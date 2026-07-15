@@ -238,15 +238,9 @@ describe('demo contact exclusion', () => {
     }
   });
 
-  it('does not deliver scheduled reminders or celebrations for demo contacts', async () => {
+  it('does not deliver scheduled reminders for demo contacts', async () => {
     const prisma = {
       reminder: { findMany: jest.fn().mockResolvedValue([]) },
-      contactCelebration: {
-        findMany: jest
-          .fn()
-          .mockResolvedValueOnce([{ ownerId: userId }])
-          .mockResolvedValueOnce([]),
-      },
     };
     const scheduler = new NotificationSchedulerService(
       prisma as unknown as PrismaService,
@@ -254,14 +248,10 @@ describe('demo contact exclusion', () => {
     );
 
     await scheduler.handleDueReminders();
-    await scheduler.handleUpcomingCelebrations();
 
     expect(prisma.reminder.findMany.mock.calls[0][0].where.contact).toEqual({
       isDemo: false,
     });
-    for (const call of prisma.contactCelebration.findMany.mock.calls) {
-      expect(call[0].where.contact).toEqual({ isDemo: false });
-    }
   });
 
   it('excludes demo contacts and their interactions from progress analytics', async () => {

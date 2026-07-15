@@ -1,7 +1,7 @@
-import type { PrismaService } from '../../prisma/prisma.service.js';
-import { ReminderAgent } from './reminder-agent.js';
+import type { PrismaService } from "../../prisma/prisma.service.js";
+import { ReminderAgent } from "./reminder-agent.js";
 
-describe('ReminderAgent ownership', () => {
+describe("ReminderAgent ownership", () => {
   const prisma = {
     contactCelebration: {
       findMany: jest.fn(),
@@ -16,54 +16,92 @@ describe('ReminderAgent ownership', () => {
     jest.clearAllMocks();
   });
 
-  it('scopes celebration reminder synchronization to owned contacts', async () => {
+  it("scopes celebration reminder synchronization to owned contacts", async () => {
     prisma.contactCelebration.findMany.mockResolvedValue([]);
     const agent = new ReminderAgent(prisma as unknown as PrismaService);
 
-    await agent.syncCelebrationReminders({ userId: 'authenticated-user' });
+    await agent.syncCelebrationReminders({ userId: "authenticated-user" });
 
     expect(prisma.contactCelebration.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          ownerId: 'authenticated-user',
-          contact: { ownerId: 'authenticated-user', isDemo: false },
+          ownerId: "authenticated-user",
+          contact: { ownerId: "authenticated-user", isDemo: false },
         }),
-      }),
+      })
     );
   });
 
-  it('checks and creates celebration reminders under the authenticated owner', async () => {
+  it("checks and creates celebration reminders under the authenticated owner", async () => {
     const celebrationDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
-    const month = String(celebrationDate.getMonth() + 1).padStart(2, '0');
-    const day = String(celebrationDate.getDate()).padStart(2, '0');
+    const month = String(celebrationDate.getMonth() + 1).padStart(2, "0");
+    const day = String(celebrationDate.getDate()).padStart(2, "0");
     prisma.contactCelebration.findMany.mockResolvedValue([
       {
-        contactId: 'contact-1',
-        contact: { firstName: 'Synthetic', lastName: 'Contact', birthday: null },
+        contactId: "contact-1",
+        contact: {
+          firstName: "Synthetic",
+          lastName: "Contact",
+          birthday: null,
+        },
         celebration: {
-          name: 'Birthday',
+          name: "Birthday",
           description: null,
           date: `${month}-${day}`,
           fullDate: null,
-          calendarType: 'gregorian',
+          calendarType: "gregorian",
         },
       },
     ]);
     prisma.reminder.findFirst.mockResolvedValue(null);
-    prisma.reminder.create.mockResolvedValue({ id: 'reminder-1' });
+    prisma.reminder.create.mockResolvedValue({ id: "reminder-1" });
     const agent = new ReminderAgent(prisma as unknown as PrismaService);
 
-    await agent.syncCelebrationReminders({ userId: 'authenticated-user' });
+    await agent.syncCelebrationReminders({ userId: "authenticated-user" });
 
     expect(prisma.reminder.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ ownerId: 'authenticated-user' }),
-      }),
+        where: expect.objectContaining({ ownerId: "authenticated-user" }),
+      })
     );
     expect(prisma.reminder.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ ownerId: 'authenticated-user' }),
-      }),
+        data: expect.objectContaining({ ownerId: "authenticated-user" }),
+      })
     );
+  });
+
+  it("stores recurring celebration dates as UTC date carriers", async () => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-07-16T12:00:00Z"));
+    prisma.contactCelebration.findMany.mockResolvedValue([
+      {
+        contactId: "contact-utc",
+        contact: { firstName: "Synthetic", lastName: null, birthday: null },
+        celebration: {
+          name: "UTC Celebration",
+          description: null,
+          date: "07-17",
+          fullDate: null,
+          calendarType: "gregorian",
+        },
+      },
+    ]);
+    prisma.reminder.findFirst.mockResolvedValue(null);
+    prisma.reminder.create.mockResolvedValue({ id: "reminder-utc" });
+    const agent = new ReminderAgent(prisma as unknown as PrismaService);
+
+    try {
+      await agent.syncCelebrationReminders({ userId: "authenticated-user" });
+
+      expect(prisma.reminder.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            scheduledAt: new Date("2026-07-17T00:00:00Z"),
+          }),
+        })
+      );
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

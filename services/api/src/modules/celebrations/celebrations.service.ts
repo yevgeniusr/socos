@@ -15,25 +15,54 @@ import {
 } from './celebrations.dto.js';
 // ==================== LUNAR DATE HELPER ====================
 
-function lunarToGregorian(lunarMonth: number, lunarDay: number, year: number): Date {
+function lunarToGregorian(
+  lunarMonth: number,
+  lunarDay: number,
+  year: number,
+): Date | null {
   try {
     // lunar.toGregorian expects { year, month, day } and returns { date: Date }
     const result = toGregorian({ year, month: lunarMonth, day: lunarDay });
     return result.date;
   } catch {
-    return new Date(year, lunarMonth - 1, lunarDay);
+    return null;
   }
 }
 
-function getGregorianDateForCelebration(celebration: { date: string; fullDate: Date | null; calendarType: string }, targetYear: number): Date | null {
+export function getGregorianDateForCelebration(
+  celebration: { date: string; fullDate: Date | null; calendarType: string },
+  targetYear: number,
+): Date | null {
   const { date, fullDate, calendarType } = celebration;
+  if (!['gregorian', 'lunar', 'chinese'].includes(calendarType)) return null;
+  const match = /^(\d{2})-(\d{2})$/.exec(date);
+  if (!match) return null;
 
-  if (fullDate) {
-    return fullDate;
+  const month = Number(match[1]);
+  const day = Number(match[2]);
+  if (month < 1 || month > 12 || day < 1) return null;
+  if (calendarType === 'lunar' || calendarType === 'chinese') {
+    if (day > 30) return null;
+  } else {
+    const validationDate = new Date(Date.UTC(2000, month - 1, day));
+    if (
+      validationDate.getUTCMonth() !== month - 1 ||
+      validationDate.getUTCDate() !== day
+    ) {
+      return null;
+    }
   }
 
-  const [month, day] = date.split('-').map(Number);
-  if (!month || !day) return null;
+  if (fullDate) {
+    if (Number.isNaN(fullDate.getTime())) return null;
+    return new Date(
+      Date.UTC(
+        fullDate.getUTCFullYear(),
+        fullDate.getUTCMonth(),
+        fullDate.getUTCDate(),
+      ),
+    );
+  }
 
   // For lunar/chinese calendars, compute the gregorian date
   if (calendarType === 'lunar' || calendarType === 'chinese') {
@@ -43,7 +72,15 @@ function getGregorianDateForCelebration(celebration: { date: string; fullDate: D
   }
 
   // Gregorian (fixed date)
-  return new Date(targetYear, month - 1, day);
+  const result = new Date(Date.UTC(targetYear, month - 1, day));
+  if (
+    result.getUTCFullYear() !== targetYear ||
+    result.getUTCMonth() !== month - 1 ||
+    result.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return result;
 }
 
 // ==================== SERVICE ====================

@@ -3,8 +3,7 @@
  *
  * Runs periodic cron jobs to:
  * 1. Check for due reminders → send email/SMS notifications (every 5 min)
- * 2. Check for upcoming celebrations → send notifications (every hour)
- * 3. Mark overdue reminders (every 30 min)
+ * 2. Mark overdue reminders (every 30 min)
  *
  * Uses @nestjs/schedule for cron-based execution.
  */
@@ -78,93 +77,22 @@ export class NotificationSchedulerService {
               message: reminder.description || undefined,
             });
 
-            this.logger.log(`✅ Reminder notification sent: ${reminder.id} (${contactName})`);
+            this.logger.log(`✅ Reminder notification sent: ${reminder.id}`);
             return { reminderId: reminder.id, sent: true };
           } catch (error) {
-            this.logger.error(`❌ Failed to send reminder notification ${reminder.id}: ${error}`);
+            this.logger.error(`❌ Failed to send reminder notification ${reminder.id}`);
             return { reminderId: reminder.id, sent: false, error: String(error) };
           }
         }),
       );
 
-      const sent = results.filter((r) => (r as any).sent === true).length;
+      const sent = results.filter(
+        (result) => result.status === 'fulfilled' && result.value.sent === true,
+      ).length;
       const failed = results.length - sent;
       this.logger.log(`📊 Reminder batch complete: ${sent} sent, ${failed} failed`);
-    } catch (error) {
-      this.logger.error(`❌ Error checking due reminders: ${error}`);
-    }
-  }
-
-  /**
-   * Check for upcoming celebrations once per hour and send notifications.
-   * Iterates all users with active contact celebrations, delegates lunar-date
-   * calculation to the celebrations service via its public API endpoint.
-   */
-  @Cron(CronExpression.EVERY_HOUR, { name: 'check-upcoming-celebrations' })
-  async handleUpcomingCelebrations(): Promise<void> {
-    this.logger.log('🎉 [Scheduler] Checking for upcoming celebrations...');
-
-    try {
-      // Get all unique user IDs with active celebrations
-      const userIds = await this.prisma.contactCelebration.findMany({
-        where: {
-          status: 'active',
-          shouldRemind: true,
-          contact: { isDemo: false },
-        },
-        select: { ownerId: true },
-        distinct: ['ownerId'],
-      });
-
-      if (userIds.length === 0) {
-        this.logger.debug('No users with active celebrations found.');
-        return;
-      }
-
-      this.logger.log(`Found ${userIds.length} user(s) with active celebrations`);
-
-      // For each user, the celebrations service handles lunar-date computation
-      const results = await Promise.allSettled(
-        userIds.map(async ({ ownerId: userId }) => {
-          try {
-            const upcoming = await this.prisma.contactCelebration.findMany({
-              where: {
-                ownerId: userId,
-                status: 'active',
-                shouldRemind: true,
-                contact: { isDemo: false },
-              },
-              include: {
-                contact: { select: { firstName: true, lastName: true } },
-                celebration: { select: { name: true, date: true, calendarType: true } },
-              },
-            });
-
-            for (const cc of upcoming) {
-              const contactName = `${cc.contact.firstName}${cc.contact.lastName ? ` ${cc.contact.lastName}` : ''}`;
-              try {
-                await this.notificationsService.sendCelebrationNotification(userId, {
-                  contactName,
-                  celebrationName: cc.celebration.name,
-                });
-              } catch (err) {
-                this.logger.warn(`⚠️  Failed to notify ${contactName} for user ${userId}: ${err}`);
-              }
-            }
-
-            this.logger.log(`✅ Celebration notifications processed for user ${userId} (${upcoming.length} celebration(s))`);
-            return { userId, processed: upcoming.length };
-          } catch (error) {
-            this.logger.error(`❌ Failed to process celebrations for user ${userId}: ${error}`);
-            return { userId, processed: 0, error: String(error) };
-          }
-        }),
-      );
-
-      const total = results.reduce((sum, r) => sum + ((r as any).processed || 0), 0);
-      this.logger.log(`📊 Celebration batch complete: ${total} notification(s) processed`);
-    } catch (error) {
-      this.logger.error(`❌ Error checking upcoming celebrations: ${error}`);
+    } catch {
+      this.logger.error('❌ Error checking due reminders');
     }
   }
 

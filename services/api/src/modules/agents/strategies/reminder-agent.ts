@@ -338,11 +338,19 @@ export class ReminderAgent {
 
     // Otherwise, it's a recurring MM-DD date
     const [month, day] = cc.celebration.date.split('-').map(Number);
-    const date = new Date(referenceDate.getFullYear(), month - 1, day);
+    const referenceYear = referenceDate.getUTCFullYear();
+    const referenceDateCarrier = new Date(
+      Date.UTC(
+        referenceYear,
+        referenceDate.getUTCMonth(),
+        referenceDate.getUTCDate(),
+      ),
+    );
+    let date = new Date(Date.UTC(referenceYear, month - 1, day));
 
     // If the date has passed this year, it will be next year
-    if (date < referenceDate) {
-      date.setFullYear(date.getFullYear() + 1);
+    if (date < referenceDateCarrier) {
+      date = new Date(Date.UTC(referenceYear + 1, month - 1, day));
     }
 
     return date;
