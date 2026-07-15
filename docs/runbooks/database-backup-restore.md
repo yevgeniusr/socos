@@ -49,34 +49,44 @@ Expected output is `backup_status=created`, then
 `restore_status=verified aggregate_counts=verified`. The verifier checks the
 SHA-256 sidecar, restores to a randomly named disposable database, compares
 aggregate row counts for every public table, requires core Socos tables, and
-drops the database on both success and failure. Use `KEEP_RESTORE_DB=1` only for
-the migration proof below, and delete it immediately afterward.
+drops the database before reporting success. A failed success-path deletion is
+a failed verification; error-path deletion remains best effort.
+
+The backup script exports one repeatable-read PostgreSQL snapshot, imports that
+snapshot into both `pg_dump` and the aggregate query, and publishes the dump
+last as an atomic commit marker. Its metadata therefore describes the exact
+dump contents, even while production writes continue. Incomplete work and any
+published sidecars are removed by the `EXIT` trap.
 
 ## Migration Recovery Drill
 
-With a retained cloud restore, run:
+Provision a separate disposable cloud restore through the administration plane
+and capture its pre-migration aggregate metadata using the same aggregate query
+as the verifier. Then run:
 
 ```bash
 DATABASE_URL="$RESTORED_DATABASE_URL" pnpm --filter @socos/api exec prisma migrate deploy
 DATABASE_URL="$RESTORED_DATABASE_URL" pnpm --filter @socos/api exec prisma validate
 DATABASE_URL="$RESTORED_DATABASE_URL" node scripts/compare-schema.mjs
+DATABASE_URL="$RESTORED_DATABASE_URL" node scripts/verify-post-migration-counts.mjs "$PRE_MIGRATION_METADATA"
 ```
 
-Require `schema_status=match statements=0`. Re-run aggregate verification, then
-drop the disposable database. If any command fails, stop the deployment and
-retain only redacted logs needed to diagnose schema metadata.
+Require `schema_status=match statements=0` and
+`migration_counts_status=preserved`. The count verifier requires every
+preexisting public table count to remain identical, allows only the three known
+empty DM tables, and requires exactly three migration-history rows. Drop the
+disposable database before declaring the drill successful. If any command
+fails, stop the deployment and retain only redacted schema metadata logs.
 
 ## Current Operational Gate
 
 On 2026-07-16, the corrected `socos` backup execution was restored entirely on
-the Coolify server. All 16 public tables and their aggregate row counts matched
-the live source, core tables were present, and the disposable restore was
+the Coolify server. All 16 preexisting public tables and their aggregate row
+counts matched the live source. The two historical migrations were baselined,
+the reconciliation migration applied, Prisma reported
+`schema_status=match statements=0`, and all preexisting counts remained
+identical. Only the three expected empty DM tables were added,
+`_prisma_migrations` contained three rows, and the disposable database was
 deleted. Earlier small executions targeted the maintenance `postgres` database
-and are not valid recovery evidence.
-
-Migration-on-restore is not yet proven. The restored database has no
-`_prisma_migrations` table, the deployed application image has no Prisma CLI,
-and the available disposable runner/tunnel paths did not complete. Production
-migration and deployment remain blocked until a cloud administrator completes
-the baseline and migration drill in the production migration runbook. The
-verified restore is necessary but is not, by itself, migration approval.
+and are not valid recovery evidence. Production remained untouched during this
+proof.

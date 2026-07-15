@@ -1,9 +1,14 @@
+BEGIN;
+
 -- Reconcile databases originally managed by `prisma db push` with the checked-in
 -- Prisma model. The legacy branch preserves row identity and maps old columns to
 -- their current equivalents. On an already-current production database it is a
 -- no-op apart from idempotently ensuring additions that may be absent.
 
 DO $$
+DECLARE
+  legacy_table RECORD;
+  has_rows BOOLEAN;
 BEGIN
   IF EXISTS (
     SELECT 1 FROM information_schema.columns
@@ -12,6 +17,19 @@ BEGIN
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'Contact' AND column_name = 'firstName'
   ) THEN
+    FOR legacy_table IN
+      SELECT tablename
+        FROM pg_tables
+       WHERE schemaname = 'public'
+         AND tablename <> '_prisma_migrations'
+    LOOP
+      EXECUTE format('SELECT EXISTS (SELECT 1 FROM %I LIMIT 1)', legacy_table.tablename)
+        INTO has_rows;
+      IF has_rows THEN
+        RAISE EXCEPTION 'Refusing to convert a populated legacy schema';
+      END IF;
+    END LOOP;
+
     -- Remove constraints whose ownership or delete behavior changed.
     ALTER TABLE "Activity" DROP CONSTRAINT IF EXISTS "Activity_contactId_fkey";
     ALTER TABLE "Activity" DROP CONSTRAINT IF EXISTS "Activity_userId_fkey";
@@ -249,3 +267,5 @@ BEGIN
       FOREIGN KEY ("sessionId") REFERENCES "DMSession"("id") ON DELETE CASCADE ON UPDATE CASCADE;
   END IF;
 END $$;
+
+COMMIT;

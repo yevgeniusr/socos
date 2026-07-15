@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
@@ -29,9 +37,13 @@ test('backup creates a private custom dump with checksum and aggregate metadata'
   executable(
     bin,
     'pg_dump',
-    'while [ "$#" -gt 0 ]; do if [ "$1" = "--file" ]; then shift; printf custom-dump > "$1"; exit; fi; shift; done; exit 2',
+    'case "$*" in *--snapshot=*) ;; *) exit 3;; esac; while [ "$#" -gt 0 ]; do if [ "$1" = "--file" ]; then shift; printf custom-dump > "$1"; exit; fi; shift; done; exit 2',
   );
-  executable(bin, 'psql', "printf 'table_name\\trow_count\\nContact\\t106\\nInteraction\\t13\\n'");
+  executable(
+    bin,
+    'psql',
+    'if [ -n "${SOCOS_SNAPSHOT_FILE:-}" ]; then printf "00000003-0000001B-1" > "$SOCOS_SNAPSHOT_FILE"; : > "$SOCOS_SNAPSHOT_READY"; trap "exit 0" TERM; while :; do sleep 1; done; else case "$*" in *"SET TRANSACTION SNAPSHOT"*) printf "table_name\\trow_count\\nContact\\t106\\nInteraction\\t13\\n";; *) exit 4;; esac; fi',
+  );
 
   const result = run('scripts/backup-postgres.sh', {
     env: {
@@ -46,11 +58,38 @@ test('backup creates a private custom dump with checksum and aggregate metadata'
   const dump = result.stdout.match(/backup_file=(.+)/)?.[1];
   assert.ok(dump);
   assert.equal(readFileSync(dump, 'utf8'), 'custom-dump');
-  assert.equal((execFileSync('stat', ['-f', '%Lp', dump], { encoding: 'utf8' })).trim(), '600');
+  assert.equal(statSync(dump).mode & 0o777, 0o600);
   assert.match(readFileSync(`${dump}.sha256`, 'utf8'), /^[a-f0-9]{64}  /);
   assert.equal(
     readFileSync(`${dump}.metadata.tsv`, 'utf8'),
     'table_name\trow_count\nContact\t106\nInteraction\t13\n',
+  );
+});
+
+test('backup never publishes partial artifacts when dump creation fails', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'socos-backup-failure-test-'));
+  const bin = join(dir, 'bin');
+  execFileSync('mkdir', ['-p', bin]);
+  executable(bin, 'pg_dump', 'exit 9');
+  executable(
+    bin,
+    'psql',
+    'printf "00000003-0000001B-1" > "$SOCOS_SNAPSHOT_FILE"; : > "$SOCOS_SNAPSHOT_READY"; trap "exit 0" TERM; while :; do sleep 1; done',
+  );
+
+  const result = run('scripts/backup-postgres.sh', {
+    env: {
+      BACKUP_DIR: dir,
+      DATABASE_URL: 'postgresql://secret-user:secret-password@example.invalid/socos',
+      PATH: `${bin}:${process.env.PATH}`,
+    },
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.doesNotMatch(`${result.stdout}${result.stderr}`, /secret-user|secret-password/);
+  assert.deepEqual(
+    readdirSync(dir).filter((name) => /\.(dump|tsv|sha256)$/.test(name)),
+    [],
   );
 });
 
@@ -85,6 +124,88 @@ test('restore verification always drops its disposable database', () => {
   assert.doesNotMatch(`${result.stdout}${result.stderr}`, /secret-user|secret-password/);
   assert.equal(readFileSync(log, 'utf8'), 'createdb\nrestore\ndropdb\n');
   assert.match(result.stdout, /aggregate_counts=verified/);
+});
+
+test('restore verification fails if the disposable database cannot be dropped', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'socos-restore-drop-test-'));
+  const bin = join(dir, 'bin');
+  execFileSync('mkdir', ['-p', bin]);
+  const dump = join(dir, 'backup.dump');
+  writeFileSync(dump, 'custom-dump');
+  writeFileSync(
+    `${dump}.sha256`,
+    `${execFileSync('shasum', ['-a', '256', dump], { encoding: 'utf8' }).split(' ')[0]}  backup.dump\n`,
+  );
+  const aggregateMetadata =
+    'table_name\trow_count\nContact\t0\nInteraction\t0\nReminder\t0\nUser\t0\nVault\t0\n';
+  writeFileSync(`${dump}.metadata.tsv`, aggregateMetadata);
+  executable(bin, 'createdb', 'exit 0');
+  executable(bin, 'pg_restore', 'exit 0');
+  executable(bin, 'psql', `printf '${aggregateMetadata.replaceAll('\n', '\\n')}'`);
+  executable(bin, 'dropdb', 'exit 8');
+
+  const result = run('scripts/verify-postgres-backup.sh', {
+    args: [dump],
+    env: {
+      ADMIN_DATABASE_URL: 'postgresql://secret-user:secret-password@example.invalid/postgres',
+      PATH: `${bin}:${process.env.PATH}`,
+    },
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.doesNotMatch(result.stdout, /restore_status=verified/);
+});
+
+test('post-migration verifier preserves old counts and permits only known empty tables', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'socos-post-migration-test-'));
+  const bin = join(dir, 'bin');
+  execFileSync('mkdir', ['-p', bin]);
+  const before = join(dir, 'before.tsv');
+  writeFileSync(before, 'table_name\trow_count\nContact\t106\nInteraction\t13\n');
+  executable(
+    bin,
+    'psql',
+    "printf 'table_name\\trow_count\\nContact\\t106\\nDMSceneResponse\\t0\\nDMSession\\t0\\nDungeonMasterScenario\\t0\\nInteraction\\t13\\n_prisma_migrations\\t3\\n'",
+  );
+
+  const result = run('scripts/verify-post-migration-counts.mjs', {
+    args: [before],
+    env: {
+      DATABASE_URL: 'postgresql://secret-user:secret-password@example.invalid/socos',
+      PATH: `${bin}:${process.env.PATH}`,
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(
+    result.stdout.trim(),
+    'migration_counts_status=preserved existing_tables=2 new_empty_tables=3 migrations=3',
+  );
+  assert.doesNotMatch(`${result.stdout}${result.stderr}`, /secret-user|secret-password/);
+});
+
+test('post-migration verifier rejects changed rows and populated new tables', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'socos-post-migration-failure-test-'));
+  const bin = join(dir, 'bin');
+  execFileSync('mkdir', ['-p', bin]);
+  const before = join(dir, 'before.tsv');
+  writeFileSync(before, 'table_name\trow_count\nContact\t106\nInteraction\t13\n');
+  executable(
+    bin,
+    'psql',
+    "printf 'table_name\\trow_count\\nContact\\t105\\nDMSceneResponse\\t1\\nDMSession\\t0\\nDungeonMasterScenario\\t0\\nInteraction\\t13\\n_prisma_migrations\\t3\\n'",
+  );
+
+  const result = run('scripts/verify-post-migration-counts.mjs', {
+    args: [before],
+    env: {
+      DATABASE_URL: 'postgresql://secret-user:secret-password@example.invalid/socos',
+      PATH: `${bin}:${process.env.PATH}`,
+    },
+  });
+
+  assert.equal(result.status, 2);
+  assert.equal(result.stderr.trim(), 'Post-migration aggregate verification failed.');
 });
 
 test('schema comparison reports drift without printing migration SQL or credentials', () => {
@@ -148,6 +269,10 @@ test('forward-only reconciliation and migration-only startup are present', () =>
     'services/api/prisma/migrations/20260715000000_reconcile_production_schema/migration.sql',
   );
   assert.equal(existsSync(migration), true, 'forward-only reconciliation migration is missing');
+  const migrationSql = readFileSync(migration, 'utf8');
+  assert.match(migrationSql, /^BEGIN;\n/);
+  assert.match(migrationSql, /Refusing to convert a populated legacy schema/);
+  assert.match(migrationSql, /\nCOMMIT;\s*$/);
 
   const startup = readFileSync(resolve(root, 'services/api/start.sh'), 'utf8');
   assert.match(startup, /^#!\/bin\/sh\nset -eu\n/);

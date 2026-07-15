@@ -21,7 +21,14 @@ backup_dir=$(CDPATH= cd -- "$(dirname -- "$backup_file")" && pwd)
 backup_name=$(basename -- "$backup_file")
 (
   cd "$backup_dir"
-  shasum -a 256 --check "$(basename -- "$checksum_file")" >/dev/null
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum -c "$(basename -- "$checksum_file")" >/dev/null
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 -c "$(basename -- "$checksum_file")" >/dev/null
+  else
+    echo "A SHA-256 checksum utility is required." >&2
+    exit 1
+  fi
 )
 
 restore_db="socos_restore_$(date -u +%Y%m%d%H%M%S)_$$"
@@ -37,7 +44,7 @@ restore_url=$(node -e '
 created=0
 cleanup() {
   rm -f "$actual_metadata"
-  if [ "$created" -eq 1 ] && [ "${KEEP_RESTORE_DB:-0}" != "1" ]; then
+  if [ "$created" -eq 1 ]; then
     dropdb --if-exists --force --maintenance-db="$ADMIN_DATABASE_URL" "$restore_db" >/dev/null 2>&1 || true
   fi
 }
@@ -78,8 +85,9 @@ for expected_table in User Vault Contact Interaction Reminder; do
 done
 
 table_count=$(awk 'NR > 1 { count++ } END { print count + 0 }' "$actual_metadata")
-printf 'restore_status=verified aggregate_counts=verified tables=%s\n' "$table_count"
-if [ "${KEEP_RESTORE_DB:-0}" = "1" ]; then
-  printf 'restore_database=%s\n' "$restore_db"
+if ! dropdb --if-exists --force --maintenance-db="$ADMIN_DATABASE_URL" "$restore_db" >/dev/null; then
+  echo "Disposable restore verification succeeded, but database deletion failed." >&2
+  exit 68
 fi
-
+created=0
+printf 'restore_status=verified aggregate_counts=verified tables=%s\n' "$table_count"

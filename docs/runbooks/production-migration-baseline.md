@@ -13,11 +13,12 @@ by `scripts/database-ops.test.mjs`:
 - `20260327000000_initial_schema`: `54bc51c615dcf13983aba12e9c88fecd142774a35fc2b1174298c68df7010701`
 - `20260331000000_add_celebrations`: `3c907065378ea6d9a3464ccf21d7e8c025d0327e402f1bb566daba2e268585ce`
 
-`20260715000000_reconcile_production_schema` is forward-only. It detects the
-legacy contact shape, preserves equivalent data through renames and backfills,
-removes obsolete columns and constraints, then ensures current tables, indexes,
-and foreign keys. On a schema already maintained by `db push`, its operations
-are idempotent.
+`20260715000000_reconcile_production_schema` is forward-only and transactional.
+Its legacy conversion exists only to reconcile a fresh, empty database produced
+by the two historical migrations. It fails closed if any legacy application
+table contains rows. On a populated schema already maintained by `db push`, it
+uses only the current-shape path and idempotently ensures missing tables,
+indexes, and foreign keys.
 
 ## Synthetic Proof
 
@@ -41,7 +42,7 @@ Before touching production:
 2. Restore it into a disposable database inside the Coolify network.
 3. Capture aggregate counts only.
 4. Run `migrate deploy`, `prisma validate`, and `compare-schema.mjs` there.
-5. Recheck aggregate counts and application-owned invariants.
+5. Run `verify-post-migration-counts.mjs` against the pre-migration metadata.
 6. Drop the restored database.
 
 Do not use `prisma db push`, `migrate reset`, or edit the two historical
@@ -53,7 +54,14 @@ using Prisma's supported history command, then deploy the reconciliation:
 DATABASE_URL="$RESTORED_DATABASE_URL" pnpm --filter @socos/api exec prisma migrate resolve --applied 20260327000000_initial_schema
 DATABASE_URL="$RESTORED_DATABASE_URL" pnpm --filter @socos/api exec prisma migrate resolve --applied 20260331000000_add_celebrations
 DATABASE_URL="$RESTORED_DATABASE_URL" pnpm --filter @socos/api exec prisma migrate deploy
+DATABASE_URL="$RESTORED_DATABASE_URL" node scripts/verify-post-migration-counts.mjs "$PRE_MIGRATION_METADATA"
 ```
+
+The completed cloud drill on 2026-07-16 baselined both historical migrations,
+applied the reconciliation, reached `schema_status=match statements=0`, and
+preserved counts for all 16 preexisting public tables. The only additions were
+three empty DM tables and three `_prisma_migrations` history rows. The
+disposable database was deleted; production was not changed.
 
 After this sequence is proven on the disposable restore, repeat the two
 `resolve --applied` commands once against production immediately before the
