@@ -32,6 +32,13 @@ export class NotificationsService {
     private configService: ConfigService,
   ) {}
 
+  async findOwnedContact(userId: string, contactId: string) {
+    return this.prisma.contact.findFirst({
+      where: { id: contactId, ownerId: userId },
+      select: { firstName: true, lastName: true },
+    });
+  }
+
   /**
    * Send an email
    */

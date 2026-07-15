@@ -32,6 +32,9 @@ const mockPrisma = {
   user: {
     findUnique: jest.fn(),
   },
+  contact: {
+    findFirst: jest.fn(),
+  },
   contactField: {
     findFirst: jest.fn(),
   },
@@ -43,6 +46,22 @@ describe('NotificationsService', () => {
   beforeEach(() => {
     service = new NotificationsService(mockPrisma, mockResend, mockTwilio, mockConfigService);
     jest.clearAllMocks();
+  });
+
+  describe('findOwnedContact', () => {
+    it('looks up a contact by both id and authenticated owner', async () => {
+      mockPrisma.contact.findFirst = jest.fn().mockResolvedValue({
+        firstName: 'Contact',
+        lastName: 'Name',
+      });
+
+      await service.findOwnedContact('user-1', 'contact-1');
+
+      expect(mockPrisma.contact.findFirst).toHaveBeenCalledWith({
+        where: { id: 'contact-1', ownerId: 'user-1' },
+        select: { firstName: true, lastName: true },
+      });
+    });
   });
 
   describe('sendEmail', () => {

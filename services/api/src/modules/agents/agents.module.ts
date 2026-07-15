@@ -10,8 +10,8 @@ import { ReminderAgent } from './strategies/reminder-agent.js';
 import { EnrichmentAgent } from './strategies/enrichment-agent.js';
 import { SummaryAgent } from './strategies/summary-agent.js';
 import { SuggestionAgent } from './strategies/suggestion-agent.js';
+import { JwtService } from '../jwt/jwt.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { GamificationService } from '../gamification/gamification.service.js';
 
 @Module({
   controllers: [AgentsController],
@@ -22,8 +22,8 @@ import { GamificationService } from '../gamification/gamification.service.js';
     EnrichmentAgent,
     SummaryAgent,
     SuggestionAgent,
+    JwtService,
     PrismaService,
-    GamificationService,
   ],
   exports: [AgentsService],
 })

@@ -8,6 +8,7 @@ import { NotificationsController } from './notifications.controller.js';
 import { NotificationsService } from './notifications.service.js';
 import { ResendEmailProvider } from './providers/resend.provider.js';
 import { TwilioSmsProvider } from './providers/twilio.provider.js';
+import { JwtService } from '../jwt/jwt.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 @Module({
@@ -17,6 +18,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
     NotificationsService,
     ResendEmailProvider,
     TwilioSmsProvider,
+    JwtService,
     PrismaService,
   ],
   exports: [NotificationsService],

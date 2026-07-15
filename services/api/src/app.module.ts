@@ -17,27 +17,15 @@ import { GamificationController } from './modules/gamification/gamification.cont
 import { GamificationService } from './modules/gamification/gamification.service.js';
 import { CelebrationsController } from './modules/celebrations/celebrations.controller.js';
 import { CelebrationsService } from './modules/celebrations/celebrations.service.js';
-import { DebugController } from './modules/debug/debug.controller.js';
 import { DungeonMasterController } from './modules/dungeon-master/dungeon-master.controller.js';
 import { DungeonMasterService } from './modules/dungeon-master/dungeon-master.service.js';
 import { AiDmService } from './modules/dungeon-master/ai-dm.service.js';
 import { AgentsModule } from './modules/agents/agents.module.js';
 import { AiAgentModule } from './modules/ai-agent/ai-agent.module.js';
 import { AgentToolsModule } from './modules/agent-tools/agent-tools.module.js';
-import { AgentsController } from './modules/agents/agents.controller.js';
 import { AiAgentController } from './modules/ai-agent/ai-agent.controller.js';
-import { AgentsService } from './modules/agents/agents.service.js';
-import { RelationshipAgent } from './modules/agents/strategies/relationship-agent.js';
-import { ReminderAgent } from './modules/agents/strategies/reminder-agent.js';
-import { EnrichmentAgent } from './modules/agents/strategies/enrichment-agent.js';
-import { SummaryAgent } from './modules/agents/strategies/summary-agent.js';
-import { SuggestionAgent } from './modules/agents/strategies/suggestion-agent.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
 import { NotificationSchedulerModule } from './modules/notifications/notification-scheduler.module.js';
-import { NotificationsController } from './modules/notifications/notifications.controller.js';
-import { NotificationsService } from './modules/notifications/notifications.service.js';
-import { ResendEmailProvider } from './modules/notifications/providers/resend.provider.js';
-import { TwilioSmsProvider } from './modules/notifications/providers/twilio.provider.js';
 
 @Module({
   imports: [
@@ -58,11 +46,8 @@ import { TwilioSmsProvider } from './modules/notifications/providers/twilio.prov
     RemindersController,
     GamificationController,
     CelebrationsController,
-    DebugController,
     DungeonMasterController,
-    AgentsController,
     AiAgentController,
-    NotificationsController,
   ],
   providers: [
     PrismaService,
@@ -75,15 +60,6 @@ import { TwilioSmsProvider } from './modules/notifications/providers/twilio.prov
     CelebrationsService,
     DungeonMasterService,
     AiDmService,
-    AgentsService,
-    RelationshipAgent,
-    ReminderAgent,
-    EnrichmentAgent,
-    SummaryAgent,
-    SuggestionAgent,
-    NotificationsService,
-    ResendEmailProvider,
-    TwilioSmsProvider,
   ],
 })
 export class AppModule {}

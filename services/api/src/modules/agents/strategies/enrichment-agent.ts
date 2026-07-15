@@ -204,10 +204,19 @@ export class EnrichmentAgent {
       if (data.jobTitle) updateData.jobTitle = data.jobTitle;
       if (data.socialLinks) updateData.socialLinks = JSON.stringify(data.socialLinks);
 
-      await this.prisma.contact.update({
-        where: { id: ctx.contactId },
+      const update = await this.prisma.contact.updateMany({
+        where: { id: ctx.contactId, ownerId: ctx.userId },
         data: updateData,
       });
+
+      if (update.count === 0) {
+        return {
+          success: false,
+          agent: 'enrichment' as any,
+          error: 'Contact not found',
+          executedAt: new Date(),
+        };
+      }
 
       return {
         success: true,
