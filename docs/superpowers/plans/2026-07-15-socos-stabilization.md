@@ -362,7 +362,9 @@ pnpm type:check
 pnpm test
 pnpm build
 node scripts/security-regression.mjs
-docker build -t socos:stabilized .
+docker build -f docker/Dockerfile.web -t socos-web:stabilized .
+docker build -f services/api/Dockerfile -t socos-api:stabilized .
+docker run --rm --entrypoint sh socos-api:stabilized -c './node_modules/.bin/prisma --version >/dev/null'
 ```
 
 Expected: all commands exit 0.

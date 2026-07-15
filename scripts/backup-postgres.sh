@@ -22,11 +22,27 @@ snapshot_sql="$snapshot_dir/hold.sql"
 snapshot_pid=
 complete=0
 
-cleanup_incomplete() {
+release_snapshot() {
   if [ -n "$snapshot_pid" ]; then
-    kill "$snapshot_pid" >/dev/null 2>&1 || true
+    # SIGINT makes psql send a PostgreSQL cancel request, which aborts the
+    # sleeping statement and closes the snapshot transaction cleanly.
+    kill -INT "$snapshot_pid" >/dev/null 2>&1 || true
+    (
+      sleep "${SNAPSHOT_CANCEL_GRACE_SECONDS:-1}"
+      kill -TERM "$snapshot_pid" >/dev/null 2>&1 || exit 0
+      sleep "${SNAPSHOT_CANCEL_GRACE_SECONDS:-1}"
+      kill -KILL "$snapshot_pid" >/dev/null 2>&1 || true
+    ) &
+    snapshot_watchdog_pid=$!
     wait "$snapshot_pid" >/dev/null 2>&1 || true
+    kill "$snapshot_watchdog_pid" >/dev/null 2>&1 || true
+    wait "$snapshot_watchdog_pid" >/dev/null 2>&1 || true
+    snapshot_pid=
   fi
+}
+
+cleanup_incomplete() {
+  release_snapshot
   rm -rf "$work_dir" "$snapshot_dir"
   if [ "$complete" -ne 1 ]; then
     rm -f "$backup_file" "$metadata_file" "$checksum_file"
@@ -101,9 +117,7 @@ psql -X "$DATABASE_URL" \
   " > "$work_metadata"
 chmod 0600 "$work_metadata"
 
-kill "$snapshot_pid" >/dev/null 2>&1 || true
-wait "$snapshot_pid" >/dev/null 2>&1 || true
-snapshot_pid=
+release_snapshot
 
 if command -v sha256sum >/dev/null 2>&1; then
   checksum=$(sha256sum "$work_backup" | awk '{ print $1 }')

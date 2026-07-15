@@ -106,17 +106,6 @@ export class AgentsController {
 
   // ========== Enrichment Agent ==========
 
-  @Post('enrich/:contactId')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Enrich contact with additional data' })
-  async enrichContact(
-    @Request() req: AuthenticatedRequest,
-    @Param('contactId') contactId: string,
-  ) {
-    const ctx = { userId: req.user.userId, contactId };
-    return this.agentsService.enrichContact(ctx);
-  }
-
   @Post('enrich/batch')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Batch enrich contacts' })
@@ -126,6 +115,17 @@ export class AgentsController {
   ) {
     const ctx = { userId: req.user.userId };
     return this.agentsService.enrichContacts(ctx, body);
+  }
+
+  @Post('enrich/:contactId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Enrich contact with additional data' })
+  async enrichContact(
+    @Request() req: AuthenticatedRequest,
+    @Param('contactId') contactId: string,
+  ) {
+    const ctx = { userId: req.user.userId, contactId };
+    return this.agentsService.enrichContact(ctx);
   }
 
   @Post('enrich/:contactId/apply')

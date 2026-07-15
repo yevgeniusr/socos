@@ -21,8 +21,16 @@ const forbiddenFingerprints = new Map([
     "7067907848e5b65c9c1eb9538168069599ba270bf10fe43fac4cc9c3d6154f02",
     "hardcoded-real-test-password",
   ],
+  [
+    "a7be3320a6dbb1da4230db68c74bd663e1d0426fe93ae71c34188404ccb5d956",
+    "legacy-personal-password-hash",
+  ],
+  [
+    "3c6fbfdb55991deacb9e44b0f792638454c5677df5287ffac7c4d4fb1183b552",
+    "personal-account-email",
+  ],
 ]);
-const candidatePattern = /[A-Za-z0-9_-]{6,}/g;
+const candidatePattern = /[A-Za-z0-9_@$./+-]{6,}/g;
 const playwrightConfigPattern = /(?:^|\/)playwright\.config\.[cm]?[jt]s$/;
 const productionE2EUrlPattern =
   /https:\/\/socos\.rachkovan\.com\.?(?=[/:`'"\s;]|$)/i;

@@ -81,6 +81,29 @@ test("detects a tracked secret candidate by its SHA-256 fingerprint without prin
   assert.doesNotMatch(result.stderr, new RegExp(syntheticSecret));
 });
 
+test("detects a tracked bcrypt credential by its fingerprint", () => {
+  const syntheticHash =
+    "$2b$10$abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234";
+  const syntheticFingerprint = createHash("sha256")
+    .update(syntheticHash)
+    .digest("hex");
+  const directory = createTrackedFixture(
+    "seed.sql",
+    `UPDATE users SET password_hash = '${syntheticHash}';\n`,
+    (source) =>
+      source.replace(
+        "const candidatePattern =",
+        `forbiddenFingerprints.set("${syntheticFingerprint}", "legacy-password-hash");\nconst candidatePattern =`,
+      ),
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /seed\.sql: legacy-password-hash/);
+  assert.doesNotMatch(result.stderr, new RegExp(syntheticHash.replaceAll("$", "\\$")));
+});
+
 test("detects the production E2E URL in an assignment fallback", () => {
   const directory = createTrackedFixture(
     "playwright.config.ts",

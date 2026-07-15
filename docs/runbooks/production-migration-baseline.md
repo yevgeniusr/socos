@@ -61,12 +61,11 @@ The completed cloud drill on 2026-07-16 baselined both historical migrations,
 applied the reconciliation, reached `schema_status=match statements=0`, and
 preserved counts for all 16 preexisting public tables. The only additions were
 three empty DM tables and three `_prisma_migrations` history rows. The
-disposable database was deleted; production was not changed.
+disposable database was deleted.
 
-After this sequence is proven on the disposable restore, repeat the two
-`resolve --applied` commands once against production immediately before the
-first migration-only deployment. Do not resolve the reconciliation migration;
-`migrate deploy` must execute it normally.
+Production was then baselined with the two `resolve --applied` commands. The
+first migration-only deployment executed the reconciliation normally, and a
+second deployment reported no pending migrations.
 
 ## Deployment
 
@@ -84,12 +83,21 @@ canonical agent routes        -> 401 without token
 notification status route     -> 401 without token
 ```
 
-Credential rotation covers the Coolify API token, database password, JWT secret,
-and personal test credentials. Replacement values belong only in their owning
-systems and Coolify environment configuration. Rotation and deployment are not
-complete until each new credential is verified and the old one is revoked.
+Credential rotation covers the Coolify API token, database owner and runtime
+credentials, JWT secret, and personal login. Replacement values belong only in
+their owning systems, macOS Keychain, and Coolify environment configuration. On
+2026-07-16 each new credential was verified, the old Coolify token was revoked,
+and the post-rotation backup completed successfully.
 
 Coolify deploys `docker-compose.prod.yml`. It intentionally contains no internal
 PostgreSQL service; the API must receive the external Coolify database URL as
 `DATABASE_URL`. Confirm that variable is configured before deploying. A
 `POSTGRES_PASSWORD` application variable is not required by this Compose file.
+
+The production deployment completed with both services healthy. The public
+root and health endpoint returned 200; guarded routes returned 401; removed DDL
+routes returned 404. Rollback must redeploy the most recent healthy secured
+commit and preserve the forward-only database schema. Never roll back to a
+release that restores forgeable tokens, runtime DDL, embedded credentials, or
+pre-baseline startup behavior; use a forward fix if no secured image is
+compatible.

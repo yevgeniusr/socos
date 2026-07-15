@@ -4,14 +4,14 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { JwtService } from '../jwt/jwt.service.js';
 import { AuthService } from './auth.service.js';
 
-const LEGACY_BYPASS_EMAIL = ['yev.rachkovan', 'gmail.com'].join('@');
-const LEGACY_BYPASS_PASSWORD = ['socos', '2026'].join('');
-const LEGACY_DEFAULT_INVITE = ['socos-founding', '2026'].join('-');
+const SYNTHETIC_EMAIL = 'synthetic-existing-user@example.test';
+const SYNTHETIC_WRONG_PASSWORD = 'synthetic-wrong-password';
+const SYNTHETIC_UNCONFIGURED_INVITE = 'synthetic-unconfigured-invite';
 const CONFIGURED_INVITE = 'synthetic-configured-invite';
 
 const user = {
   id: 'synthetic-user-id',
-  email: LEGACY_BYPASS_EMAIL,
+  email: SYNTHETIC_EMAIL,
   name: 'Synthetic User',
   passwordHash: '$2a$10$eImiTXuWVxfM37uY4JANjQ==',
   xp: 10,
@@ -48,7 +48,7 @@ describe('AuthService security', () => {
     }
   });
 
-  it('rejects the removed account-specific credentials when the bcrypt hash does not match', async () => {
+  it('rejects credentials when the bcrypt hash does not match', async () => {
     const nonmatchingUser = {
       ...user,
       passwordHash: await bcrypt.hash('synthetic-different-password', 4),
@@ -56,8 +56,8 @@ describe('AuthService security', () => {
     prismaUser.findUnique.mockResolvedValue(nonmatchingUser);
 
     await expect(service.login({
-      email: LEGACY_BYPASS_EMAIL,
-      password: LEGACY_BYPASS_PASSWORD,
+      email: SYNTHETIC_EMAIL,
+      password: SYNTHETIC_WRONG_PASSWORD,
     })).rejects.toBeInstanceOf(UnauthorizedException);
     expect(generateToken).not.toHaveBeenCalled();
   });
@@ -71,7 +71,7 @@ describe('AuthService security', () => {
       email: 'synthetic-new-user@example.test',
       password: 'synthetic-password',
       name: 'Synthetic New User',
-      inviteCode: LEGACY_DEFAULT_INVITE,
+      inviteCode: SYNTHETIC_UNCONFIGURED_INVITE,
     })).rejects.toBeInstanceOf(UnauthorizedException);
     expect(prismaUser.findUnique).not.toHaveBeenCalled();
     expect(prismaUser.create).not.toHaveBeenCalled();

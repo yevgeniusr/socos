@@ -97,6 +97,56 @@ if (!databaseUrl) {
     });
   });
 
+  test('reconciliation preserves a populated current-shape database', async () => {
+    await withClient(async (client) => {
+      await client.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+    });
+    execFileSync(
+      'pnpm',
+      ['--filter', '@socos/api', 'exec', 'prisma', 'db', 'push', '--skip-generate'],
+      { cwd: root, env: { ...process.env, DATABASE_URL: databaseUrl }, stdio: 'pipe' },
+    );
+    await withClient(async (client) => {
+      await client.query(
+        'DROP TABLE "DMSceneResponse", "DMSession", "DungeonMasterScenario" CASCADE',
+      );
+      await client.query(
+        `INSERT INTO "User" ("id", "email", "updatedAt")
+         VALUES ('current-shape-user', 'current-shape@example.invalid', CURRENT_TIMESTAMP)`,
+      );
+      await client.query(
+        `INSERT INTO "Vault" ("id", "name", "ownerId", "updatedAt")
+         VALUES ('current-shape-vault', 'Synthetic vault', 'current-shape-user', CURRENT_TIMESTAMP);
+         INSERT INTO "Contact" ("id", "vaultId", "ownerId", "firstName", "bio", "updatedAt")
+         VALUES ('current-shape-contact', 'current-shape-vault', 'current-shape-user', 'Synthetic', 'preserve-me', CURRENT_TIMESTAMP);
+         INSERT INTO "Interaction" ("id", "contactId", "ownerId", "type", "content", "updatedAt")
+         VALUES ('current-shape-interaction', 'current-shape-contact', 'current-shape-user', 'note', 'preserve-interaction', CURRENT_TIMESTAMP);
+         INSERT INTO "Reminder" ("id", "contactId", "ownerId", "type", "title", "scheduledAt", "updatedAt")
+         VALUES ('current-shape-reminder', 'current-shape-contact', 'current-shape-user', 'followup', 'preserve-reminder', CURRENT_TIMESTAMP + INTERVAL '1 day', CURRENT_TIMESTAMP);`,
+      );
+
+      await client.query(readFileSync(reconciliationPath, 'utf8'));
+
+      const preserved = await client.query(
+        'SELECT count(*)::int AS count FROM "User" WHERE id = $1',
+        ['current-shape-user'],
+      );
+      assert.equal(preserved.rows[0].count, 1);
+      const related = await client.query(
+        `SELECT
+           (SELECT "bio" FROM "Contact" WHERE "id" = 'current-shape-contact') AS bio,
+           (SELECT "content" FROM "Interaction" WHERE "id" = 'current-shape-interaction') AS interaction,
+           (SELECT "title" FROM "Reminder" WHERE "id" = 'current-shape-reminder') AS reminder`,
+      );
+      assert.deepEqual(related.rows[0], {
+        bio: 'preserve-me',
+        interaction: 'preserve-interaction',
+        reminder: 'preserve-reminder',
+      });
+      assert.equal(await columnExists(client, 'DungeonMasterScenario', 'id'), true);
+    });
+  });
+
   test('fresh migration deployment reaches the checked-in Prisma schema', async () => {
     await withClient(async (client) => {
       await client.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');

@@ -35,3 +35,21 @@ test('web standalone build traces and preserves the monorepo layout', () => {
     /COPY --from=builder --chown=nextjs:nodejs \/app\/node_modules \/app\/node_modules/,
   );
 });
+
+test('api images package locked Prisma while keeping artifacts root-owned', () => {
+  for (const path of ['services/api/Dockerfile', 'docker/Dockerfile.backend']) {
+    const dockerfile = readFileSync(resolve(root, path), 'utf8');
+
+    assert.doesNotMatch(dockerfile, /npm install -g prisma/);
+    assert.match(
+      dockerfile,
+      /RUN \/prod\/api\/node_modules\/\.bin\/prisma --version/,
+    );
+    assert.match(dockerfile, /USER nestjs/);
+    assert.doesNotMatch(dockerfile, /--chown=nestjs:nestjs/);
+  }
+
+  const startup = readFileSync(resolve(root, 'services/api/start.sh'), 'utf8');
+  assert.match(startup, /\.\/node_modules\/\.bin\/prisma migrate deploy/);
+  assert.doesNotMatch(startup, /command -v prisma/);
+});

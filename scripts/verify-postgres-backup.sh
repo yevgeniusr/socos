@@ -43,12 +43,21 @@ restore_url=$(node -e '
 
 created=0
 cleanup() {
+  status=$?
+  trap - EXIT HUP INT TERM
   rm -f "$actual_metadata"
-  if [ "$created" -eq 1 ]; then
-    dropdb --if-exists --force --maintenance-db="$ADMIN_DATABASE_URL" "$restore_db" >/dev/null 2>&1 || true
+  if [ "$created" -eq 1 ] && [ "${KEEP_RESTORE_DB:-0}" != "1" ]; then
+    if ! dropdb --if-exists --force --maintenance-db="$ADMIN_DATABASE_URL" "$restore_db" >/dev/null 2>&1; then
+      echo "Disposable restore database deletion failed during cleanup." >&2
+      if [ "$status" -eq 0 ]; then
+        status=68
+      fi
+    fi
   fi
+  exit "$status"
 }
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap 'exit 70' HUP INT TERM
 
 createdb --maintenance-db="$ADMIN_DATABASE_URL" "$restore_db" >/dev/null
 created=1
@@ -85,9 +94,14 @@ for expected_table in User Vault Contact Interaction Reminder; do
 done
 
 table_count=$(awk 'NR > 1 { count++ } END { print count + 0 }' "$actual_metadata")
-if ! dropdb --if-exists --force --maintenance-db="$ADMIN_DATABASE_URL" "$restore_db" >/dev/null; then
-  echo "Disposable restore verification succeeded, but database deletion failed." >&2
-  exit 68
+if [ "${KEEP_RESTORE_DB:-0}" = "1" ]; then
+  created=0
+  printf 'restore_database_retained=%s\n' "$restore_db"
+else
+  if ! dropdb --if-exists --force --maintenance-db="$ADMIN_DATABASE_URL" "$restore_db" >/dev/null; then
+    echo "Disposable restore verification succeeded, but database deletion failed." >&2
+    exit 68
+  fi
+  created=0
 fi
-created=0
 printf 'restore_status=verified aggregate_counts=verified tables=%s\n' "$table_count"

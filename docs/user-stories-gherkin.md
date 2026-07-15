@@ -150,7 +150,7 @@ Feature: Authentication
   Scenario: Successful login
     Given I am on the /dashboard page
     And I am not authenticated
-    When I enter "yev.rachkovan@gmail.com" as email
+    When I enter "owner@example.test" as email
     And I enter the synthetic password from `E2E_TEST_PASSWORD`
     And I click "Sign In"
     Then I should be redirected to the dashboard
@@ -160,7 +160,7 @@ Feature: Authentication
   Scenario: Failed login with wrong password
     Given I am on the /dashboard page
     And I am not authenticated
-    When I enter "yev.rachkovan@gmail.com" as email
+    When I enter "owner@example.test" as email
     And I enter "wrongpassword" as password
     And I click "Sign In"
     Then I should see an error message "Login failed"
@@ -369,7 +369,7 @@ Feature: Auth API
 
   Scenario: POST /api/auth/login with bad credentials returns 401
     Given a registered synthetic user from the E2E environment
-    When I send POST /api/auth/login with email "yev.rachkovan@gmail.com" and password "wrongpassword"
+    When I send POST /api/auth/login with email "owner@example.test" and password "wrongpassword"
     Then I should receive 401 Unauthorized
     And the response should NOT include an accessToken
 

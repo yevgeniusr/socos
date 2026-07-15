@@ -11,7 +11,7 @@
     "dev": "turbo run dev",
     "build": "turbo run build",
     "lint": "turbo run lint",
-    "test": "turbo run test && node --experimental-strip-types --test scripts/security-regression.test.mjs scripts/e2e-host-policy.test.mjs scripts/database-ops.test.mjs scripts/migration-safety.integration.test.mjs scripts/docker-packaging.test.mjs",
+    "test": "turbo run test && node --experimental-strip-types --test scripts/security-regression.test.mjs scripts/e2e-host-policy.test.mjs scripts/database-ops.test.mjs scripts/migration-safety.integration.test.mjs scripts/docker-packaging.test.mjs scripts/coolify-ops.test.mjs && node scripts/security-regression.mjs",
     "type:check": "turbo run type:check",
     "security:regression": "node scripts/security-regression.mjs",
     "clean": "turbo run clean"

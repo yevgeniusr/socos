@@ -236,8 +236,10 @@ export class ReminderAgent {
 
       const contactCelebrations = await this.prisma.contactCelebration.findMany({
         where: {
+          ownerId: ctx.userId,
           status: 'active',
           shouldRemind: true,
+          contact: { ownerId: ctx.userId },
           celebration: {
             pack: {
               OR: [{ ownerId: null }, { ownerId: ctx.userId }],
@@ -268,6 +270,7 @@ export class ReminderAgent {
           const existingReminder = await this.prisma.reminder.findFirst({
             where: {
               contactId: cc.contactId,
+              ownerId: ctx.userId,
               type: 'birthday', // Simplified - could be more specific
               scheduledAt: celebrationDate,
             },

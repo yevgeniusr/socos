@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 
 const databaseUrl = process.env.DATABASE_URL;
 const metadataPath = process.argv[2];
-const expectedMigrationCount = Number.parseInt(process.env.EXPECTED_MIGRATION_COUNT ?? '3', 10);
+const expectedMigrationCount = Number.parseInt(process.env.EXPECTED_MIGRATION_COUNT ?? '4', 10);
 const allowedNewTables = new Set(['DMSceneResponse', 'DMSession', 'DungeonMasterScenario']);
 
 if (!databaseUrl || !metadataPath || !Number.isSafeInteger(expectedMigrationCount)) {
@@ -77,13 +77,22 @@ try {
 }
 
 let valid = before.size > 0;
+const beforeMigrationCount = before.get('_prisma_migrations');
 for (const [table, count] of before) {
-  valid &&= table !== '_prisma_migrations' && after.get(table) === count;
+  if (table !== '_prisma_migrations') valid &&= after.get(table) === count;
 }
+let introducedEmptyTables = 0;
 for (const table of allowedNewTables) {
-  valid &&= !before.has(table) && after.get(table) === 0;
+  if (before.has(table)) {
+    valid &&= after.get(table) === before.get(table);
+  } else {
+    valid &&= after.get(table) === 0;
+    introducedEmptyTables++;
+  }
 }
 valid &&= after.get('_prisma_migrations') === expectedMigrationCount;
+valid &&= beforeMigrationCount === undefined
+  || beforeMigrationCount === expectedMigrationCount - 1;
 for (const table of after.keys()) {
   valid &&= before.has(table) || allowedNewTables.has(table) || table === '_prisma_migrations';
 }
@@ -94,5 +103,5 @@ if (!valid) {
 }
 
 console.log(
-  `migration_counts_status=preserved existing_tables=${before.size} new_empty_tables=${allowedNewTables.size} migrations=${expectedMigrationCount}`,
+  `migration_counts_status=preserved existing_tables=${before.size - (beforeMigrationCount === undefined ? 0 : 1)} new_empty_tables=${introducedEmptyTables} migrations=${expectedMigrationCount}`,
 );

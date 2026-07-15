@@ -80,9 +80,14 @@ const DEMO_CONTACTS = [
 async function seed() {
   console.log('[seed] Starting database seed...');
 
+  const ownerEmail = process.env.SOCOS_SEED_OWNER_EMAIL;
+  if (!ownerEmail) {
+    throw new Error('SOCOS_SEED_OWNER_EMAIL is required for synthetic seed data.');
+  }
+
   // Find the demo user
   const user = await prisma.user.findUnique({
-    where: { email: 'yev.rachkovan@gmail.com' },
+    where: { email: ownerEmail },
   });
 
   if (!user) {
@@ -90,7 +95,7 @@ async function seed() {
     process.exit(1);
   }
 
-  console.log(`[seed] Found user: ${user.email} (${user.id})`);
+  console.log('[seed] Found configured synthetic seed owner.');
 
   // Find or create vault for user
   let vault = await prisma.vault.findFirst({

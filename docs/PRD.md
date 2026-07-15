@@ -39,7 +39,7 @@ Feature: Authentication
 
   Scenario: Existing user logs in
     Given I am on the login page
-    When I enter email "yev.rachkovan@gmail.com"
+    When I enter email "owner@example.test"
     And I enter the synthetic password from `E2E_TEST_PASSWORD`
     And I click "Sign In"
     Then I am redirected to the dashboard

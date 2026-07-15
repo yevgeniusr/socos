@@ -23,17 +23,25 @@ export class DungeonMasterController {
     @Request() req: { user: { userId: string } },
     @Body() dto: CreateSessionDto,
   ) {
-    // Ensure requesting user is one of the participants
-    if (!dto.participants.includes(req.user.userId)) {
-      dto.participants.unshift(req.user.userId);
-    }
-    return this.dmService.createSession(dto);
+    return this.dmService.createSession(dto, req.user.userId);
+  }
+
+  @Post('sessions/:id/accept')
+  @ApiOperation({ summary: 'Accept a pending DM session invitation' })
+  async acceptSession(
+    @Request() req: { user: { userId: string } },
+    @Param('id') id: string,
+  ) {
+    return this.dmService.acceptSession(id, req.user.userId);
   }
 
   @Get('sessions/:id')
   @ApiOperation({ summary: 'Get session state + current scene' })
-  async getSession(@Param('id') id: string) {
-    return this.dmService.getSession(id);
+  async getSession(
+    @Request() req: { user: { userId: string } },
+    @Param('id') id: string,
+  ) {
+    return this.dmService.getSession(id, req.user.userId);
   }
 
   @Post('sessions/:id/begin')
@@ -57,8 +65,11 @@ export class DungeonMasterController {
 
   @Post('sessions/:id/advance')
   @ApiOperation({ summary: 'Advance to next scene (after AI synthesis)' })
-  async advanceScene(@Param('id') id: string) {
-    return this.dmService.advanceScene(id);
+  async advanceScene(
+    @Request() req: { user: { userId: string } },
+    @Param('id') id: string,
+  ) {
+    return this.dmService.advanceScene(id, req.user.userId);
   }
 
   @Get('sessions/:id/debrief')

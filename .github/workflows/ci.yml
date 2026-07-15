@@ -52,3 +52,30 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      - name: Build production web image
+        run: docker build -f docker/Dockerfile.web -t socos-web:ci .
+
+      - name: Build production API image
+        run: docker build -f services/api/Dockerfile -t socos-api:ci .
+
+      - name: Verify production API runtime tools
+        run: docker run --rm --entrypoint sh socos-api:ci -c './node_modules/.bin/prisma --version >/dev/null'
+
+      - name: Verify production API startup and health
+        env:
+          DATABASE_URL: postgresql://postgres:test-only@127.0.0.1:5432/socos_migration_test_ci
+        run: |
+          docker run -d --name socos-api-ci --network host \
+            -e DATABASE_URL \
+            -e JWT_SECRET=synthetic-ci-jwt-secret-at-least-32-characters \
+            -e PORT=3001 \
+            socos-api:ci
+          trap 'docker logs socos-api-ci; docker rm -f socos-api-ci >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:3001/api/health-check >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1

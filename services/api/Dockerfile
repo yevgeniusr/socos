@@ -40,9 +40,7 @@ RUN pnpm --filter @socos/api deploy --prod --legacy /prod/api
 # Copy generated Prisma client into the deployed node_modules
 RUN cp -r /app/node_modules/.pnpm/@prisma+client*/node_modules/@prisma/client /prod/api/node_modules/@prisma/client
 RUN cp -r /app/node_modules/.pnpm/@prisma+client*/node_modules/.prisma /prod/api/node_modules/.prisma
-
-# Install prisma CLI globally in the production image so start.sh can use it
-RUN npm install -g prisma@6.9.0 --save-exact
+RUN /prod/api/node_modules/.bin/prisma --version >/dev/null
 
 # ---- Stage 3: Production runner ----
 FROM node:22-alpine AS runner
@@ -52,16 +50,13 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 RUN addgroup --system --gid 1001 nestjs && \
-    adduser --system --uid 1001 nestjs
+    adduser --system --uid 1001 --ingroup nestjs nestjs
 
 COPY --from=builder /prod/api/node_modules ./node_modules
 COPY --from=builder /app/services/api/dist ./dist
 COPY --from=builder /app/services/api/prisma ./prisma
 COPY --from=builder /app/services/api/package.json ./
 COPY --from=builder /app/services/api/start.sh ./start.sh
-
-# Install prisma CLI globally in the runner so startup script can use it
-RUN npm install -g prisma@6.9.0 --save-exact
 
 USER nestjs
 

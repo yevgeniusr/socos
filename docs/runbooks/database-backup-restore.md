@@ -14,7 +14,7 @@ The Socos PostgreSQL resource has an enabled Coolify backup schedule:
 
 - Schedule: daily at 02:00 UTC
 - Local retention: seven days and seven copies
-- Off-host storage: not configured
+- Off-host storage: client-side encrypted Google Drive replication, 30 days
 - Backup configuration: `b85nxfljaz0xpo9xqa57lfr4`
 
 Before a schema deployment, use the configured Coolify context to trigger a new
@@ -50,7 +50,31 @@ Expected output is `backup_status=created`, then
 SHA-256 sidecar, restores to a randomly named disposable database, compares
 aggregate row counts for every public table, requires core Socos tables, and
 drops the database before reporting success. A failed success-path deletion is
-a failed verification; error-path deletion remains best effort.
+a failed verification; error-path deletion failures are also reported. Set
+`KEEP_RESTORE_DB=1` only for an explicitly managed cloud drill that will be
+deleted separately; the verifier reports the generated database identifier as
+`restore_database_retained=<database-name>`.
+
+## Off-Host Replication
+
+The production host runs `scripts/offsite-backup.sh` after the Coolify backup
+window. An `rclone crypt` remote encrypts file contents, names, and directory
+names before upload to Google Drive. The job verifies plaintext source bytes
+against the encrypted remote and applies a 30-day off-host retention policy.
+The crypt password is held in the production root-only rclone config and
+separately in the operator's macOS Keychain. No decrypted dump is stored on the
+operator workstation.
+
+The destination is required to be an `rclone crypt` backend under the dedicated
+`socos-postgres-backups` subpath. Retention runs only after a source dump between
+2 minutes and 26 hours old is copied and cryptographically verified; stale or
+failed local backups leave existing off-host generations untouched.
+
+The server schedule is installed at `/etc/cron.d/socos-offsite-backup`. Inspect
+`/var/log/socos-offsite-backup.log` for the latest
+`offsite_backup_status=verified` marker. A successful Coolify backup is not a
+substitute for this marker because local-only copies share the server failure
+domain.
 
 The backup script exports one repeatable-read PostgreSQL snapshot, imports that
 snapshot into both `pg_dump` and the aggregate query, and publishes the dump
@@ -74,7 +98,7 @@ DATABASE_URL="$RESTORED_DATABASE_URL" node scripts/verify-post-migration-counts.
 Require `schema_status=match statements=0` and
 `migration_counts_status=preserved`. The count verifier requires every
 preexisting public table count to remain identical, allows only the three known
-empty DM tables, and requires exactly three migration-history rows. Drop the
+empty DM tables, and requires exactly four migration-history rows. Drop the
 disposable database before declaring the drill successful. If any command
 fails, stop the deployment and retain only redacted schema metadata logs.
 
@@ -89,4 +113,10 @@ identical. Only the three expected empty DM tables were added,
 `_prisma_migrations` contained three rows, and the disposable database was
 deleted. Earlier small executions targeted the maintenance `postgres` database
 and are not valid recovery evidence. Production remained untouched during this
-proof.
+proof. A post-rotation backup (`ipqz6iid9jp6crsm6g25ro1p`) then completed with
+`status=success` on 2026-07-16.
+The same day, all five retained Socos dumps were copied to the encrypted
+off-host remote and `rclone cryptcheck` reported zero differences across five
+matching files. The decrypted remote view contained five files, while the
+underlying Drive path exposed no plaintext `pg-dump` names. The scheduled job
+and separate Keychain recovery material were verified after installation.

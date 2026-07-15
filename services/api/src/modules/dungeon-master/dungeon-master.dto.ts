@@ -6,7 +6,10 @@ export class CreateSessionDto {
   @IsString()
   scenarioId: string;
 
-  @ApiProperty({ example: ['user-id-1', 'user-id-2'], description: 'Array of exactly 2 user IDs' })
+  @ApiProperty({
+    example: ['user-id-1', 'user-id-2'],
+    description: 'Array of exactly 2 user IDs',
+  })
   @IsArray()
   @ArrayMinSize(2)
   @IsString({ each: true })
@@ -40,6 +43,17 @@ export class DMScenarioDto {
   totalScenes: number;
 }
 
+export class DebriefDto {
+  @ApiProperty()
+  narrative: string;
+  @ApiProperty()
+  connectionHighlights: string[];
+  @ApiProperty()
+  xpAwarded: number;
+  @ApiProperty()
+  recommendedNextSteps: string[];
+}
+
 export class DMSessionDto {
   @ApiProperty()
   id: string;
@@ -55,6 +69,14 @@ export class DMSessionDto {
   status: string;
   @ApiProperty()
   currentNarrative: string | null;
+  @ApiPropertyOptional()
+  sceneStartedAt: Date | null;
+  @ApiPropertyOptional()
+  debrief: DebriefDto | null;
+  @ApiPropertyOptional()
+  debriefStartedAt: Date | null;
+  @ApiPropertyOptional()
+  xpAwardedAt: Date | null;
   @ApiProperty()
   startedAt: Date | null;
   @ApiProperty()
@@ -85,17 +107,6 @@ export class DMSessionListDto {
   sessions: DMSessionDto[];
   @ApiProperty()
   total: number;
-}
-
-export class DebriefDto {
-  @ApiProperty()
-  narrative: string;
-  @ApiProperty()
-  connectionHighlights: string[];
-  @ApiProperty()
-  xpAwarded: number;
-  @ApiProperty()
-  recommendedNextSteps: string[];
 }
 
 // Prompt injection DTOs

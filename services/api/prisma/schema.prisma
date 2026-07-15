@@ -431,6 +431,10 @@ model DMSession {
   currentScene     Int                   @default(0)
   status           String // "waiting" | "active" | "scene_submission" | "scene_review" | "debrief" | "completed" | "expired"
   currentNarrative String? // AI narration for current scene
+  sceneStartedAt   DateTime?
+  debrief          Json?
+  debriefStartedAt DateTime?
+  xpAwardedAt      DateTime?
   startedAt        DateTime?
   deadline         DateTime?
   createdAt        DateTime              @default(now())
