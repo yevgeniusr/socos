@@ -1,5 +1,13 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const baseURL = process.env.E2E_BASE_URL;
+if (!baseURL) {
+  throw new Error('E2E_BASE_URL is required and must target a staging deployment.');
+}
+if (new URL(baseURL).hostname === 'socos.rachkovan.com') {
+  throw new Error('E2E_BASE_URL must not target the production SOCOS hostname.');
+}
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
@@ -8,7 +16,7 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: 'html',
   use: {
-    baseURL: 'https://socos.rachkovan.com',
+    baseURL,
     trace: 'on-first-retry',
   },
   projects: [

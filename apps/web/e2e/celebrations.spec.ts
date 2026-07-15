@@ -1,9 +1,15 @@
 import { test, expect, request } from '@playwright/test';
 
-const BASE = 'https://socos.rachkovan.com/api';
+function requireE2EEnv(name: 'E2E_BASE_URL' | 'E2E_TEST_EMAIL' | 'E2E_TEST_PASSWORD'): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required for staging E2E tests.`);
+  return value;
+}
+
+const BASE = `${requireE2EEnv('E2E_BASE_URL').replace(/\/+$/, '')}/api`;
 const TEST_USER = {
-  email: 'yev.rachkovan@gmail.com',
-  password: 'socos2026',
+  email: requireE2EEnv('E2E_TEST_EMAIL'),
+  password: requireE2EEnv('E2E_TEST_PASSWORD'),
 };
 
 // Helper: get auth token via API login

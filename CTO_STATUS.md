@@ -135,7 +135,7 @@ Get a key at https://openrouter.ai/keys. No code changes required.
 - `@socos/platform` (React + Vite) is **still boilerplate** — `App.tsx` renders "Welcome to ts-monorepo-boilerplate" with a logo and shared message. No SOCOS-specific features implemented.
 - `AiDmService.callAI()` now uses `LlmService.complete()` via OpenRouter (not Anthropic SDK). Falls back to mock only when OPENROUTER_API_KEY is unset.
 - `@socos/web` has a **landing page** (`/`) + dashboard (`/dashboard`) + auth pages (`/auth/login`, `/auth/signup`) + health-check/setup-db routes.
-- Database connection string is hardcoded in `docker-compose.prod.yml`: `postgresql://postgres:37BLEWztnVO7AqI8bQb9vUrCnnBif8uaThihxv4K9R7Nsa7AiRiywB4K1Ob2nZIi@zwkk0scogckskkwss8oo48k4:5432/socos?sslmode=disable`
+- Database connection values were previously hardcoded in `docker-compose.prod.yml`; deployment now requires environment-provided credentials.
 - Three docker-compose files exist: `docker-compose.yaml` (default), `docker-compose.local.yml`, `docker-compose.prod.yml`
 - `docker/Dockerfile.web` is separate from root-level `Dockerfile`
 - `docker-compose.yaml` includes a `platform` service (port 8080) not present in `docker-compose.prod.yml` — the platform container is not deployed in prod.

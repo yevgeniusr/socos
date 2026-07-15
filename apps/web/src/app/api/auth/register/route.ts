@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerApiBaseUrl } from '@/lib/server-api';
 
-const API_BASE = (process.env.SOCOS_API_URL || 'http://localhost:3001').replace(/\/$/, '');
 const COOKIE_NAME = 'socos_token';
 
 export async function POST(request: NextRequest) {
@@ -10,7 +10,7 @@ export async function POST(request: NextRequest) {
       'Content-Type': request.headers.get('content-type') || 'application/json',
     };
 
-    const res = await fetch(`${API_BASE}/auth/register`, {
+    const res = await fetch(`${getServerApiBaseUrl()}/api/auth/register`, {
       method: 'POST',
       headers,
       body,

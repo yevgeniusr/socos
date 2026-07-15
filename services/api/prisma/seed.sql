@@ -1,7 +1,7 @@
 -- Fix user password and seed database
 -- This script is run automatically on first startup
 
--- Fix yev.rachkovan@gmail.com password to 'socos2026'
+-- Set the seeded user's password hash.
 UPDATE "User"
 SET "passwordHash" = '$2b$10$8yaNNEbrEX.hja8kyxyDbeaqlvE5sATATPw8zNMAZM9qiwsx4fYyy'
 WHERE email = 'yev.rachkovan@gmail.com';

@@ -13,6 +13,7 @@
     "lint": "turbo run lint",
     "test": "turbo run test",
     "type:check": "turbo run type:check",
+    "security:regression": "node scripts/security-regression.mjs",
     "clean": "turbo run clean"
   },
   "engines": {

@@ -40,7 +40,7 @@ Feature: Authentication
   Scenario: Existing user logs in
     Given I am on the login page
     When I enter email "yev.rachkovan@gmail.com"
-    And I enter password "socos2026"
+    And I enter the synthetic password from `E2E_TEST_PASSWORD`
     And I click "Sign In"
     Then I am redirected to the dashboard
     And my token is stored in localStorage
@@ -241,7 +241,7 @@ interface Stats {
 
 ### Must Pass (MVP Gate)
 
-- [ ] Login with `yev.rachkovan@gmail.com` / `socos2026` → dashboard
+- [ ] Login with the synthetic `E2E_TEST_EMAIL` / `E2E_TEST_PASSWORD` account -> dashboard
 - [ ] Dashboard shows 6 seeded contacts (from DB seed)
 - [ ] Stats show: total contacts count, XP, level
 - [ ] Add Contact modal opens → creates contact → appears in list

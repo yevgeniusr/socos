@@ -91,16 +91,19 @@ ENV API_INTERNAL_URL=http://localhost:3001
 ENV NODE_PATH=/app/services/api/node_modules
 
 HEALTHCHECK --interval=10s --timeout=5s --retries=3 --start-period=30s \
-  CMD node -e "const http = require('http'); http.get('http://localhost:3000/', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"
+  CMD wget -qO- http://localhost:3000/api/health-check > /dev/null && wget -qO- http://localhost:3001/api/health-check > /dev/null
 
-# Start NestJS (db init happens inside main.ts), then Next.js
+# Start the API only after its migration gate passes, then start Next.js.
 CMD ["tini", "--", "sh", "-c", "\
 cd /app/services/api && \
-node dist/main.js & \
+sh start.sh & API_PID=$!; \
 echo 'Waiting for NestJS to start...' && \
+API_READY=0; \
 for i in $(seq 1 30); do \
-  if wget -qO- http://localhost:3001/health/check > /dev/null 2>&1; then \
-    echo 'NestJS ready, starting Next.js'; break; fi; \
+  if wget -qO- http://localhost:3001/api/health-check > /dev/null 2>&1; then \
+    API_READY=1; echo 'NestJS ready, starting Next.js'; break; fi; \
+  if ! kill -0 $API_PID 2>/dev/null; then echo 'NestJS exited before readiness' >&2; exit 1; fi; \
   echo 'Waiting... attempt '$i; sleep 2; \
 done && \
+[ $API_READY -eq 1 ] || { echo 'NestJS readiness timed out' >&2; exit 1; }; \
 node /app/apps/web/server.js"]

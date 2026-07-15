@@ -151,7 +151,7 @@ Feature: Authentication
     Given I am on the /dashboard page
     And I am not authenticated
     When I enter "yev.rachkovan@gmail.com" as email
-    And I enter "socos2026" as password
+    And I enter the synthetic password from `E2E_TEST_PASSWORD`
     And I click "Sign In"
     Then I should be redirected to the dashboard
     And I should see my user profile (name, level, XP)
@@ -361,14 +361,14 @@ Feature: Toast Notifications
 Feature: Auth API
 
   Scenario: POST /api/auth/login with valid credentials
-    Given a registered user with email "yev.rachkovan@gmail.com" and password "socos2026"
+    Given a registered synthetic user from the E2E environment
     When I send POST /api/auth/login with valid credentials
     Then I should receive 200 OK
     And the response should include an accessToken
     And the response should include user id, email, name, xp, level
 
   Scenario: POST /api/auth/login with bad credentials returns 401
-    Given a registered user with email "yev.rachkovan@gmail.com" and password "socos2026"
+    Given a registered synthetic user from the E2E environment
     When I send POST /api/auth/login with email "yev.rachkovan@gmail.com" and password "wrongpassword"
     Then I should receive 401 Unauthorized
     And the response should NOT include an accessToken

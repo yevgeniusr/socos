@@ -1,8 +1,14 @@
 import { test, expect } from '@playwright/test';
 
+function requireE2EEnv(name: 'E2E_TEST_EMAIL' | 'E2E_TEST_PASSWORD'): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required for staging E2E tests.`);
+  return value;
+}
+
 const TEST_USER = {
-  email: 'yev.rachkovan@gmail.com',
-  password: 'socos2026',
+  email: requireE2EEnv('E2E_TEST_EMAIL'),
+  password: requireE2EEnv('E2E_TEST_PASSWORD'),
 };
 
 test.describe('SOCOS CRM', () => {

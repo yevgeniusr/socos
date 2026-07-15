@@ -1,10 +1,16 @@
 import { test, expect } from '@playwright/test';
 
-const BASE_URL = process.env.E2E_BASE_URL || 'https://socos.rachkovan.com';
-const TEST_EMAIL = 'yev.rachkovan@gmail.com';
-const TEST_PASSWORD = 'socos2026';
+function requireE2EEnv(name: 'E2E_BASE_URL' | 'E2E_TEST_EMAIL' | 'E2E_TEST_PASSWORD'): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required for staging E2E tests.`);
+  return value;
+}
 
-test.describe('SOCOS MVP - Production Smoke Tests', () => {
+const BASE_URL = requireE2EEnv('E2E_BASE_URL').replace(/\/+$/, '');
+const TEST_EMAIL = requireE2EEnv('E2E_TEST_EMAIL');
+const TEST_PASSWORD = requireE2EEnv('E2E_TEST_PASSWORD');
+
+test.describe('SOCOS MVP - Staging Smoke Tests', () => {
 
   test.beforeEach(async ({ page }) => {
     // Clear localStorage before each test

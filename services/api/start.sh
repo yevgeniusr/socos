@@ -1,23 +1,9 @@
 #!/bin/sh
-cd /app
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+cd "$SCRIPT_DIR"
 
 echo "[startup] SOCOS API starting..."
 
-# Run prisma db push
-if [ -f "/usr/local/bin/prisma" ]; then
-  echo "[startup] prisma found, running db push..."
-  set +e
-  /usr/local/bin/prisma db push --accept-data-loss --skip-generate 2>&1 | while IFS= read -r line; do echo "[prisma] $line"; done
-  PRISMA_EXIT=$?
-  set -e
-  if [ $PRISMA_EXIT -eq 0 ]; then
-    echo "[startup] prisma db push succeeded"
-  else
-    echo "[startup] prisma db push failed (exit $PRISMA_EXIT)"
-  fi
-else
-  echo "[startup] prisma not found"
-fi
-
-echo "[startup] Starting NestJS..."
-exec node dist/main.js
+echo "[startup] Migration baseline is not approved; refusing to mutate or start against the database." >&2
+echo "[startup] Complete the migration baseline task before enabling prisma migrate deploy." >&2
+exit 1

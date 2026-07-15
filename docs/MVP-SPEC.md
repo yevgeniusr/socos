@@ -18,7 +18,7 @@
 | Token stored in localStorage | ✅ | Key: `socos_token` |
 | Logout clears token | ✅ | Button in dashboard header |
 
-**Test Creds:** `yev.rachkovan@gmail.com` / `socos2026`
+**Test Creds:** Supply a synthetic account through `E2E_TEST_EMAIL` and `E2E_TEST_PASSWORD`.
 
 ---
 

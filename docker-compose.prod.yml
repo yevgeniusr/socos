@@ -40,16 +40,15 @@ services:
       db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/health/check || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/api/health-check || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=postgresql://postgres:37BLEWztnVO7AqI8bQb9vUrCnnBif8uaThihxv4K9R7Nsa7AiRiywB4K1Ob2nZIi@zwkk0scogckskkwss8oo48k4:5432/socos?sslmode=disable
-      - NODE_TLS_REJECT_UNAUTHORIZED=0
-      - JWT_SECRET=${JWT_SECRET:-socos-dev-secret-2026}
+      - DATABASE_URL=${DATABASE_URL:?DATABASE_URL is required}
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
       - PORT=3001
     labels:
       - "traefik.enable=true"
@@ -70,7 +69,7 @@ services:
     image: postgres:15-alpine
     environment:
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=37BLEWztnVO7AqI8bQb9vUrCnnBif8uaThihxv4K9R7Nsa7AiRiywB4K1Ob2nZIi
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       - POSTGRES_DB=socos
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
