@@ -8,12 +8,15 @@ RUN apk add --no-cache python3 make g++
 RUN corepack enable && corepack prepare pnpm@10.10.0 --activate
 
 COPY pnpm-lock.yaml package.json pnpm-workspace.yaml ./
+COPY apps/platform/package.json apps/platform/
+COPY apps/web/package.json apps/web/
 COPY services/api/package.json services/api/
+COPY packages/agent-core/package.json packages/agent-core/
 COPY packages/shared/package.json packages/shared/
 COPY packages/eslint-config/package.json packages/eslint-config/
 COPY packages/typescript-config/package.json packages/typescript-config/
 
-RUN pnpm install
+RUN pnpm install --frozen-lockfile
 
 # ---- Stage 2: Builder ----
 FROM node:22-alpine AS builder

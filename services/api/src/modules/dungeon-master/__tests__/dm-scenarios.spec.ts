@@ -1,4 +1,3 @@
-import { describe, it, expect } from 'vitest';
 import { SCENARIOS, getDefaultScenarios } from '../dm-scenarios.data.js';
 
 describe('SCENARIOS', () => {
@@ -8,7 +7,7 @@ describe('SCENARIOS', () => {
 
   it('has unique archetype values', () => {
     const archetypes = SCENARIOS.map((s) => s.archetype);
-    expect(new Set(archetypes)).toHaveLength(3);
+    expect(new Set(archetypes).size).toBe(3);
     expect(archetypes).toContain('mystery');
     expect(archetypes).toContain('adventure');
     expect(archetypes).toContain('intimate');
@@ -16,7 +15,7 @@ describe('SCENARIOS', () => {
 
   it('has valid unique IDs', () => {
     const ids = SCENARIOS.map((s) => s.id);
-    expect(new Set(ids)).toHaveLength(3);
+    expect(new Set(ids).size).toBe(3);
   });
 
   it('has required fields on all scenarios', () => {

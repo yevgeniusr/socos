@@ -94,10 +94,10 @@ Desktop.ini
 *.p12
 *.pfx
 
-# Package manager locks (uncomment if you want to ignore them)
-# pnpm-lock.yaml
-# package-lock.json
-# yarn.lock
+# Alternative package manager state (pnpm-lock.yaml is committed)
+package-lock.json
+yarn.lock
+.pnpm-store/
 
 # Storybook
 storybook-static/

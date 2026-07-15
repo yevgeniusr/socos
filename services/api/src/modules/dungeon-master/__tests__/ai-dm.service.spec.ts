@@ -1,15 +1,21 @@
-import { describe, it, expect } from 'vitest';
+import type { ConfigService } from '@nestjs/config';
+import type { AnthropicService } from '../../llm/anthropic.service.js';
+import type { LlmService } from '../../llm/llm.service.js';
 import { AiDmService } from '../ai-dm.service.js';
-import { ScenePromptContext } from '../dungeon-master.dto.js';
+import type { ScenePromptContext } from '../dungeon-master.dto.js';
 
-const SERVICE = new AiDmService();
+const SERVICE = new AiDmService(
+  {} as ConfigService,
+  { isConfigured: false } as AnthropicService,
+  { isConfigured: false } as LlmService,
+);
 
 const MOCK_CONTEXT: ScenePromptContext = {
   scenarioName: 'Mystery at the Gala',
   scenarioArchetype: 'mystery',
   setting: 'The grand ballroom',
-  userA: { id: 'user-a', name: 'Alice', bio: 'Loves puzzles and champagne' },
-  userB: { id: 'user-b', name: 'Bob', bio: 'A quiet observer' },
+  userA: { id: 'user-a', name: 'Alice' },
+  userB: { id: 'user-b', name: 'Bob' },
   sceneIndex: 0,
   totalScenes: 5,
   sceneDescription: 'The Disappearance',
@@ -49,10 +55,10 @@ describe('AiDmService', () => {
       expect(prompt).toContain('The Disappearance');
     });
 
-    it('includes user names and bios', () => {
+    it('includes both user names', () => {
       const prompt = SERVICE.buildScenePrompt(MOCK_CONTEXT);
       expect(prompt).toContain('Alice');
-      expect(prompt).toContain('Loves puzzles and champagne');
+      expect(prompt).toContain('Bob');
     });
 
     it('includes the scenario archetype', () => {

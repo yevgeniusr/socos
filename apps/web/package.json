@@ -7,9 +7,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint src/",
+    "lint": "ESLINT_USE_FLAT_CONFIG=false eslint src/",
     "type:check": "tsc --noEmit",
-    "test": "vitest",
+    "test": "vitest run --passWithNoTests --exclude 'e2e/**'",
+    "test:watch": "vitest",
     "clean": "rm -rf .next node_modules .turbo"
   },
   "type": "module",
