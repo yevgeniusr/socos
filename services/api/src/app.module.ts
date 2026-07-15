@@ -23,7 +23,6 @@ import { AiDmService } from './modules/dungeon-master/ai-dm.service.js';
 import { AgentsModule } from './modules/agents/agents.module.js';
 import { AiAgentModule } from './modules/ai-agent/ai-agent.module.js';
 import { AgentToolsModule } from './modules/agent-tools/agent-tools.module.js';
-import { AiAgentController } from './modules/ai-agent/ai-agent.controller.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
 import { NotificationSchedulerModule } from './modules/notifications/notification-scheduler.module.js';
 
@@ -47,7 +46,6 @@ import { NotificationSchedulerModule } from './modules/notifications/notificatio
     GamificationController,
     CelebrationsController,
     DungeonMasterController,
-    AiAgentController,
   ],
   providers: [
     PrismaService,

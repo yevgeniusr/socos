@@ -1,4 +1,10 @@
-import { GUARDS_METADATA, PATH_METADATA, ROUTE_ARGS_METADATA } from '@nestjs/common/constants';
+import { RequestMethod } from '@nestjs/common';
+import {
+  GUARDS_METADATA,
+  METHOD_METADATA,
+  PATH_METADATA,
+  ROUTE_ARGS_METADATA,
+} from '@nestjs/common/constants';
 import { AuthGuard } from '../auth/auth.guard.js';
 import { NotificationsController } from './notifications.controller.js';
 import type { NotificationsService } from './notifications.service.js';
@@ -37,12 +43,24 @@ describe('NotificationsController security', () => {
     }
   });
 
-  it('does not expose direct-send or cron controller methods', () => {
-    expect(NotificationsController.prototype).not.toHaveProperty('sendEmail');
-    expect(NotificationsController.prototype).not.toHaveProperty('sendEmailToContact');
-    expect(NotificationsController.prototype).not.toHaveProperty('sendSms');
-    expect(NotificationsController.prototype).not.toHaveProperty('sendSmsToContact');
-    expect(NotificationsController.prototype).not.toHaveProperty('checkDueReminders');
+  it('exposes only the approved status and owned-reminder routes', () => {
+    const routes = Object.getOwnPropertyNames(NotificationsController.prototype)
+      .flatMap((methodName) => {
+        const handler = NotificationsController.prototype[
+          methodName as keyof NotificationsController
+        ];
+        const requestMethod = Reflect.getMetadata(METHOD_METADATA, handler) as
+          | RequestMethod
+          | undefined;
+        const path = Reflect.getMetadata(PATH_METADATA, handler) as string | undefined;
+
+        return requestMethod === undefined || path === undefined
+          ? []
+          : [`${RequestMethod[requestMethod]} ${path}`];
+      })
+      .sort();
+
+    expect(routes).toEqual(['GET status', 'POST reminders/:contactId']);
   });
 
   it('owner-scopes reminder contacts and forwards the authenticated user', async () => {
