@@ -8,6 +8,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 /** @type {import("next").NextConfig} */
 const nextConfig = {
   output: 'standalone',
+  outputFileTracingRoot: resolve(__dirname, '../..'),
   transpilePackages: ['@socos/shared'],
   // Nginx handles all routing - use relative paths
   // These rewrites are for SSR and internal Next.js routing
