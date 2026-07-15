@@ -1,4 +1,14 @@
-import { IsString, IsOptional, IsArray, IsDateString, IsNumber, IsObject, Min, Max } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsArray,
+  IsDateString,
+  IsNumber,
+  IsObject,
+  IsInt,
+  Min,
+  Max,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateContactDto {
@@ -77,6 +87,20 @@ export class CreateContactDto {
   @IsOptional()
   @IsString()
   vaultId?: string;
+
+  @ApiPropertyOptional({ minimum: 1, maximum: 5, default: 3 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  importance?: number;
+
+  @ApiPropertyOptional({ minimum: 7, maximum: 365, default: 90 })
+  @IsOptional()
+  @IsInt()
+  @Min(7)
+  @Max(365)
+  preferredCadenceDays?: number;
 }
 
 export class UpdateContactDto {
@@ -148,6 +172,20 @@ export class UpdateContactDto {
   @Min(0)
   @Max(100)
   relationshipScore?: number;
+
+  @ApiPropertyOptional({ minimum: 1, maximum: 5 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  importance?: number;
+
+  @ApiPropertyOptional({ minimum: 7, maximum: 365 })
+  @IsOptional()
+  @IsInt()
+  @Min(7)
+  @Max(365)
+  preferredCadenceDays?: number;
 }
 
 export class ContactFieldDto {

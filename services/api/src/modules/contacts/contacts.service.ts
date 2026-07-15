@@ -13,7 +13,9 @@ export class ContactsService {
   async create(userId: string, dto: CreateContactDto) {
     // Get user's default vault
     const vault = await this.prisma.vault.findFirst({
-      where: { ownerId: userId },
+      where: dto.vaultId
+        ? { id: dto.vaultId, ownerId: userId }
+        : { ownerId: userId },
     });
 
     if (!vault) {
@@ -22,7 +24,7 @@ export class ContactsService {
 
     const contact = await this.prisma.contact.create({
       data: {
-        vaultId: dto.vaultId || vault.id,
+        vaultId: vault.id,
         ownerId: userId,
         firstName: dto.firstName,
         lastName: dto.lastName,
@@ -38,6 +40,8 @@ export class ContactsService {
         socialLinks: dto.socialLinks ? JSON.stringify(dto.socialLinks) : undefined,
         firstMetDate: dto.firstMetDate ? new Date(dto.firstMetDate) : undefined,
         firstMetContext: dto.firstMetContext,
+        importance: dto.importance,
+        preferredCadenceDays: dto.preferredCadenceDays,
       },
       include: {
         owner: {

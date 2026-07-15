@@ -10,25 +10,32 @@ datasource db {
 // ==================== USER ====================
 
 model User {
-  id           String    @id @default(cuid())
-  email        String    @unique
-  name         String?
-  avatar       String?
-  passwordHash String?
-  xp           Int       @default(0)
-  level        Int       @default(1)
-  streakDays   Int       @default(0)
-  lastActiveAt DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id             String    @id @default(cuid())
+  email          String    @unique
+  name           String?
+  avatar         String?
+  passwordHash   String?
+  xp             Int       @default(0)
+  level          Int       @default(1)
+  streakDays     Int       @default(0)
+  lastActiveAt   DateTime?
+  timeZone       String    @default("UTC")
+  briefHourLocal Int       @default(8)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   // Relations
-  contacts     Contact[]
-  interactions Interaction[]
-  reminders    Reminder[]
-  achievements UserAchievement[]
-  vaults       Vault[]
-  sessions     Session[]
+  contacts       Contact[]
+  interactions   Interaction[]
+  reminders      Reminder[]
+  achievements   UserAchievement[]
+  vaults         Vault[]
+  sessions       Session[]
+  briefBatches   BriefBatch[]
+  briefItems     BriefItem[]
+  quests         Quest[]
+  briefFeedback  BriefFeedback[]
+  xpTransactions XpTransaction[]
 }
 
 // ==================== VAULT ====================
@@ -85,7 +92,9 @@ model Contact {
   anniversary DateTime?
 
   // Relationship Score (AI-calculated)
-  relationshipScore Int @default(50) // 0-100
+  relationshipScore    Int @default(50) // 0-100
+  importance           Int @default(3)
+  preferredCadenceDays Int @default(90)
 
   // Tags & Labels (JSON for flexibility)
   labels String[] @default([])
@@ -128,6 +137,111 @@ model Contact {
   @@index([ownerId, isDemo])
   @@index([lastContactedAt])
   @@index([nextReminderAt])
+}
+
+// ==================== DAILY SOCIAL BRIEF ====================
+
+model BriefBatch {
+  id            String      @id @default(cuid())
+  ownerId       String
+  owner         User        @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  localDate     DateTime    @db.Date
+  timeZone      String
+  status        String      @default("generating")
+  generatedAt   DateTime?
+  schemaVersion String      @default("1.0")
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  items         BriefItem[]
+  quests        Quest[]
+
+  @@unique([id, ownerId])
+  @@unique([ownerId, localDate], map: "BriefBatch_ownerId_localDate_key")
+  @@index([ownerId, status])
+}
+
+model BriefItem {
+  id           String          @id @default(cuid())
+  batchId      String
+  batch        BriefBatch      @relation(fields: [batchId, ownerId], references: [id, ownerId], onDelete: Cascade)
+  ownerId      String
+  owner        User            @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  contactId    String?
+  kind         String
+  sourceType   String
+  sourceId     String?
+  rank         Int
+  score        Float
+  title        String
+  reason       String
+  evidence     Json
+  status       String          @default("pending")
+  snoozedUntil DateTime?
+  actionedAt   DateTime?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  quests       Quest[]
+  feedback     BriefFeedback[]
+
+  @@unique([id, ownerId])
+  @@unique([id, batchId, ownerId])
+  @@unique([batchId, kind, rank])
+  @@index([ownerId, contactId])
+  @@index([ownerId, status, snoozedUntil])
+}
+
+model Quest {
+  id             String          @id @default(cuid())
+  batchId        String
+  batch          BriefBatch      @relation(fields: [batchId, ownerId], references: [id, ownerId], onDelete: Cascade)
+  ownerId        String
+  owner          User            @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  briefItemId    String
+  briefItem      BriefItem       @relation(fields: [briefItemId, batchId, ownerId], references: [id, batchId, ownerId], onDelete: Cascade)
+  title          String
+  completionType String
+  targetId       String
+  xpReward       Int
+  status         String          @default("pending")
+  completedAt    DateTime?
+  createdAt      DateTime        @default(now())
+  feedback       BriefFeedback[]
+
+  @@unique([id, ownerId])
+  @@unique([batchId, briefItemId])
+  @@index([ownerId, status])
+}
+
+model BriefFeedback {
+  id             String     @id @default(cuid())
+  ownerId        String
+  owner          User       @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  briefItemId    String?
+  briefItem      BriefItem? @relation(fields: [briefItemId, ownerId], references: [id, ownerId], onDelete: Cascade)
+  questId        String?
+  quest          Quest?     @relation(fields: [questId, ownerId], references: [id, ownerId], onDelete: Cascade)
+  action         String
+  reason         String?
+  snoozedUntil   DateTime?
+  idempotencyKey String
+  requestHash    String
+  createdAt      DateTime   @default(now())
+
+  @@unique([ownerId, idempotencyKey], map: "BriefFeedback_ownerId_idempotencyKey_key")
+  @@index([ownerId, briefItemId, createdAt])
+}
+
+model XpTransaction {
+  id         String   @id @default(cuid())
+  ownerId    String
+  owner      User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  amount     Int
+  sourceType String
+  sourceId   String
+  createdAt  DateTime @default(now())
+
+  @@unique([ownerId, sourceType, sourceId], map: "XpTransaction_ownerId_sourceType_sourceId_key")
+  @@index([ownerId, createdAt])
 }
 
 // ==================== CONTACT FIELD ====================
