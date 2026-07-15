@@ -14,6 +14,10 @@ import {
   AgentResult,
   RelationshipRecommendation,
 } from '../agents/types.js';
+import {
+  assessRelationship,
+  type RelationshipHealth,
+} from '../../briefs/relationship-health.js';
 
 @Injectable()
 export class RelationshipAgent {
@@ -29,7 +33,8 @@ export class RelationshipAgent {
   ): Promise<AgentResult<RelationshipRecommendation[]>> {
     const { daysStale = 14, limit = 20 } = options;
 
-    const staleDate = new Date();
+    const now = new Date();
+    const staleDate = new Date(now);
     staleDate.setDate(staleDate.getDate() - daysStale);
 
     try {
@@ -39,10 +44,7 @@ export class RelationshipAgent {
           isDemo: false,
           OR: [
             { lastContactedAt: { lt: staleDate } },
-            {
-              lastContactedAt: null,
-              createdAt: { lt: staleDate },
-            },
+            { lastContactedAt: null },
           ],
         },
         include: {
@@ -56,21 +58,20 @@ export class RelationshipAgent {
 
       const recommendations: RelationshipRecommendation[] = contacts.map(
         (contact) => {
-          const daysSinceContact = contact.lastContactedAt
-            ? Math.floor(
-                (Date.now() - contact.lastContactedAt.getTime()) /
-                  (1000 * 60 * 60 * 24),
-              )
-            : Math.floor(
-                (Date.now() - contact.createdAt.getTime()) /
-                  (1000 * 60 * 60 * 24),
-              );
+          const preferredCadenceDays = (
+            contact as typeof contact & { preferredCadenceDays?: number }
+          ).preferredCadenceDays ?? 90;
+          const health = assessRelationship({
+            now,
+            lastContactedAt: contact.lastContactedAt,
+            preferredCadenceDays,
+          });
+          const daysSinceContact = health.daysSinceContact ?? 0;
 
-          // Determine priority based on days since contact and relationship score
           let priority: 'high' | 'medium' | 'low';
-          if (daysSinceContact > 60 || contact.relationshipScore < 30) {
+          if (health.score < 30) {
             priority = 'high';
-          } else if (daysSinceContact > 30 || contact.relationshipScore < 50) {
+          } else if (health.score < 60) {
             priority = 'medium';
           } else {
             priority = 'low';
@@ -79,7 +80,7 @@ export class RelationshipAgent {
           return {
             contactId: contact.id,
             contactName: `${contact.firstName}${contact.lastName ? ` ${contact.lastName}` : ''}`,
-            reason: this.getReason(daysSinceContact, contact.relationshipScore),
+            reason: this.getReason(health),
             priority,
             daysSinceContact,
             suggestedAction: this.getSuggestedAction(contact, daysSinceContact),
@@ -108,49 +109,33 @@ export class RelationshipAgent {
    */
   async refreshScores(userId: string): Promise<AgentResult<{ updated: number }>> {
     try {
+      const now = new Date();
       const contacts = await this.prisma.contact.findMany({
         where: { ownerId: userId, isDemo: false },
-        include: {
-          interactions: {
-            orderBy: { occurredAt: 'desc' },
-            take: 10,
-          },
-        },
       });
 
       let updated = 0;
       for (const contact of contacts) {
-        const lastInteraction = contact.interactions[0];
-        const interactionCount = contact.interactions.length;
-
-        // Simple scoring algorithm:
-        // Base score of 50, +10 for recent interaction, -5 for each 30 days stale
-        let newScore = 50;
-
-        if (lastInteraction) {
-          const daysSince = Math.floor(
-            (Date.now() - lastInteraction.occurredAt.getTime()) /
-              (1000 * 60 * 60 * 24),
-          );
-
-          if (daysSince <= 7) newScore += 30;
-          else if (daysSince <= 14) newScore += 20;
-          else if (daysSince <= 30) newScore += 10;
-          else newScore -= Math.min(30, Math.floor(daysSince / 30) * 5);
-        }
-
-        // Boost for consistent interactions
-        if (interactionCount >= 10) newScore += 10;
-        else if (interactionCount >= 5) newScore += 5;
-
-        newScore = Math.max(0, Math.min(100, newScore));
+        if (contact.isDemo) continue;
+        const preferredCadenceDays = (
+          contact as typeof contact & { preferredCadenceDays?: number }
+        ).preferredCadenceDays ?? 90;
+        const newScore = assessRelationship({
+          now,
+          lastContactedAt: contact.lastContactedAt,
+          preferredCadenceDays,
+        }).score;
 
         if (newScore !== contact.relationshipScore) {
-          await this.prisma.contact.update({
-            where: { id: contact.id },
+          const result = await this.prisma.contact.updateMany({
+            where: {
+              id: contact.id,
+              ownerId: userId,
+              isDemo: false,
+            },
             data: { relationshipScore: newScore },
           });
-          updated++;
+          updated += result.count;
         }
       }
 
@@ -170,17 +155,17 @@ export class RelationshipAgent {
     }
   }
 
-  private getReason(daysSinceContact: number, relationshipScore: number): string {
-    if (daysSinceContact > 60) {
-      return `You haven't connected in ${daysSinceContact} days. Time for a check-in!`;
+  private getReason(health: RelationshipHealth): string {
+    if (health.reasonCode === 'never_contacted') {
+      return 'No interaction has been recorded yet.';
     }
-    if (relationshipScore < 30) {
-      return 'Your relationship score is low. A meaningful interaction could help.';
+    if (health.reasonCode === 'cadence_overdue') {
+      return `Preferred check-in cadence is overdue by ${health.daysOverdue} days.`;
     }
-    if (daysSinceContact > 30) {
-      return `It's been ${daysSinceContact} days. Consider reaching out.`;
+    if (health.reasonCode === 'cadence_due') {
+      return 'Preferred check-in cadence is due today.';
     }
-    return 'Regular check-ins help maintain strong relationships.';
+    return 'The relationship is within its preferred check-in cadence.';
   }
 
   private getSuggestedAction(

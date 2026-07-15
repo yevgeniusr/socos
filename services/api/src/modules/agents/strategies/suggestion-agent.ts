@@ -130,76 +130,16 @@ export class SuggestionAgent {
    * Suggest warm introductions between contacts
    */
   async suggestIntroductions(
-    ctx: AgentContext,
-    options: { limit?: number } = {},
+    _ctx: AgentContext,
+    _options: { limit?: number } = {},
   ): Promise<AgentResult<Array<{ person1: string; person2: string; reason: string }>>> {
-    const { limit = 10 } = options;
-
-    try {
-      const contacts = await this.prisma.contact.findMany({
-        where: { ownerId: ctx.userId, isDemo: false },
-        include: {
-          interactions: {
-            include: {
-              contact: {
-                select: { id: true, firstName: true, lastName: true },
-              },
-            },
-          },
-        },
-      });
-
-      // Find contacts that both have interacted with the same person
-      // but haven't interacted with each other
-      const introductions: Array<{ person1: string; person2: string; reason: string }> = [];
-
-      for (const contact of contacts) {
-        const interactionPartners = new Set(
-          contact.interactions
-            .map((i) => i.contact.id)
-            .filter((id) => id !== contact.id),
-        );
-
-        for (const partnerId of interactionPartners) {
-          const partner = contacts.find((c) => c.id === partnerId);
-          if (!partner) continue;
-
-          // Check if they haven't interacted
-          const partnerInteracted = partner.interactions.some((i) =>
-            i.contact.id === contact.id,
-          );
-          if (partnerInteracted) continue;
-
-          // Check if this introduction already exists
-          const exists = introductions.some(
-            (intro) =>
-              (intro.person1 === contact.id && intro.person2 === partnerId) ||
-              (intro.person1 === partnerId && intro.person2 === contact.id),
-          );
-          if (exists) continue;
-
-          introductions.push({
-            person1: contact.id,
-            person2: partnerId,
-            reason: `Both have interacted with ${contact.firstName} but haven't met each other`,
-          });
-        }
-      }
-
-      return {
-        success: true,
-        agent: 'suggestion' as any,
-        data: introductions.slice(0, limit),
-        executedAt: new Date(),
-      };
-    } catch (error) {
-      return {
-        success: false,
-        agent: 'suggestion' as any,
-        error: error instanceof Error ? error.message : 'Unknown error',
-        executedAt: new Date(),
-      };
-    }
+    return {
+      success: false,
+      agent: 'suggestion' as any,
+      data: [],
+      error: 'INSUFFICIENT_GRAPH_DATA',
+      executedAt: new Date(),
+    };
   }
 
   /**

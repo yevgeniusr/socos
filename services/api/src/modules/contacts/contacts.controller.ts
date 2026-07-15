@@ -41,6 +41,16 @@ export class ContactsController {
     return this.contactsService.getTags(req.user.userId);
   }
 
+  @Get('due')
+  @ApiOperation({ summary: 'Get contacts needing follow-up (stale contacts)' })
+  async getDueContacts(
+    @Request() req: { user: { userId: string } },
+    @Query('days') days?: number,
+    @Query('limit') limit?: number,
+  ) {
+    return this.contactsService.getDueContacts(req.user.userId, days, limit);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get a contact by ID' })
   async findOne(
@@ -67,16 +77,6 @@ export class ContactsController {
     @Param('id') id: string,
   ) {
     return this.contactsService.delete(req.user.userId, id);
-  }
-
-  @Get('due')
-  @ApiOperation({ summary: 'Get contacts needing follow-up (stale contacts)' })
-  async getDueContacts(
-    @Request() req: { user: { userId: string } },
-    @Query('days') days?: number,
-    @Query('limit') limit?: number,
-  ) {
-    return this.contactsService.getDueContacts(req.user.userId, days, limit);
   }
 
   @Post(':id/interactions')
