@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 
 const databaseUrl = process.env.DATABASE_URL;
 const metadataPath = process.argv[2];
-const expectedMigrationCount = Number.parseInt(process.env.EXPECTED_MIGRATION_COUNT ?? '4', 10);
+const expectedMigrationCount = Number.parseInt(process.env.EXPECTED_MIGRATION_COUNT ?? '5', 10);
 const allowedNewTables = new Set(['DMSceneResponse', 'DMSession', 'DungeonMasterScenario']);
 
 if (!databaseUrl || !metadataPath || !Number.isSafeInteger(expectedMigrationCount)) {

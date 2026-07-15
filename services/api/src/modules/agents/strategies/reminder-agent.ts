@@ -42,6 +42,7 @@ export class ReminderAgent {
             gte: new Date(),
             lte: endDate,
           },
+          contact: { isDemo: false },
           ...(types.length > 0 ? { type: { in: types } } : {}),
         },
         include: {
@@ -95,6 +96,7 @@ export class ReminderAgent {
       const contacts = await this.prisma.contact.findMany({
         where: {
           ownerId: ctx.userId,
+          isDemo: false,
           birthday: { not: null },
         },
       });
@@ -164,6 +166,7 @@ export class ReminderAgent {
       const contacts = await this.prisma.contact.findMany({
         where: {
           ownerId: ctx.userId,
+          isDemo: false,
           OR: [
             { lastContactedAt: { lt: staleDate } },
             {
@@ -239,7 +242,7 @@ export class ReminderAgent {
           ownerId: ctx.userId,
           status: 'active',
           shouldRemind: true,
-          contact: { ownerId: ctx.userId },
+          contact: { ownerId: ctx.userId, isDemo: false },
           celebration: {
             pack: {
               OR: [{ ownerId: null }, { ownerId: ctx.userId }],

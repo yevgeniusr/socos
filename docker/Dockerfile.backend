@@ -34,6 +34,7 @@ WORKDIR /app/services/api
 
 RUN pnpm prisma generate
 RUN pnpm build
+RUN test -f /app/services/api/dist/cli/monica-import.js
 
 RUN pnpm --filter @socos/api deploy --prod --legacy /prod/api
 

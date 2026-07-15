@@ -40,7 +40,11 @@ export class SummaryAgent {
 
     try {
       const interaction = await this.prisma.interaction.findFirst({
-        where: { id: ctx.interactionId, ownerId: ctx.userId },
+        where: {
+          id: ctx.interactionId,
+          ownerId: ctx.userId,
+          contact: { isDemo: false },
+        },
         include: { contact: true },
       });
 
@@ -103,7 +107,7 @@ export class SummaryAgent {
 
     try {
       const contact = await this.prisma.contact.findFirst({
-        where: { id: ctx.contactId, ownerId: ctx.userId },
+        where: { id: ctx.contactId, ownerId: ctx.userId, isDemo: false },
       });
 
       if (!contact) {
@@ -175,15 +179,28 @@ export class SummaryAgent {
 
       const [interactions, newContacts, remindersCompleted] = await Promise.all([
         this.prisma.interaction.findMany({
-          where: { ownerId: ctx.userId, occurredAt: { gte: sinceDate } },
+          where: {
+            ownerId: ctx.userId,
+            occurredAt: { gte: sinceDate },
+            contact: { isDemo: false },
+          },
           include: { contact: { select: { firstName: true, lastName: true } } },
           orderBy: { occurredAt: 'desc' },
         }),
         this.prisma.contact.count({
-          where: { ownerId: ctx.userId, createdAt: { gte: sinceDate } },
+          where: {
+            ownerId: ctx.userId,
+            createdAt: { gte: sinceDate },
+            isDemo: false,
+          },
         }),
         this.prisma.reminder.count({
-          where: { ownerId: ctx.userId, status: 'completed', completedAt: { gte: sinceDate } },
+          where: {
+            ownerId: ctx.userId,
+            status: 'completed',
+            completedAt: { gte: sinceDate },
+            contact: { isDemo: false },
+          },
         }),
       ]);
 

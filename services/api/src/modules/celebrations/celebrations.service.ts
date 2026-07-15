@@ -110,7 +110,12 @@ export class CelebrationsService {
     endDate.setDate(endDate.getDate() + days);
 
     const toRemind: any[] = await this.prisma.contactCelebration.findMany({
-      where: { ownerId: userId, status: 'active', shouldRemind: true },
+      where: {
+        ownerId: userId,
+        status: 'active',
+        shouldRemind: true,
+        contact: { isDemo: false },
+      },
       include: {
         celebration: {
           include: { pack: { select: { id: true, name: true } } },
@@ -683,6 +688,7 @@ export class CelebrationsService {
       where: {
         ownerId: userId,
         status: 'active',
+        contact: { isDemo: false },
       },
       include: {
         celebration: {

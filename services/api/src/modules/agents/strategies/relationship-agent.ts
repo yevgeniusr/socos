@@ -36,6 +36,7 @@ export class RelationshipAgent {
       const contacts = await this.prisma.contact.findMany({
         where: {
           ownerId: ctx.userId,
+          isDemo: false,
           OR: [
             { lastContactedAt: { lt: staleDate } },
             {
@@ -108,7 +109,7 @@ export class RelationshipAgent {
   async refreshScores(userId: string): Promise<AgentResult<{ updated: number }>> {
     try {
       const contacts = await this.prisma.contact.findMany({
-        where: { ownerId: userId },
+        where: { ownerId: userId, isDemo: false },
         include: {
           interactions: {
             orderBy: { occurredAt: 'desc' },

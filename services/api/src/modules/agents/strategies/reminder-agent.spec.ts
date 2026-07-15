@@ -26,7 +26,7 @@ describe('ReminderAgent ownership', () => {
       expect.objectContaining({
         where: expect.objectContaining({
           ownerId: 'authenticated-user',
-          contact: { ownerId: 'authenticated-user' },
+          contact: { ownerId: 'authenticated-user', isDemo: false },
         }),
       }),
     );

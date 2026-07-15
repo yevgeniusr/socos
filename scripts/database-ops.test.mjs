@@ -285,7 +285,7 @@ test('post-migration verifier preserves old counts and permits only known empty 
   executable(
     bin,
     'psql',
-    "printf 'table_name\\trow_count\\nContact\\t106\\nDMSceneResponse\\t0\\nDMSession\\t0\\nDungeonMasterScenario\\t0\\nInteraction\\t13\\n_prisma_migrations\\t4\\n'",
+    "printf 'table_name\\trow_count\\nContact\\t106\\nDMSceneResponse\\t0\\nDMSession\\t0\\nDungeonMasterScenario\\t0\\nInteraction\\t13\\n_prisma_migrations\\t5\\n'",
   );
 
   const result = run('scripts/verify-post-migration-counts.mjs', {
@@ -299,7 +299,7 @@ test('post-migration verifier preserves old counts and permits only known empty 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(
     result.stdout.trim(),
-    'migration_counts_status=preserved existing_tables=2 new_empty_tables=3 migrations=4',
+    'migration_counts_status=preserved existing_tables=2 new_empty_tables=3 migrations=5',
   );
   assert.doesNotMatch(`${result.stdout}${result.stderr}`, /secret-user|secret-password/);
 });
@@ -313,7 +313,7 @@ test('post-migration verifier rejects changed rows and populated new tables', ()
   executable(
     bin,
     'psql',
-    "printf 'table_name\\trow_count\\nContact\\t105\\nDMSceneResponse\\t1\\nDMSession\\t0\\nDungeonMasterScenario\\t0\\nInteraction\\t13\\n_prisma_migrations\\t4\\n'",
+    "printf 'table_name\\trow_count\\nContact\\t105\\nDMSceneResponse\\t1\\nDMSession\\t0\\nDungeonMasterScenario\\t0\\nInteraction\\t13\\n_prisma_migrations\\t5\\n'",
   );
 
   const result = run('scripts/verify-post-migration-counts.mjs', {
@@ -335,12 +335,12 @@ test('post-migration verifier preserves DM tables during ongoing migrations', ()
   const before = join(dir, 'before.tsv');
   writeFileSync(
     before,
-    'table_name\trow_count\nContact\t106\nDMSceneResponse\t2\nDMSession\t1\nDungeonMasterScenario\t3\nInteraction\t13\n_prisma_migrations\t3\n',
+    'table_name\trow_count\nContact\t106\nDMSceneResponse\t2\nDMSession\t1\nDungeonMasterScenario\t3\nInteraction\t13\n_prisma_migrations\t4\n',
   );
   executable(
     bin,
     'psql',
-    "printf 'table_name\\trow_count\\nContact\\t106\\nDMSceneResponse\\t2\\nDMSession\\t1\\nDungeonMasterScenario\\t3\\nInteraction\\t13\\n_prisma_migrations\\t4\\n'",
+    "printf 'table_name\\trow_count\\nContact\\t106\\nDMSceneResponse\\t2\\nDMSession\\t1\\nDungeonMasterScenario\\t3\\nInteraction\\t13\\n_prisma_migrations\\t5\\n'",
   );
 
   const result = run('scripts/verify-post-migration-counts.mjs', {
@@ -354,8 +354,26 @@ test('post-migration verifier preserves DM tables during ongoing migrations', ()
   assert.equal(result.status, 0, result.stderr);
   assert.equal(
     result.stdout.trim(),
-    'migration_counts_status=preserved existing_tables=5 new_empty_tables=0 migrations=4',
+    'migration_counts_status=preserved existing_tables=5 new_empty_tables=0 migrations=5',
   );
+});
+
+test('contact provenance migration is forward-only and owner-scoped', () => {
+  const migration = resolve(
+    root,
+    'services/api/prisma/migrations/20260716120000_add_contact_provenance/migration.sql',
+  );
+  assert.equal(existsSync(migration), true, 'contact provenance migration is missing');
+  const sql = readFileSync(migration, 'utf8');
+
+  assert.match(sql, /ADD COLUMN "groups" TEXT\[\]/);
+  assert.match(sql, /ADD COLUMN "isDemo" BOOLEAN NOT NULL DEFAULT false/);
+  assert.match(sql, /ADD COLUMN "sourceSystem" TEXT/);
+  assert.match(sql, /ADD COLUMN "sourceId" TEXT/);
+  assert.match(sql, /ADD CONSTRAINT "Contact_source_pair_check" CHECK/);
+  assert.match(sql, /CREATE UNIQUE INDEX "Contact_ownerId_sourceSystem_sourceId_key"/);
+  assert.match(sql, /CREATE INDEX "Contact_ownerId_isDemo_idx"/);
+  assert.doesNotMatch(sql, /UPDATE\s+"Contact"\s+SET\s+"isDemo"/i);
 });
 
 test('schema comparison reports drift without printing migration SQL or credentials', () => {

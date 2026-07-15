@@ -43,6 +43,7 @@ export class NotificationSchedulerService {
             gte: fiveMinutesAgo,
             lte: now,
           },
+          contact: { isDemo: false },
         },
         include: {
           contact: {
@@ -106,7 +107,11 @@ export class NotificationSchedulerService {
     try {
       // Get all unique user IDs with active celebrations
       const userIds = await this.prisma.contactCelebration.findMany({
-        where: { status: 'active', shouldRemind: true },
+        where: {
+          status: 'active',
+          shouldRemind: true,
+          contact: { isDemo: false },
+        },
         select: { ownerId: true },
         distinct: ['ownerId'],
       });
@@ -123,7 +128,12 @@ export class NotificationSchedulerService {
         userIds.map(async ({ ownerId: userId }) => {
           try {
             const upcoming = await this.prisma.contactCelebration.findMany({
-              where: { ownerId: userId, status: 'active', shouldRemind: true },
+              where: {
+                ownerId: userId,
+                status: 'active',
+                shouldRemind: true,
+                contact: { isDemo: false },
+              },
               include: {
                 contact: { select: { firstName: true, lastName: true } },
                 celebration: { select: { name: true, date: true, calendarType: true } },
@@ -171,6 +181,7 @@ export class NotificationSchedulerService {
         where: {
           status: 'pending',
           scheduledAt: { lt: new Date() },
+          contact: { isDemo: false },
         },
         data: {
           status: 'overdue',

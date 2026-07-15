@@ -272,8 +272,8 @@ export class GamificationService {
       include: {
         _count: {
           select: {
-            contacts: true,
-            interactions: true,
+            contacts: { where: { isDemo: false } },
+            interactions: { where: { contact: { isDemo: false } } },
           },
         },
         achievements: {
@@ -385,8 +385,8 @@ export class GamificationService {
         level: true,
         _count: {
           select: {
-            contacts: true,
-            interactions: true,
+            contacts: { where: { isDemo: false } },
+            interactions: { where: { contact: { isDemo: false } } },
           },
         },
       },

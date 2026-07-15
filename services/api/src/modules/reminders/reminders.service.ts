@@ -39,7 +39,7 @@ export class RemindersService {
     });
 
     // Send notification for birthday, anniversary, or followup reminders
-    if (['birthday', 'anniversary', 'followup'].includes(dto.type)) {
+    if (!contact.isDemo && ['birthday', 'anniversary', 'followup'].includes(dto.type)) {
       const contactName = `${reminder.contact.firstName}${reminder.contact.lastName ? ` ${reminder.contact.lastName}` : ''}`;
       this.notificationsService.sendReminderNotification(userId, {
         contactName,
@@ -102,6 +102,7 @@ export class RemindersService {
           ownerId: userId,
           status: 'pending',
           scheduledAt: { gte: now },
+          contact: { isDemo: false },
         },
         take: 20,
         orderBy: { scheduledAt: 'asc' },
@@ -116,6 +117,7 @@ export class RemindersService {
         where: {
           ownerId: userId,
           scheduledAt: { gte: now, lte: endOfToday },
+          contact: { isDemo: false },
         },
         _count: true,
       }),
@@ -126,6 +128,7 @@ export class RemindersService {
         ownerId: userId,
         status: 'pending',
         scheduledAt: { lt: now },
+        contact: { isDemo: false },
       },
     });
 
@@ -134,6 +137,7 @@ export class RemindersService {
         ownerId: userId,
         status: 'pending',
         scheduledAt: { gte: now, lte: endOfToday },
+        contact: { isDemo: false },
       },
     });
 
@@ -142,6 +146,7 @@ export class RemindersService {
         ownerId: userId,
         status: 'pending',
         scheduledAt: { gte: now, lte: endOfWeek },
+        contact: { isDemo: false },
       },
     });
 
@@ -221,13 +226,22 @@ export class RemindersService {
       },
       include: {
         contact: {
-          select: { id: true, firstName: true, lastName: true, photo: true },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            photo: true,
+            isDemo: true,
+          },
         },
       },
     });
 
     // Send celebration/achievement-style notification on completion
-    if (['birthday', 'anniversary', 'followup'].includes(reminder.type)) {
+    if (
+      !updated.contact.isDemo &&
+      ['birthday', 'anniversary', 'followup'].includes(reminder.type)
+    ) {
       const contactName = `${updated.contact.firstName}${updated.contact.lastName ? ` ${updated.contact.lastName}` : ''}`;
       this.notificationsService.sendReminderNotification(userId, {
         contactName,

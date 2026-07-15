@@ -16,6 +16,7 @@ import { ReminderAgent } from './strategies/reminder-agent.js';
 import { EnrichmentAgent } from './strategies/enrichment-agent.js';
 import { SummaryAgent } from './strategies/summary-agent.js';
 import { SuggestionAgent } from './strategies/suggestion-agent.js';
+import { PrismaService } from '../prisma/prisma.service.js';
 import {
   AgentContext,
   AgentType,
@@ -35,6 +36,7 @@ export class AgentsService {
     private enrichmentAgent: EnrichmentAgent,
     private summaryAgent: SummaryAgent,
     private suggestionAgent: SuggestionAgent,
+    private prisma: PrismaService,
   ) {}
 
   /**
@@ -189,7 +191,9 @@ export class AgentsService {
         this.relationshipAgent.getRecommendations(ctx, { limit: 10 }),
         this.reminderAgent.getUpcomingReminders(ctx, { daysAhead: 14 }),
         this.suggestionAgent.getSuggestions(ctx, { limit: 5 }),
-        this.prisma?.contact?.count({ where: { ownerId: ctx.userId } }) || 0,
+        this.prisma.contact.count({
+          where: { ownerId: ctx.userId, isDemo: false },
+        }),
       ]);
 
       return {
@@ -216,7 +220,4 @@ export class AgentsService {
       };
     }
   }
-
-  // Placeholder - actual Prisma access via individual agents
-  private prisma: any = null;
 }

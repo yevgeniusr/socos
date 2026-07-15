@@ -20,7 +20,9 @@ export class InteractionsService {
       throw new NotFoundException('Contact not found');
     }
 
-    const xpEarned = await this.gamificationService.calculateInteractionXp(dto.type);
+    const xpEarned = contact.isDemo
+      ? 0
+      : await this.gamificationService.calculateInteractionXp(dto.type);
 
     const interaction = await this.prisma.interaction.create({
       data: {
@@ -42,17 +44,25 @@ export class InteractionsService {
       },
     });
 
-    // Update user's XP and check for level up
-    const user = await this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        xp: { increment: xpEarned },
-        lastActiveAt: new Date(),
-      },
-    });
+    const user = contact.isDemo
+      ? await this.prisma.user.findUniqueOrThrow({
+          where: { id: userId },
+          select: { xp: true, level: true },
+        })
+      : await this.prisma.user.update({
+          where: { id: userId },
+          data: {
+            xp: { increment: xpEarned },
+            lastActiveAt: new Date(),
+          },
+        });
 
-    // Check for level up
-    const levelInfo = await this.gamificationService.checkLevelUp(userId, user.xp);
+    const levelInfo = contact.isDemo
+      ? {
+          newLevel: user.level,
+          xpForNextLevel: Math.pow(user.level, 2) * 100,
+        }
+      : await this.gamificationService.checkLevelUp(userId, user.xp);
 
     // Update contact's lastContactedAt
     await this.prisma.contact.update({
@@ -60,8 +70,9 @@ export class InteractionsService {
       data: { lastContactedAt: new Date() },
     });
 
-    // Check for achievements
-    const newAchievements = await this.gamificationService.checkAchievements(userId);
+    const newAchievements = contact.isDemo
+      ? []
+      : await this.gamificationService.checkAchievements(userId);
 
     return {
       interaction: {

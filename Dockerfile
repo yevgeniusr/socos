@@ -47,6 +47,7 @@ WORKDIR /app/services/api
 RUN sed -i 's/"module": "nodenext"/"module": "commonjs"/' tsconfig.json && \
     sed -i 's/"moduleResolution": "nodenext"/"moduleResolution": "node"/' tsconfig.json && \
     pnpm build
+RUN test -f /app/services/api/dist/cli/monica-import.js
 
 FROM node:22-alpine AS runner
 

@@ -30,6 +30,7 @@ export class SuggestionAgent {
         where: { id: ctx.userId },
         include: {
           contacts: {
+            where: { isDemo: false },
             include: {
               interactions: {
                 orderBy: { occurredAt: 'desc' },
@@ -136,7 +137,7 @@ export class SuggestionAgent {
 
     try {
       const contacts = await this.prisma.contact.findMany({
-        where: { ownerId: ctx.userId },
+        where: { ownerId: ctx.userId, isDemo: false },
         include: {
           interactions: {
             include: {
@@ -214,6 +215,7 @@ export class SuggestionAgent {
       const contacts = await this.prisma.contact.findMany({
         where: {
           ownerId: ctx.userId,
+          isDemo: false,
           relationshipScore: { lt: 50 },
         },
         include: {

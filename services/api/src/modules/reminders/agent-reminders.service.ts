@@ -63,7 +63,7 @@ export class AgentRemindersService {
     const reason = input.reason ?? 'all';
 
     const contacts = await this.prisma.contact.findMany({
-      where: { ownerId: userId },
+      where: { ownerId: userId, isDemo: false },
       include: {
         _count: { select: { interactions: true } },
       },
@@ -181,7 +181,7 @@ export class AgentRemindersService {
       where: { id: input.contactId, ownerId: userId },
     });
 
-    if (!contact) {
+    if (!contact || contact.isDemo) {
       return { reminderId: '', success: false };
     }
 

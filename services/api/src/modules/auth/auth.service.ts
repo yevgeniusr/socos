@@ -149,9 +149,9 @@ export class AuthService {
       include: {
         _count: {
           select: {
-            contacts: true,
-            interactions: true,
-            reminders: true,
+            contacts: { where: { isDemo: false } },
+            interactions: { where: { contact: { isDemo: false } } },
+            reminders: { where: { contact: { isDemo: false } } },
             achievements: true,
           },
         },

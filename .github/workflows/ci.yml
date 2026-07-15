@@ -60,7 +60,7 @@ jobs:
         run: docker build -f services/api/Dockerfile -t socos-api:ci .
 
       - name: Verify production API runtime tools
-        run: docker run --rm --entrypoint sh socos-api:ci -c './node_modules/.bin/prisma --version >/dev/null'
+        run: docker run --rm --entrypoint sh socos-api:ci -c './node_modules/.bin/prisma --version >/dev/null && test -f ./dist/cli/monica-import.js'
 
       - name: Verify production API startup and health
         env:

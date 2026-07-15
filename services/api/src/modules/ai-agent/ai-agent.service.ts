@@ -127,7 +127,7 @@ export class AiAgentService {
     const limit = options.limit ?? 3;
     const filterReason = options.reason ?? "all";
 
-    const where: any = { ownerId: ctx.userId };
+    const where: any = { ownerId: ctx.userId, isDemo: false };
     if (ctx.vaultId) {
       where.vaultMemberships = { some: { vaultId: ctx.vaultId } };
     }
@@ -258,7 +258,7 @@ Respond with one reason per line, numbered to match. Do NOT add any prefix or co
     options: { type?: string } = {},
   ): Promise<ScheduleReminderResponse> {
     const contact = await this.prisma.contact.findFirst({
-      where: { id: ctx.contactId, ownerId: ctx.userId },
+      where: { id: ctx.contactId, ownerId: ctx.userId, isDemo: false },
       include: {},
     });
 
@@ -495,7 +495,7 @@ Best regards,
     _request: any,
   ): Promise<AssessRelationshipHealthResponse> {
     const contact = await this.prisma.contact.findFirst({
-      where: { id: ctx.contactId, ownerId: ctx.userId },
+      where: { id: ctx.contactId, ownerId: ctx.userId, isDemo: false },
     });
 
     if (!contact) {

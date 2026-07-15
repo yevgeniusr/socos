@@ -90,6 +90,7 @@ model Contact {
   // Tags & Labels (JSON for flexibility)
   labels String[] @default([])
   tags   String[] @default([])
+  groups String[] @default([])
 
   // Social Links
   socialLinks Json? // { linkedin, twitter, instagram, etc }
@@ -99,6 +100,13 @@ model Contact {
   firstMetContext String?
   lastContactedAt DateTime?
   nextReminderAt  DateTime?
+
+  // Import provenance
+  isDemo          Boolean   @default(false)
+  sourceSystem    String?
+  sourceId        String?
+  sourceUpdatedAt DateTime?
+  importedAt      DateTime?
 
   // Timestamps
   createdAt DateTime @default(now())
@@ -113,9 +121,11 @@ model Contact {
   activities          Activity[]
   contactCelebrations ContactCelebration[]
 
+  @@unique([ownerId, sourceSystem, sourceId])
   // Indexes
   @@index([vaultId])
   @@index([ownerId])
+  @@index([ownerId, isDemo])
   @@index([lastContactedAt])
   @@index([nextReminderAt])
 }
