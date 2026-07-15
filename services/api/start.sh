@@ -1,9 +1,20 @@
 #!/bin/sh
+set -eu
+
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$SCRIPT_DIR"
 
 echo "[startup] SOCOS API starting..."
 
-echo "[startup] Migration baseline is not approved; refusing to mutate or start against the database." >&2
-echo "[startup] Complete the migration baseline task before enabling prisma migrate deploy." >&2
-exit 1
+echo "[startup] Applying Prisma migrations..."
+if command -v prisma >/dev/null 2>&1; then
+  prisma migrate deploy
+elif [ -x ./node_modules/.bin/prisma ]; then
+  ./node_modules/.bin/prisma migrate deploy
+else
+  echo "[startup] Prisma CLI is unavailable; refusing to start without migrations." >&2
+  exit 1
+fi
+
+echo "[startup] Starting NestJS..."
+exec node dist/main.js

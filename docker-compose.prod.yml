@@ -36,9 +36,6 @@ services:
     build:
       context: .
       dockerfile: services/api/Dockerfile
-    depends_on:
-      db:
-        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3001/api/health-check || exit 1"]
       interval: 10s
@@ -61,22 +58,6 @@ services:
       - "traefik.http.routers.api-swwcg80gkw4k0k4oco8w8wgw-https.tls=true"
     expose:
       - "3001"
-    networks:
-      - coolify
-    restart: unless-stopped
-
-  db:
-    image: postgres:15-alpine
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      - POSTGRES_DB=socos
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
     networks:
       - coolify
     restart: unless-stopped
