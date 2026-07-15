@@ -4,14 +4,14 @@ import { RegisterDto, LoginDto, AuthResponseDto, UpdateProfileDto } from './auth
 import * as bcrypt from 'bcryptjs';
 import { JwtService } from '../jwt/jwt.service.js';
 
-// Valid invite codes — separated by commas in INVITE_CODES env var
-// Default codes for initial access
-const DEFAULT_INVITE_CODES = ['socos-founding-2026', 'nanachi-beta'];
-
 function isValidInviteCode(code: string): boolean {
-  const validCodes = process.env.INVITE_CODES
-    ? process.env.INVITE_CODES.split(',').map(c => c.trim())
-    : DEFAULT_INVITE_CODES;
+  const configuredCodes = process.env.INVITE_CODES;
+  if (!configuredCodes) return false;
+
+  const validCodes = configuredCodes
+    .split(',')
+    .map(c => c.trim())
+    .filter(Boolean);
   return validCodes.includes(code);
 }
 
@@ -83,27 +83,6 @@ export class AuthService {
   }
 
   async login(dto: LoginDto): Promise<AuthResponseDto> {
-    // ── Special bypass: fix corrupted hash and allow login for yev's test account ──
-    if (dto.email === 'yev.rachkovan@gmail.com' && dto.password === 'socos2026') {
-      const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
-      if (user) {
-        const hashOk = user.passwordHash && user.passwordHash.length === 60 && user.passwordHash.startsWith('$2b$');
-        if (!hashOk) {
-          // Hash is missing or corrupted — fix it
-          try {
-            const newHash = await bcrypt.hash('socos2026', 10);
-            await this.prisma.user.update({ where: { id: user.id }, data: { passwordHash: newHash } });
-          } catch (hashErr) {
-            // If DB update fails, still allow login — JWT only needs user.id
-            console.warn('[Auth] Could not update corrupted hash:', hashErr);
-          }
-        }
-        const accessToken = this.jwtService.generateToken(user.id);
-        return { accessToken, user: { id: user.id, email: user.email, name: user.name, xp: user.xp, level: user.level } };
-      }
-    }
-
-    // ── Standard login ──
     const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
     if (!user || !user.passwordHash) {
       throw new UnauthorizedException('Invalid credentials');

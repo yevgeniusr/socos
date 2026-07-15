@@ -4,6 +4,8 @@
   "globalEnv": [
     "PORT",
     "NODE_ENV",
+    "JWT_SECRET",
+    "INVITE_CODES",
     "ESLINT_USE_FLAT_CONFIG"
   ],
   "tasks": {

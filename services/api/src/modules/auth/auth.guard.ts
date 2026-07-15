@@ -9,11 +9,15 @@ export class AuthGuard implements CanActivate {
     const request = context.switchToHttp().getRequest();
     const authHeader = request.headers.authorization;
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    if (typeof authHeader !== 'string' || !authHeader.startsWith('Bearer ')) {
       throw new UnauthorizedException('No token provided');
     }
 
-    const token = authHeader.split(' ')[1];
+    const token = authHeader.slice('Bearer '.length).trim();
+    if (!token) {
+      throw new UnauthorizedException('No token provided');
+    }
+
     const decoded = this.jwtService.verifyToken(token);
 
     if (!decoded) {
