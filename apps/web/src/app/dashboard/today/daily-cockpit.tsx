@@ -97,6 +97,7 @@ export default function DailyCockpit() {
   >(null);
   const reminderTriggerRef = useRef<HTMLButtonElement>(null);
   const questTriggerRef = useRef<HTMLButtonElement>(null);
+  const questSuccessFocusRef = useRef<HTMLHeadingElement>(null);
   const intents = useRef(new IntentRegistry());
 
   const closeReminderDialog = useCallback(() => {
@@ -104,10 +105,15 @@ export default function DailyCockpit() {
     window.requestAnimationFrame(() => reminderTriggerRef.current?.focus());
   }, []);
 
-  const closeQuestDialog = useCallback(() => {
-    setSelectedQuest(null);
-    window.requestAnimationFrame(() => questTriggerRef.current?.focus());
-  }, []);
+  const closeQuestDialog = useCallback(
+    (focusTarget: "trigger" | "page" = "trigger") => {
+      if (focusTarget === "page") questSuccessFocusRef.current?.focus();
+      setSelectedQuest(null);
+      if (focusTarget === "trigger")
+        window.requestAnimationFrame(() => questTriggerRef.current?.focus());
+    },
+    []
+  );
 
   const loadBrief = useCallback((signal?: AbortSignal, preserve = false) => {
     if (!preserve) setBrief({ status: "loading" });
@@ -291,7 +297,13 @@ export default function DailyCockpit() {
           <p className="text-xs font-black uppercase text-secondary">
             Personal workspace
           </p>
-          <h1 className="mt-1 text-2xl font-black sm:text-3xl">Today</h1>
+          <h1
+            ref={questSuccessFocusRef}
+            tabIndex={-1}
+            className="mt-1 text-2xl font-black sm:text-3xl"
+          >
+            Today
+          </h1>
           <p className="mt-1 text-sm text-on-surface-variant">
             A bounded view of the relationships that matter now.
           </p>

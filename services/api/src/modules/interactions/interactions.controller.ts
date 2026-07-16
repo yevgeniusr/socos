@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards, Request, Headers } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { InteractionsService } from './interactions.service.js';
 import { CreateInteractionDto, InteractionQueryDto } from './interactions.dto.js';
@@ -16,8 +16,11 @@ export class InteractionsController {
   async create(
     @Request() req: { user: { userId: string } },
     @Body() dto: CreateInteractionDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ) {
-    return this.interactionsService.create(req.user.userId, dto);
+    return idempotencyKey
+      ? this.interactionsService.create(req.user.userId, dto, idempotencyKey)
+      : this.interactionsService.create(req.user.userId, dto);
   }
 
   @Get()

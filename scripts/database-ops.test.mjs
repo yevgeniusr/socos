@@ -291,7 +291,7 @@ test('post-migration verifier supports the current rollout from the pre-agent ba
   executable(
     bin,
     'psql',
-    `printf 'table_name\\trow_count\\nActionOutbox\\t0\\nActionProposal\\t0\\nAgentClient\\t0\\nAgentCredential\\t0\\nAgentIdempotencyRecord\\t0\\nApprovalGrant\\t0\\nCalendarEvent\\t0\\nCalendarSource\\t0\\nCalendarWatch\\t0\\nCityStay\\t0\\nContact\\t106\\nDMSceneResponse\\t2\\nDMSession\\t1\\nDerivedVisit\\t0\\nDiscoveredEvent\\t0\\nDungeonMasterScenario\\t3\\nEventPreference\\t0\\nEventSource\\t0\\nGoogleCalendarConnection\\t0\\nGoogleOAuthAttempt\\t0\\nLocationAlias\\t0\\nLocationDevice\\t0\\nLocationSample\\t0\\nMutationAuditEvent\\t0\\nPersonalDataDeletionAudit\\t0\\n_prisma_migrations\\t${expectedMigrationCount}\\n'`,
+    `printf 'table_name\\trow_count\\nActionOutbox\\t0\\nActionProposal\\t0\\nAgentClient\\t0\\nAgentCredential\\t0\\nAgentIdempotencyRecord\\t0\\nApprovalGrant\\t0\\nCalendarEvent\\t0\\nCalendarSource\\t0\\nCalendarWatch\\t0\\nCityStay\\t0\\nContact\\t106\\nDMSceneResponse\\t2\\nDMSession\\t1\\nDerivedVisit\\t0\\nDiscoveredEvent\\t0\\nDungeonMasterScenario\\t3\\nEventPreference\\t0\\nEventSource\\t0\\nGoogleCalendarConnection\\t0\\nGoogleOAuthAttempt\\t0\\nHumanIdempotencyRecord\\t0\\nLocationAlias\\t0\\nLocationDevice\\t0\\nLocationSample\\t0\\nMutationAuditEvent\\t0\\nPersonalDataDeletionAudit\\t0\\n_prisma_migrations\\t${expectedMigrationCount}\\n'`,
   );
 
   const result = run('scripts/verify-post-migration-counts.mjs', {
@@ -305,7 +305,7 @@ test('post-migration verifier supports the current rollout from the pre-agent ba
   assert.equal(result.status, 0, result.stderr);
   assert.equal(
     result.stdout.trim(),
-    `migration_counts_status=preserved existing_tables=4 new_empty_tables=21 migrations=${expectedMigrationCount}`,
+    `migration_counts_status=preserved existing_tables=4 new_empty_tables=22 migrations=${expectedMigrationCount}`,
   );
 });
 

@@ -35,11 +35,13 @@ import { PersonalContextModule } from './modules/personal-data/personal-context.
 import { LocationModule } from './modules/location/location.module.js';
 import { CalendarModule } from './modules/calendar/calendar.module.js';
 import { EventsModule } from './modules/events/events.module.js';
+import { HumanIdempotencyModule } from './common/human-idempotency.module.js';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
+    HumanIdempotencyModule,
     AgentsModule,
     NotificationsModule,
     NotificationSchedulerModule,

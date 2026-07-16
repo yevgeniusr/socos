@@ -39,6 +39,7 @@ model User {
   agentClients              AgentClient[]
   agentCredentials          AgentCredential[]
   agentIdempotencyRecords   AgentIdempotencyRecord[]
+  humanIdempotencyRecords   HumanIdempotencyRecord[]
   actionProposals           ActionProposal[]
   approvalGrants            ApprovalGrant[]
   mutationAuditEvents       MutationAuditEvent[]
@@ -701,6 +702,23 @@ model AgentIdempotencyRecord {
 
   @@unique([clientId, operation, idempotencyKey])
   @@index([ownerId, clientId])
+  @@index([expiresAt])
+}
+
+model HumanIdempotencyRecord {
+  id             String   @id @default(cuid())
+  ownerId        String
+  owner          User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  operation      String
+  idempotencyKey String
+  requestHash    String
+  status         String   @default("in_progress")
+  response       Json?
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([ownerId, operation, idempotencyKey])
   @@index([expiresAt])
 }
 

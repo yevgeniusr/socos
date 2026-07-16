@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Request, Headers } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { RemindersService } from './reminders.service.js';
 import { CreateReminderDto, UpdateReminderDto, ReminderQueryDto } from './reminders.dto.js';
@@ -16,8 +16,11 @@ export class RemindersController {
   async create(
     @Request() req: { user: { userId: string } },
     @Body() dto: CreateReminderDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ) {
-    return this.remindersService.create(req.user.userId, dto);
+    return idempotencyKey
+      ? this.remindersService.create(req.user.userId, dto, idempotencyKey)
+      : this.remindersService.create(req.user.userId, dto);
   }
 
   @Get()

@@ -16,7 +16,7 @@ import {
   collectProposalContactIds,
   presentProposalHistory,
 } from "./action-proposal.presenter.js";
-import { hashCanonicalJson } from "./canonical-json.js";
+import { canonicalJson, hashCanonicalJson } from "./canonical-json.js";
 
 const PROPOSAL_TTL_MS = 24 * 60 * 60 * 1000;
 const APPROVAL_TTL_MS = 15 * 60 * 1000;
@@ -190,6 +190,7 @@ export class ActionProposalService {
             clientId: true,
             actionType: true,
             payloadHash: true,
+            payload: true,
             preview: true,
             status: true,
             expiresAt: true,
@@ -211,7 +212,23 @@ export class ActionProposalService {
           idempotencyKey: "approval:review",
           payload: proposal.preview,
         });
-        if (!reviewable.success) throw approvalConflict();
+        const executable = agentActionProposalInputSchema.safeParse({
+          actionType: proposal.actionType,
+          idempotencyKey: "approval:payload",
+          payload: proposal.payload,
+        });
+        if (
+          !reviewable.success ||
+          !executable.success ||
+          canonicalJson(reviewable.data.payload) !==
+            canonicalJson(executable.data.payload) ||
+          hashCanonicalJson({
+            actionType: executable.data.actionType,
+            payload: executable.data.payload,
+          }) !== proposal.payloadHash
+        ) {
+          throw approvalConflict();
+        }
 
         const claim = await tx.actionProposal.updateMany({
           where: {
@@ -267,10 +284,7 @@ export class ActionProposalService {
     return { id: proposalId, status: "rejected" as const };
   }
 
-  async validateGrant(
-    principal: AgentPrincipal,
-    binding: ApprovalBinding
-  ) {
+  async validateGrant(principal: AgentPrincipal, binding: ApprovalBinding) {
     const grant = await this.prisma.approvalGrant.findFirst({
       where: {
         id: binding.grantId,

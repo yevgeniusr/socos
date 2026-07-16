@@ -96,6 +96,7 @@ function json(route: Route, body: unknown, status = 200) {
 interface ApiState {
   feedback: Array<{ body: Record<string, unknown>; key: string }>;
   interactionBodies: Array<Record<string, unknown>>;
+  interactionKeys: string[];
   questBodies: Array<Record<string, unknown>>;
   completedReminders: string[];
   reminderQuestCompletionCalls: number;
@@ -103,6 +104,7 @@ interface ApiState {
   failFirstKeep: boolean;
   failFirstSnooze: boolean;
   reminderBodies: Array<Record<string, unknown>>;
+  reminderKeys: string[];
   generateCalls: number;
   releaseFeedback: () => void;
   releaseQuestComplete: () => void;
@@ -119,6 +121,8 @@ async function installApi(
     holdQuestComplete?: boolean;
     holdReminderCreate?: boolean;
     loseFirstReminderQuestResponse?: boolean;
+    loseFirstInteractionResponse?: boolean;
+    loseFirstReminderCreateResponse?: boolean;
     statsMode?: "ready" | "deferred-error";
   } = {}
 ): Promise<ApiState> {
@@ -141,6 +145,7 @@ async function installApi(
   const state: ApiState = {
     feedback: [],
     interactionBodies: [],
+    interactionKeys: [],
     questBodies: [],
     completedReminders: [],
     reminderQuestCompletionCalls: 0,
@@ -148,6 +153,7 @@ async function installApi(
     failFirstKeep: true,
     failFirstSnooze: true,
     reminderBodies: [],
+    reminderKeys: [],
     generateCalls: 0,
     releaseFeedback,
     releaseQuestComplete,
@@ -292,7 +298,17 @@ async function installApi(
       state.reminderBodies.push(
         request.postDataJSON() as Record<string, unknown>
       );
+      state.reminderKeys.push(request.headers()["idempotency-key"] ?? "");
       if (options.holdReminderCreate) await reminderCreateGate;
+      if (
+        options.loseFirstReminderCreateResponse &&
+        state.reminderBodies.length === 1
+      )
+        return json(
+          route,
+          { message: "Synthetic lost reminder response" },
+          503
+        );
       return json(route, { id: "created-reminder" });
     }
     const feedback = url.pathname.match(
@@ -347,6 +363,16 @@ async function installApi(
       state.interactionBodies.push(
         request.postDataJSON() as Record<string, unknown>
       );
+      state.interactionKeys.push(request.headers()["idempotency-key"] ?? "");
+      if (
+        options.loseFirstInteractionResponse &&
+        state.interactionBodies.length === 1
+      )
+        return json(
+          route,
+          { message: "Synthetic lost interaction response" },
+          503
+        );
       return json(route, { interaction: { id: "interaction-evidence" } });
     }
     const questComplete = url.pathname.match(
@@ -485,6 +511,7 @@ test("performs durable cockpit actions with exact contracts", async ({
     title: "Follow up with Synthetic Person",
     scheduledAt: expect.any(String),
   });
+  expect(api.reminderKeys[0]).toMatch(/^[A-Za-z0-9._:-]{8,128}$/);
   await page
     .locator("li")
     .filter({ hasText: "Synthetic upcoming reminder" })
@@ -515,6 +542,8 @@ test("performs durable cockpit actions with exact contracts", async ({
   await expect
     .poll(() => api.questBodies)
     .toContainEqual({ interactionId: "interaction-evidence" });
+  expect(api.interactionKeys[0]).toMatch(/^[A-Za-z0-9._:-]{8,128}$/);
+  await expect(page.getByRole("heading", { name: "Today" })).toBeFocused();
 
   const reminderQuest = page
     .locator("li")
@@ -530,6 +559,7 @@ test("performs durable cockpit actions with exact contracts", async ({
   await expect
     .poll(() => api.questBodies)
     .toContainEqual({ reminderId: "quest-reminder-target" });
+  await expect(page.getByRole("heading", { name: "Today" })).toBeFocused();
 
   await page.getByRole("link", { name: /pending approvals/ }).click();
   await expect(page).toHaveURL(/\/dashboard\/approvals\?status=pending$/);
@@ -544,6 +574,98 @@ test("performs durable cockpit actions with exact contracts", async ({
     .filter({ hasText: "Synthetic invitation" });
   await invitation.getByRole("button", { name: "Reject" }).click();
   await expect.poll(() => api.decisions).toContain("proposal-reject:reject");
+});
+
+test("retries lost committed cockpit POST responses with stable intent keys", async ({
+  page,
+}) => {
+  const api = await installApi(page, {
+    loseFirstInteractionResponse: true,
+    loseFirstReminderCreateResponse: true,
+  });
+  await page.goto("/dashboard/today");
+
+  const person = page
+    .locator("li")
+    .filter({ hasText: "Synthetic Person" })
+    .first();
+  await person.getByRole("button", { name: "Create reminder" }).click();
+  const reminderDialog = page.getByRole("dialog", { name: "Create reminder" });
+  await reminderDialog.getByRole("button", { name: "Create reminder" }).click();
+  await expect(reminderDialog.getByRole("alert")).toContainText(
+    "Synthetic lost reminder response"
+  );
+  await reminderDialog.getByRole("button", { name: "Create reminder" }).click();
+  await expect(reminderDialog).toBeHidden();
+  expect(api.reminderBodies).toHaveLength(2);
+  expect(api.reminderBodies[1]).toEqual(api.reminderBodies[0]);
+  expect(api.reminderKeys[1]).toBe(api.reminderKeys[0]);
+
+  const quest = page
+    .locator("li")
+    .filter({ hasText: "Log a synthetic interaction" });
+  await quest.getByRole("button", { name: "Complete quest" }).click();
+  const interactionDialog = page.getByRole("dialog", {
+    name: "Log a synthetic interaction",
+  });
+  await interactionDialog
+    .getByRole("textbox", { name: "Title" })
+    .fill("Synthetic retry conversation");
+  await interactionDialog
+    .getByRole("textbox", { name: "Notes" })
+    .fill("Synthetic retry notes");
+  await interactionDialog
+    .getByRole("button", { name: "Log and verify" })
+    .click();
+  await expect(interactionDialog.getByRole("alert")).toContainText(
+    "Synthetic lost interaction response"
+  );
+  await interactionDialog
+    .getByRole("button", { name: "Log and verify" })
+    .click();
+  await expect(interactionDialog).toBeHidden();
+  expect(api.interactionBodies).toHaveLength(2);
+  expect(api.interactionBodies[1]).toEqual(api.interactionBodies[0]);
+  expect(api.interactionKeys[1]).toBe(api.interactionKeys[0]);
+  await expect(page.getByRole("heading", { name: "Today" })).toBeFocused();
+});
+
+test("moves focus to the stable page heading after each successful quest", async ({
+  page,
+}) => {
+  await installApi(page);
+  await page.goto("/dashboard/today");
+  const todayHeading = page.getByRole("heading", { name: "Today" });
+
+  const interactionQuest = page
+    .locator("li")
+    .filter({ hasText: "Log a synthetic interaction" });
+  await interactionQuest
+    .getByRole("button", { name: "Complete quest" })
+    .click();
+  const interactionDialog = page.getByRole("dialog", {
+    name: "Log a synthetic interaction",
+  });
+  await interactionDialog.getByRole("textbox", { name: "Title" }).fill("Call");
+  await interactionDialog.getByRole("textbox", { name: "Notes" }).fill("Done");
+  await interactionDialog
+    .getByRole("button", { name: "Log and verify" })
+    .click();
+  await expect(interactionDialog).toBeHidden();
+  await expect(todayHeading).toBeFocused();
+
+  const reminderQuest = page
+    .locator("li")
+    .filter({ hasText: "Complete the synthetic reminder" });
+  await reminderQuest.getByRole("button", { name: "Complete quest" }).click();
+  const reminderDialog = page.getByRole("dialog", {
+    name: "Complete the synthetic reminder",
+  });
+  await reminderDialog
+    .getByRole("button", { name: "Complete and verify" })
+    .click();
+  await expect(reminderDialog).toBeHidden();
+  await expect(todayHeading).toBeFocused();
 });
 
 test("generates only after explicit command and isolates panel failures", async ({

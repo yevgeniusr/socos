@@ -2,6 +2,7 @@ import { NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import type { GamificationService } from "../gamification/gamification.service.js";
 import type { PrismaService } from "../prisma/prisma.service.js";
+import type { HumanIdempotencyService } from "../../common/human-idempotency.service.js";
 import { InteractionType } from "./interactions.dto.js";
 import { InteractionsService } from "./interactions.service.js";
 
@@ -70,11 +71,22 @@ function harness(
     checkAchievements: jest.fn(),
     notifyInteractionRewards: jest.fn().mockResolvedValue(undefined),
   };
+  let committedIntent: unknown;
+  const humanIdempotency = {
+    execute: jest.fn().mockImplementation(
+      async (_ownerId, _operation, _key, _request, execute) => {
+        if (committedIntent) return { value: committedIntent, replayed: true };
+        committedIntent = await execute(tx);
+        return { value: committedIntent, replayed: false };
+      }
+    ),
+  };
   const service = new InteractionsService(
     prisma as unknown as PrismaService,
-    gamification as unknown as GamificationService
+    gamification as unknown as GamificationService,
+    humanIdempotency as unknown as HumanIdempotencyService
   );
-  return { gamification, prisma, service, tx };
+  return { gamification, humanIdempotency, prisma, service, tx };
 }
 
 describe("InteractionsService agent commands", () => {
@@ -554,6 +566,28 @@ describe("InteractionsService human commands", () => {
     expect(tx.user.update).toHaveBeenCalledTimes(1);
     expect(gamification.checkLevelUp).not.toHaveBeenCalled();
     expect(gamification.checkAchievements).not.toHaveBeenCalled();
+  });
+
+  it("reconciles a lost committed response without another interaction or XP award", async () => {
+    const { gamification, humanIdempotency, service, tx } = harness();
+
+    const first = await service.create(
+      ownerId,
+      input,
+      "intent-key-interaction-001"
+    );
+    const retry = await service.create(
+      ownerId,
+      input,
+      "intent-key-interaction-001"
+    );
+
+    expect(retry).toEqual(first);
+    expect(humanIdempotency.execute).toHaveBeenCalledTimes(2);
+    expect(tx.interaction.create).toHaveBeenCalledTimes(1);
+    expect(tx.xpTransaction.create).toHaveBeenCalledTimes(1);
+    expect(tx.user.update).toHaveBeenCalledTimes(1);
+    expect(gamification.notifyInteractionRewards).toHaveBeenCalledTimes(1);
   });
 
   it("notifies from committed achievement metadata and the actual level transition", async () => {

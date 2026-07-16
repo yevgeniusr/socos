@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import { apiJson } from "@/lib/api-client";
 import { getFocusLoopTarget } from "../../contacts/_components/dialog-focus";
+import { IntentRegistry } from "../intent-registry";
 
 function tomorrowLocal() {
   const date = new Date();
@@ -29,6 +30,7 @@ export default function ReminderDialog({
   const [error, setError] = useState("");
   const dialogRef = useRef<HTMLFormElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+  const registry = useRef(new IntentRegistry());
 
   useEffect(() => {
     closeRef.current?.focus();
@@ -66,15 +68,19 @@ export default function ReminderDialog({
     setBusy(true);
     setError("");
     try {
+      const body = {
+        contactId: contact.id,
+        type: "followup",
+        title: title.trim(),
+        scheduledAt: new Date(scheduledAt).toISOString(),
+      };
+      const key = registry.current.keyFor(contact.id, "reminder:create", body);
       await apiJson("/api/reminders", {
         method: "POST",
-        body: JSON.stringify({
-          contactId: contact.id,
-          type: "followup",
-          title: title.trim(),
-          scheduledAt: new Date(scheduledAt).toISOString(),
-        }),
+        headers: { "Idempotency-Key": key },
+        body: JSON.stringify(body),
       });
+      registry.current.resolve(contact.id, "reminder:create", body);
       onClose();
       void onSuccess().catch(() => undefined);
     } catch (reason) {

@@ -25,7 +25,7 @@ export default function QuestCompletionDialog({
   onSuccess,
 }: {
   quest: Quest;
-  onClose: () => void;
+  onClose: (focusTarget?: "trigger" | "page") => void;
   onSuccess: () => Promise<void>;
 }) {
   const [action, setAction] = useState<QuestAction | null>(null);
@@ -120,24 +120,32 @@ export default function QuestCompletionDialog({
     try {
       let id = evidenceId;
       if (!id) {
+        const body = {
+          type,
+          title: title.trim(),
+          content: notes.trim(),
+          occurredAt: new Date(occurredAt).toISOString(),
+        };
+        const key = registry.current.keyFor(
+          action.contact.id,
+          "interaction:create",
+          body
+        );
         const created = await apiJson<InteractionResponse>(
           `/api/contacts/${encodeURIComponent(action.contact.id)}/interactions`,
           {
             method: "POST",
-            body: JSON.stringify({
-              type,
-              title: title.trim(),
-              content: notes.trim(),
-              occurredAt: new Date(occurredAt).toISOString(),
-            }),
+            headers: { "Idempotency-Key": key },
+            body: JSON.stringify(body),
           }
         );
+        registry.current.resolve(action.contact.id, "interaction:create", body);
         id = created.interaction.id;
         setEvidenceId(id);
       }
       await completeQuest(id);
+      onClose("page");
       await onSuccess();
-      onClose();
     } catch (reason) {
       setError(
         reason instanceof Error
@@ -172,8 +180,8 @@ export default function QuestCompletionDialog({
         setEvidenceId(id);
       }
       await completeQuest(id);
+      onClose("page");
       await onSuccess();
-      onClose();
     } catch (reason) {
       setError(
         reason instanceof Error
@@ -213,7 +221,7 @@ export default function QuestCompletionDialog({
             ref={closeRef}
             type="button"
             disabled={busy}
-            onClick={onClose}
+            onClick={() => onClose()}
             aria-label="Close"
             className="flex size-11 items-center justify-center rounded-lg"
           >

@@ -128,7 +128,10 @@ describe("ContactsController route ordering", () => {
       const baseUrl = `http://127.0.0.1:${address.port}/contacts/contact-route/interactions`;
       const validResponse = await fetch(baseUrl, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "intent-key-interaction-001",
+        },
         body: JSON.stringify({
           type: InteractionType.NOTE,
           title: "Synthetic note",
@@ -150,7 +153,8 @@ describe("ContactsController route ordering", () => {
           contactId: "contact-route",
           type: InteractionType.NOTE,
           title: "Synthetic note",
-        }
+        },
+        "intent-key-interaction-001"
       );
       expect(callerOwnedContactResponse.status).toBe(400);
       expect(interactionsService.create).toHaveBeenCalledTimes(1);

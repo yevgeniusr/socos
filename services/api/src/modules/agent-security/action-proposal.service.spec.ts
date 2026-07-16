@@ -12,6 +12,15 @@ const principal: AgentPrincipal = {
   clientName: "Hermes Synthetic",
   scopes: ["proposals:write"],
 };
+const messagePayload = {
+  contactId: "contact-synthetic",
+  channel: "social" as const,
+  body: "Synthetic draft",
+};
+const messagePayloadHash = hashCanonicalJson({
+  actionType: "message",
+  payload: messagePayload,
+});
 
 function harness() {
   const tx = {
@@ -88,9 +97,9 @@ describe("ActionProposalService", () => {
       }),
       select: expect.any(Object),
     });
-    expect(JSON.stringify(tx.actionProposal.create.mock.calls[0][0])).not.toContain(
-      "proposal:message:001"
-    );
+    expect(
+      JSON.stringify(tx.actionProposal.create.mock.calls[0][0])
+    ).not.toContain("proposal:message:001");
   });
 
   it("rejects references outside the authenticated owner", async () => {
@@ -135,12 +144,9 @@ describe("ActionProposalService", () => {
       ownerId: principal.ownerId,
       clientId: principal.clientId,
       actionType: "message",
-      payloadHash: "a".repeat(64),
-      preview: {
-        contactId: "contact-synthetic",
-        channel: "social",
-        body: "Synthetic draft",
-      },
+      payloadHash: messagePayloadHash,
+      payload: messagePayload,
+      preview: messagePayload,
       status: "pending",
       expiresAt: new Date("2026-07-16T13:00:00.000Z"),
     });
@@ -151,13 +157,16 @@ describe("ActionProposalService", () => {
         ...data,
         proposal: {
           actionType: "message",
-          payloadHash: "a".repeat(64),
-          payload: {},
+          payloadHash: messagePayloadHash,
+          payload: messagePayload,
         },
       })
     );
 
-    const grant = await service.approve(principal.ownerId, "proposal-synthetic");
+    const grant = await service.approve(
+      principal.ownerId,
+      "proposal-synthetic"
+    );
 
     expect(grant).toEqual(
       expect.objectContaining({
@@ -169,7 +178,7 @@ describe("ActionProposalService", () => {
         expiresAt: new Date("2026-07-16T12:15:00.000Z"),
         proposal: expect.objectContaining({
           actionType: "message",
-          payloadHash: "a".repeat(64),
+          payloadHash: messagePayloadHash,
         }),
       })
     );
@@ -192,7 +201,8 @@ describe("ActionProposalService", () => {
       ownerId: principal.ownerId,
       clientId: principal.clientId,
       actionType: "message",
-      payloadHash: "a".repeat(64),
+      payloadHash: messagePayloadHash,
+      payload: messagePayload,
       preview: { contactId: "contact-synthetic", unexpected: "hidden" },
       status: "pending",
       expiresAt: new Date("2026-07-16T13:00:00.000Z"),
@@ -200,6 +210,48 @@ describe("ActionProposalService", () => {
 
     await expect(
       service.approve(principal.ownerId, "proposal-corrupt")
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.actionProposal.updateMany).not.toHaveBeenCalled();
+    expect(tx.approvalGrant.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses a valid preview that does not match the persisted payload", async () => {
+    const { service, tx } = harness();
+    tx.actionProposal.findFirst.mockResolvedValue({
+      id: "proposal-mismatched-preview",
+      ownerId: principal.ownerId,
+      clientId: principal.clientId,
+      actionType: "message",
+      payloadHash: messagePayloadHash,
+      payload: messagePayload,
+      preview: { ...messagePayload, body: "Different reviewed draft" },
+      status: "pending",
+      expiresAt: new Date("2026-07-16T13:00:00.000Z"),
+    });
+
+    await expect(
+      service.approve(principal.ownerId, "proposal-mismatched-preview")
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.actionProposal.updateMany).not.toHaveBeenCalled();
+    expect(tx.approvalGrant.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses a valid payload whose persisted hash no longer matches", async () => {
+    const { service, tx } = harness();
+    tx.actionProposal.findFirst.mockResolvedValue({
+      id: "proposal-mismatched-hash",
+      ownerId: principal.ownerId,
+      clientId: principal.clientId,
+      actionType: "message",
+      payloadHash: "a".repeat(64),
+      payload: messagePayload,
+      preview: messagePayload,
+      status: "pending",
+      expiresAt: new Date("2026-07-16T13:00:00.000Z"),
+    });
+
+    await expect(
+      service.approve(principal.ownerId, "proposal-mismatched-hash")
     ).rejects.toBeInstanceOf(ConflictException);
     expect(tx.actionProposal.updateMany).not.toHaveBeenCalled();
     expect(tx.approvalGrant.create).not.toHaveBeenCalled();

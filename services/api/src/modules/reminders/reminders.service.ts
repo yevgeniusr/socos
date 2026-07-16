@@ -1,7 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
+import { HumanIdempotencyService } from '../../common/human-idempotency.service.js';
 import {
   CreateReminderDto,
   ReminderQueryDto,
@@ -34,6 +35,7 @@ export class RemindersService {
   constructor(
     private prisma: PrismaService,
     private notificationsService: NotificationsService,
+    @Optional() private humanIdempotencyService?: HumanIdempotencyService,
   ) {}
 
   createForAgent(
@@ -50,44 +52,33 @@ export class RemindersService {
     );
   }
 
-  async create(userId: string, dto: CreateReminderDto) {
-    // Verify contact belongs to user
-    const contact = await this.prisma.contact.findFirst({
-      where: { id: dto.contactId, ownerId: userId, isDemo: false },
-    });
-
-    if (!contact || contact.isDemo) {
-      throw new NotFoundException('Contact not found');
+  async create(
+    userId: string,
+    dto: CreateReminderDto,
+    idempotencyKey?: string,
+  ) {
+    if (idempotencyKey) {
+      if (!this.humanIdempotencyService) {
+        throw new Error('Human idempotency service is unavailable.');
+      }
+      const result = await this.humanIdempotencyService.execute(
+        userId,
+        'reminder:create',
+        idempotencyKey,
+        dto,
+        (tx) => this.createForHumanInTransaction(tx, userId, dto),
+      );
+      if (!result.replayed) {
+        this.notifyReminderCreated(userId, dto, result.value);
+      }
+      return result.value;
     }
 
-    const reminder = await this.prisma.reminder.create({
-      data: {
-        contactId: dto.contactId,
-        ownerId: userId,
-        type: dto.type,
-        title: dto.title,
-        description: dto.description,
-        scheduledAt: new Date(dto.scheduledAt),
-        repeatInterval: dto.repeatInterval,
-        isRecurring: dto.isRecurring || false,
-      },
-      include: {
-        contact: {
-          select: { id: true, firstName: true, lastName: true, photo: true },
-        },
-      },
-    });
-
-    // Send notification for birthday, anniversary, or followup reminders
-    if (!contact.isDemo && ['birthday', 'anniversary', 'followup'].includes(dto.type)) {
-      const contactName = `${reminder.contact.firstName}${reminder.contact.lastName ? ` ${reminder.contact.lastName}` : ''}`;
-      this.notificationsService.sendReminderNotification(userId, {
-        contactName,
-        type: dto.type as 'birthday' | 'anniversary' | 'followup',
-        date: new Date(dto.scheduledAt).toLocaleDateString(),
-      }).catch(err => console.error('Failed to send reminder notification:', err));
-    }
-
+    const reminder = await this.prisma.$transaction(
+      (tx) => this.createForHumanInTransaction(tx, userId, dto),
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+    this.notifyReminderCreated(userId, dto, reminder);
     return reminder;
   }
 
@@ -364,6 +355,51 @@ export class RemindersService {
     }
 
     return next;
+  }
+
+  private async createForHumanInTransaction(
+    transaction: Prisma.TransactionClient,
+    userId: string,
+    dto: CreateReminderDto,
+  ) {
+    const contact = await transaction.contact.findFirst({
+      where: { id: dto.contactId, ownerId: userId, isDemo: false },
+    });
+    if (!contact || contact.isDemo) {
+      throw new NotFoundException('Contact not found');
+    }
+
+    return transaction.reminder.create({
+      data: {
+        contactId: dto.contactId,
+        ownerId: userId,
+        type: dto.type,
+        title: dto.title,
+        description: dto.description,
+        scheduledAt: new Date(dto.scheduledAt),
+        repeatInterval: dto.repeatInterval,
+        isRecurring: dto.isRecurring || false,
+      },
+      include: {
+        contact: {
+          select: { id: true, firstName: true, lastName: true, photo: true },
+        },
+      },
+    });
+  }
+
+  private notifyReminderCreated(
+    userId: string,
+    dto: CreateReminderDto,
+    reminder: { contact: { firstName: string; lastName: string | null } },
+  ): void {
+    if (!['birthday', 'anniversary', 'followup'].includes(dto.type)) return;
+    const contactName = `${reminder.contact.firstName}${reminder.contact.lastName ? ` ${reminder.contact.lastName}` : ''}`;
+    void this.notificationsService.sendReminderNotification(userId, {
+      contactName,
+      type: dto.type as 'birthday' | 'anniversary' | 'followup',
+      date: new Date(dto.scheduledAt).toLocaleDateString(),
+    }).catch(err => console.error('Failed to send reminder notification:', err));
   }
 
   private async createForAgentInTransaction(

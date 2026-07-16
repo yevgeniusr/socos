@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Request, Headers } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ContactsService } from './contacts.service.js';
 import { CreateContactDto, UpdateContactDto, ContactQueryDto } from './contacts.dto.js';
@@ -99,9 +99,12 @@ export class ContactsController {
     @Request() req: { user: { userId: string } },
     @Param('id') contactId: string,
     @Body() dto: CreateContactInteractionDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ) {
     const interaction: CreateInteractionDto = { ...dto, contactId };
-    return this.interactionsService.create(req.user.userId, interaction);
+    return idempotencyKey
+      ? this.interactionsService.create(req.user.userId, interaction, idempotencyKey)
+      : this.interactionsService.create(req.user.userId, interaction);
   }
 
   @Get(':id/interactions')

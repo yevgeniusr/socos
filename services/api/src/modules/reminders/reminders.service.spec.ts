@@ -2,6 +2,7 @@ import { NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import type { NotificationsService } from "../notifications/notifications.service.js";
 import type { PrismaService } from "../prisma/prisma.service.js";
+import type { HumanIdempotencyService } from "../../common/human-idempotency.service.js";
 import { ReminderType, RepeatInterval } from "./reminders.dto.js";
 import { RemindersService } from "./reminders.service.js";
 
@@ -77,13 +78,25 @@ function harness(
   const notifications = {
     sendReminderNotification: jest.fn().mockResolvedValue(undefined),
   };
+  let committedIntent: unknown;
+  const humanIdempotency = {
+    execute: jest.fn().mockImplementation(
+      async (_ownerId, _operation, _key, _request, execute) => {
+        if (committedIntent) return { value: committedIntent, replayed: true };
+        committedIntent = await execute(tx);
+        return { value: committedIntent, replayed: false };
+      }
+    ),
+  };
   const service = new RemindersService(
     prisma as unknown as PrismaService,
-    notifications as unknown as NotificationsService
+    notifications as unknown as NotificationsService,
+    humanIdempotency as unknown as HumanIdempotencyService
   );
   return {
     completedReminder,
     notifications,
+    humanIdempotency,
     prisma,
     recurringReminder,
     service,
@@ -180,6 +193,26 @@ describe("RemindersService agent commands", () => {
 
     await service.create(ownerId, input);
 
+    expect(notifications.sendReminderNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it("reconciles a lost committed response without another reminder", async () => {
+    const { humanIdempotency, notifications, service, tx } = harness();
+
+    const first = await service.create(
+      ownerId,
+      input,
+      "intent-key-reminder-001"
+    );
+    const retry = await service.create(
+      ownerId,
+      input,
+      "intent-key-reminder-001"
+    );
+
+    expect(retry).toEqual(first);
+    expect(humanIdempotency.execute).toHaveBeenCalledTimes(2);
+    expect(tx.reminder.create).toHaveBeenCalledTimes(1);
     expect(notifications.sendReminderNotification).toHaveBeenCalledTimes(1);
   });
 

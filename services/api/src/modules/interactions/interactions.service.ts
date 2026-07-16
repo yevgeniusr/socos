@@ -1,8 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { GamificationService } from '../gamification/gamification.service.js';
 import type { InteractionRewardNotifications } from '../gamification/gamification.service.js';
+import { HumanIdempotencyService } from '../../common/human-idempotency.service.js';
 import {
   CreateInteractionDto,
   InteractionQueryDto,
@@ -60,6 +61,7 @@ export class InteractionsService {
   constructor(
     private prisma: PrismaService,
     private gamificationService: GamificationService,
+    @Optional() private humanIdempotencyService?: HumanIdempotencyService,
   ) {}
 
   async createForAgent(
@@ -76,18 +78,43 @@ export class InteractionsService {
     return this.toAgentResult(result);
   }
 
-  async create(userId: string, dto: CreateInteractionDto) {
+  async create(
+    userId: string,
+    dto: CreateInteractionDto,
+    idempotencyKey?: string,
+  ) {
+    if (idempotencyKey) {
+      if (!this.humanIdempotencyService) {
+        throw new Error('Human idempotency service is unavailable.');
+      }
+      const result = await this.humanIdempotencyService.execute(
+        userId,
+        'interaction:create',
+        idempotencyKey,
+        dto,
+        async (tx) => {
+          const write = await this.createForAgentInTransaction(tx, userId, dto);
+          return {
+            response: this.toHumanResult(write),
+            rewardNotifications: write.rewardNotifications,
+          };
+        },
+      );
+      if (!result.replayed) {
+        this.notifyInteractionRewards(userId, result.value.rewardNotifications);
+      }
+      return result.value.response;
+    }
+
     const result = await this.prisma.$transaction(
       (tx) => this.createForAgentInTransaction(tx, userId, dto),
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
     );
+    this.notifyInteractionRewards(userId, result.rewardNotifications);
+    return this.toHumanResult(result);
+  }
 
-    void this.gamificationService
-      .notifyInteractionRewards(userId, result.rewardNotifications)
-      .catch((err) =>
-        console.error('Failed to send interaction reward notifications:', err)
-      );
-
+  private toHumanResult(result: InteractionWriteResult) {
     return {
       interaction: {
         id: result.interactionId,
@@ -103,6 +130,17 @@ export class InteractionsService {
       },
       newAchievements: result.newAchievements,
     };
+  }
+
+  private notifyInteractionRewards(
+    userId: string,
+    rewardNotifications: InteractionRewardNotifications,
+  ): void {
+    void this.gamificationService
+      .notifyInteractionRewards(userId, rewardNotifications)
+      .catch((err) =>
+        console.error('Failed to send interaction reward notifications:', err)
+      );
   }
 
   async findAll(userId: string, query: InteractionQueryDto) {
