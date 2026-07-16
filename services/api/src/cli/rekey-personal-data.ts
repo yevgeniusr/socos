@@ -204,8 +204,9 @@ export class PrismaPersonalDataRekeyStore implements PersonalDataRekeyStore {
   async transaction<T>(
     callback: (transaction: PersonalDataRekeyTransaction) => Promise<T>
   ): Promise<T> {
-    return this.prisma.$transaction((prisma) =>
-      callback(new PrismaPersonalDataRekeyTransaction(prisma))
+    return this.prisma.$transaction(
+      (prisma) => callback(new PrismaPersonalDataRekeyTransaction(prisma)),
+      { maxWait: 10_000, timeout: 120_000 }
     );
   }
 

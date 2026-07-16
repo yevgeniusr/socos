@@ -325,6 +325,52 @@ describe("personal data rekey command", () => {
       'ORDER BY "pkceKeyVersion", "id"'
     );
     expect(queryRaw.mock.calls[0].slice(1)).toEqual([1, "cursor", 10]);
+    expect((prisma.$transaction as jest.Mock).mock.calls[0][1]).toEqual({
+      maxWait: 10_000,
+      timeout: 120_000,
+    });
+  });
+
+  it("issues compare-and-set SQL with Buffer values and the old key version", async () => {
+    const executeRaw = jest.fn().mockResolvedValue(1);
+    const prisma = {
+      $transaction: jest.fn(async (callback) =>
+        callback({ $executeRawUnsafe: executeRaw })
+      ),
+      $disconnect: jest.fn(),
+    } as unknown as PrismaClient;
+    const store = new PrismaPersonalDataRekeyStore(prisma);
+    const replacement = {
+      ciphertext: Buffer.from([1, 2, 3]),
+      iv: Buffer.alloc(12, 4),
+      tag: Buffer.alloc(16, 5),
+      keyVersion: 2,
+    };
+
+    const updated = await store.transaction((transaction) =>
+      transaction.compareAndSet(
+        PERSONAL_DATA_ENVELOPES[0],
+        "synthetic-row",
+        1,
+        replacement
+      )
+    );
+
+    expect(updated).toBe(true);
+    expect(executeRaw.mock.calls[0][0]).toContain(
+      'WHERE "id" = $5 AND "pkceKeyVersion" = $6'
+    );
+    expect(executeRaw.mock.calls[0].slice(1)).toEqual([
+      replacement.ciphertext,
+      replacement.iv,
+      replacement.tag,
+      2,
+      "synthetic-row",
+      1,
+    ]);
+    expect(executeRaw.mock.calls[0].slice(1, 4).every(Buffer.isBuffer)).toBe(
+      true
+    );
   });
 
   it("uses compare-and-set and reports contention without overwriting", async () => {
@@ -342,6 +388,67 @@ describe("personal data rekey command", () => {
 
     expect(result).toEqual({ scanned: 1, rekeyed: 0, contended: 1 });
     expect(store.rows.get("GoogleOAuthAttempt.pkce")?.[0]).toEqual(original);
+  });
+
+  it("recovers a contended source-version row behind the cursor on a fresh invocation", async () => {
+    const store = new MemoryRekeyStore();
+    const cipher = new PersonalDataCipherService(config());
+    store.seed(
+      0,
+      ["a", "b", "c"].map((id) => encryptedRow(cipher, 0, id))
+    );
+    store.contendIds.add("a");
+
+    const first = await runPersonalDataRekey(
+      { from: 1, to: 2, batchSize: 2, dryRun: false },
+      store,
+      cipher
+    );
+
+    expect(first).toEqual({ scanned: 3, rekeyed: 2, contended: 1 });
+    expect(
+      store.rows.get("GoogleOAuthAttempt.pkce")?.map((row) => row.keyVersion)
+    ).toEqual([1, 2, 2]);
+
+    const resumedStore = new MemoryRekeyStore();
+    resumedStore.seed(0, store.rows.get("GoogleOAuthAttempt.pkce")!);
+    const resumed = await runPersonalDataRekey(
+      { from: 1, to: 2, batchSize: 2, dryRun: false },
+      resumedStore,
+      cipher
+    );
+
+    expect(resumed).toEqual({ scanned: 1, rekeyed: 1, contended: 0 });
+    expect(
+      resumedStore.rows
+        .get("GoogleOAuthAttempt.pkce")
+        ?.map((row) => row.keyVersion)
+    ).toEqual([2, 2, 2]);
+  });
+
+  it("excludes nullable envelopes without decrypting or updating", async () => {
+    const store = new MemoryRekeyStore();
+    const cipher = new PersonalDataCipherService(config());
+    const nullableRow = {
+      id: "nullable-row",
+      ownerId: "synthetic-owner",
+      ciphertext: null,
+      iv: null,
+      tag: null,
+      keyVersion: null,
+    } as unknown as PersonalDataEnvelopeRow;
+    store.seed(2, [nullableRow]);
+    const reencrypt = jest.spyOn(cipher, "reencryptToVersion");
+
+    const result = await runPersonalDataRekey(
+      { from: 1, to: 2, batchSize: 10, dryRun: false },
+      store,
+      cipher
+    );
+
+    expect(result).toEqual({ scanned: 0, rekeyed: 0, contended: 0 });
+    expect(reencrypt).not.toHaveBeenCalled();
+    expect(store.updates).toBe(0);
   });
 
   it("resumes after interruption using only remaining source-version rows", async () => {
