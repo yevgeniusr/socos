@@ -341,6 +341,100 @@ test('post-migration verifier supports a seven-migration upgrade and preserves c
   );
 });
 
+test('post-migration verifier supports an eight-migration upgrade with event tables introduced empty', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'socos-count-eight-migration-test-'));
+  const bin = join(dir, 'bin');
+  execFileSync('mkdir', ['-p', bin]);
+  const before = join(dir, 'before.tsv');
+  const expectedMigrationCount = readdirSync(resolve(root, 'services/api/prisma/migrations'))
+    .filter((name) => existsSync(resolve(root, 'services/api/prisma/migrations', name, 'migration.sql')))
+    .length;
+  const beforeMetadata =
+    'table_name\trow_count\nActionOutbox\t1\nActionProposal\t2\nAgentClient\t3\nAgentCredential\t3\nAgentIdempotencyRecord\t4\nApprovalGrant\t1\nCalendarEvent\t0\nCalendarSource\t0\nCalendarWatch\t0\nCityStay\t0\nContact\t106\nDMSceneResponse\t2\nDMSession\t1\nDerivedVisit\t0\nDungeonMasterScenario\t3\nGoogleCalendarConnection\t0\nGoogleOAuthAttempt\t0\nLocationAlias\t0\nLocationDevice\t0\nLocationSample\t0\nMutationAuditEvent\t8\nPersonalDataDeletionAudit\t0\n_prisma_migrations\t8\n';
+  writeFileSync(before, beforeMetadata);
+  executable(
+    bin,
+    'psql',
+    `printf 'table_name\\trow_count\\nActionOutbox\\t1\\nActionProposal\\t2\\nAgentClient\\t3\\nAgentCredential\\t3\\nAgentIdempotencyRecord\\t4\\nApprovalGrant\\t1\\nCalendarEvent\\t0\\nCalendarSource\\t0\\nCalendarWatch\\t0\\nCityStay\\t0\\nContact\\t106\\nDMSceneResponse\\t2\\nDMSession\\t1\\nDerivedVisit\\t0\\nDiscoveredEvent\\t0\\nDungeonMasterScenario\\t3\\nEventPreference\\t0\\nEventSource\\t0\\nGoogleCalendarConnection\\t0\\nGoogleOAuthAttempt\\t0\\nLocationAlias\\t0\\nLocationDevice\\t0\\nLocationSample\\t0\\nMutationAuditEvent\\t8\\nPersonalDataDeletionAudit\\t0\\n_prisma_migrations\\t${expectedMigrationCount}\\n'`,
+  );
+
+  const result = run('scripts/verify-post-migration-counts.mjs', {
+    args: [before],
+    env: {
+      DATABASE_URL: 'postgresql://secret-user:secret-password@example.invalid/socos',
+      PATH: `${bin}:${process.env.PATH}`,
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(
+    result.stdout.trim(),
+    `migration_counts_status=preserved existing_tables=22 new_empty_tables=3 migrations=${expectedMigrationCount}`,
+  );
+});
+
+test('post-migration verifier supports a nine-migration upgrade before event-brief snapshots', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'socos-count-nine-migration-test-'));
+  const bin = join(dir, 'bin');
+  execFileSync('mkdir', ['-p', bin]);
+  const before = join(dir, 'before.tsv');
+  const expectedMigrationCount = readdirSync(resolve(root, 'services/api/prisma/migrations'))
+    .filter((name) => existsSync(resolve(root, 'services/api/prisma/migrations', name, 'migration.sql')))
+    .length;
+  const metadata =
+    'table_name\trow_count\nActionOutbox\t1\nActionProposal\t2\nAgentClient\t3\nAgentCredential\t3\nAgentIdempotencyRecord\t4\nApprovalGrant\t1\nCalendarEvent\t0\nCalendarSource\t0\nCalendarWatch\t0\nCityStay\t0\nContact\t106\nDMSceneResponse\t2\nDMSession\t1\nDerivedVisit\t0\nDiscoveredEvent\t0\nDungeonMasterScenario\t3\nEventPreference\t0\nEventSource\t0\nGoogleCalendarConnection\t0\nGoogleOAuthAttempt\t0\nLocationAlias\t0\nLocationDevice\t0\nLocationSample\t0\nMutationAuditEvent\t8\nPersonalDataDeletionAudit\t0\n_prisma_migrations\t9\n';
+  const afterMetadata =
+    `table_name\trow_count\nActionOutbox\t1\nActionProposal\t2\nAgentClient\t3\nAgentCredential\t3\nAgentIdempotencyRecord\t4\nApprovalGrant\t1\nCalendarEvent\t0\nCalendarSource\t0\nCalendarWatch\t0\nCityStay\t0\nContact\t106\nDMSceneResponse\t2\nDMSession\t1\nDerivedVisit\t0\nDiscoveredEvent\t0\nDungeonMasterScenario\t3\nEventPreference\t0\nEventSource\t0\nGoogleCalendarConnection\t0\nGoogleOAuthAttempt\t0\nLocationAlias\t0\nLocationDevice\t0\nLocationSample\t0\nMutationAuditEvent\t8\nPersonalDataDeletionAudit\t0\n_prisma_migrations\t${expectedMigrationCount}\n`;
+  writeFileSync(before, metadata);
+  executable(
+    bin,
+    'psql',
+    `printf '${afterMetadata.replaceAll('\n', '\\n')}'`,
+  );
+
+  const result = run('scripts/verify-post-migration-counts.mjs', {
+    args: [before],
+    env: {
+      DATABASE_URL: 'postgresql://secret-user:secret-password@example.invalid/socos',
+      PATH: `${bin}:${process.env.PATH}`,
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(
+    result.stdout.trim(),
+    `migration_counts_status=preserved existing_tables=25 new_empty_tables=0 migrations=${expectedMigrationCount}`,
+  );
+});
+
+test('post-migration verifier accepts current-to-current metadata without event-brief tables', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'socos-current-migration-test-'));
+  const bin = join(dir, 'bin');
+  execFileSync('mkdir', ['-p', bin]);
+  const before = join(dir, 'before.tsv');
+  const expectedMigrationCount = readdirSync(resolve(root, 'services/api/prisma/migrations'))
+    .filter((name) => existsSync(resolve(root, 'services/api/prisma/migrations', name, 'migration.sql')))
+    .length;
+  const metadata =
+    `table_name\trow_count\nActionOutbox\t1\nActionProposal\t2\nAgentClient\t3\nAgentCredential\t3\nAgentIdempotencyRecord\t4\nApprovalGrant\t1\nCalendarEvent\t0\nCalendarSource\t0\nCalendarWatch\t0\nCityStay\t0\nContact\t106\nDMSceneResponse\t2\nDMSession\t1\nDerivedVisit\t0\nDiscoveredEvent\t0\nDungeonMasterScenario\t3\nEventPreference\t0\nEventSource\t0\nGoogleCalendarConnection\t0\nGoogleOAuthAttempt\t0\nLocationAlias\t0\nLocationDevice\t0\nLocationSample\t0\nMutationAuditEvent\t8\nPersonalDataDeletionAudit\t0\n_prisma_migrations\t${expectedMigrationCount}\n`;
+  writeFileSync(before, metadata);
+  executable(bin, 'psql', `printf '${metadata.replaceAll('\n', '\\n')}'`);
+
+  const result = run('scripts/verify-post-migration-counts.mjs', {
+    args: [before],
+    env: {
+      DATABASE_URL: 'postgresql://secret-user:secret-password@example.invalid/socos',
+      PATH: `${bin}:${process.env.PATH}`,
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(
+    result.stdout.trim(),
+    `migration_counts_status=preserved existing_tables=25 new_empty_tables=0 migrations=${expectedMigrationCount}`,
+  );
+});
+
 test('post-migration verifier derives migration count and allows calendar location event tables', () => {
   const dir = mkdtempSync(join(tmpdir(), 'socos-calendar-event-migration-test-'));
   const bin = join(dir, 'bin');
@@ -401,6 +495,33 @@ test('post-migration verifier rejects nonzero introduced calendar location event
   assert.match(result.stderr, /Post-migration aggregate verification failed/);
 });
 
+test('post-migration verifier rejects unexpected post-migration tables', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'socos-unexpected-table-test-'));
+  const bin = join(dir, 'bin');
+  execFileSync('mkdir', ['-p', bin]);
+  const before = join(dir, 'before.tsv');
+  writeFileSync(
+    before,
+    'table_name\trow_count\nActionOutbox\t0\nActionProposal\t0\nAgentClient\t0\nAgentCredential\t0\nAgentIdempotencyRecord\t0\nApprovalGrant\t0\nCalendarEvent\t0\nCalendarSource\t0\nCalendarWatch\t0\nCityStay\t0\nContact\t1\nDerivedVisit\t0\nDiscoveredEvent\t0\nEventPreference\t0\nEventSource\t0\nGoogleCalendarConnection\t0\nGoogleOAuthAttempt\t0\nLocationAlias\t0\nLocationDevice\t0\nLocationSample\t0\nMutationAuditEvent\t0\nPersonalDataDeletionAudit\t0\n_prisma_migrations\t9\n',
+  );
+  executable(
+    bin,
+    'psql',
+    "printf 'table_name\\trow_count\\nActionOutbox\\t0\\nActionProposal\\t0\\nAgentClient\\t0\\nAgentCredential\\t0\\nAgentIdempotencyRecord\\t0\\nApprovalGrant\\t0\\nCalendarEvent\\t0\\nCalendarSource\\t0\\nCalendarWatch\\t0\\nCityStay\\t0\\nContact\\t1\\nDerivedVisit\\t0\\nDiscoveredEvent\\t0\\nEventPreference\\t0\\nEventSource\\t0\\nGoogleCalendarConnection\\t0\\nGoogleOAuthAttempt\\t0\\nLocationAlias\\t0\\nLocationDevice\\t0\\nLocationSample\\t0\\nMutationAuditEvent\\t0\\nPersonalDataDeletionAudit\\t0\\nUnexpectedPersonalTable\\t0\\n_prisma_migrations\\t10\\n'",
+  );
+
+  const result = run('scripts/verify-post-migration-counts.mjs', {
+    args: [before],
+    env: {
+      DATABASE_URL: 'postgresql://secret-user:secret-password@example.invalid/socos',
+      PATH: `${bin}:${process.env.PATH}`,
+    },
+  });
+
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /Post-migration aggregate verification failed/);
+});
+
 test('post-migration verifier rejects metadata without migration history', () => {
   const dir = mkdtempSync(join(tmpdir(), 'socos-missing-history-test-'));
   const before = join(dir, 'before.tsv');
@@ -413,6 +534,40 @@ test('post-migration verifier rejects metadata without migration history', () =>
 
   assert.equal(result.status, 65);
   assert.match(result.stderr, /migration history/i);
+});
+
+test('post-migration verifier rejects count-eight metadata missing calendar-location tables', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'socos-missing-calendar-location-metadata-test-'));
+  const before = join(dir, 'before.tsv');
+  writeFileSync(
+    before,
+    'table_name\trow_count\nActionOutbox\t0\nActionProposal\t0\nAgentClient\t0\nAgentCredential\t0\nAgentIdempotencyRecord\t0\nApprovalGrant\t0\nCalendarEvent\t0\nCalendarSource\t0\nCalendarWatch\t0\nCityStay\t0\nContact\t106\nDerivedVisit\t0\nGoogleCalendarConnection\t0\nGoogleOAuthAttempt\t0\nLocationAlias\t0\nLocationDevice\t0\nMutationAuditEvent\t0\nPersonalDataDeletionAudit\t0\n_prisma_migrations\t8\n',
+  );
+
+  const result = run('scripts/verify-post-migration-counts.mjs', {
+    args: [before],
+    env: { DATABASE_URL: 'postgresql://example.invalid/socos' },
+  });
+
+  assert.equal(result.status, 65);
+  assert.match(result.stderr, /calendar-location tables/i);
+});
+
+test('post-migration verifier rejects count-nine metadata missing event-discovery tables', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'socos-missing-event-metadata-test-'));
+  const before = join(dir, 'before.tsv');
+  writeFileSync(
+    before,
+    'table_name\trow_count\nActionOutbox\t0\nActionProposal\t0\nAgentClient\t0\nAgentCredential\t0\nAgentIdempotencyRecord\t0\nApprovalGrant\t0\nCalendarEvent\t0\nCalendarSource\t0\nCalendarWatch\t0\nCityStay\t0\nContact\t106\nDerivedVisit\t0\nDiscoveredEvent\t0\nEventSource\t0\nGoogleCalendarConnection\t0\nGoogleOAuthAttempt\t0\nLocationAlias\t0\nLocationDevice\t0\nLocationSample\t0\nMutationAuditEvent\t0\nPersonalDataDeletionAudit\t0\n_prisma_migrations\t9\n',
+  );
+
+  const result = run('scripts/verify-post-migration-counts.mjs', {
+    args: [before],
+    env: { DATABASE_URL: 'postgresql://example.invalid/socos' },
+  });
+
+  assert.equal(result.status, 65);
+  assert.match(result.stderr, /event-discovery tables/i);
 });
 
 test('post-migration verifier rejects count-seven metadata missing an agent table', () => {
