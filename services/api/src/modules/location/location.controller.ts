@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
   Request,
   UseGuards,
@@ -16,8 +17,12 @@ import {
   type AuthenticatedLocationDevice,
   type AuthenticatedOwnerRequest,
   CreateLocationDeviceDto,
+  CreateLocationAliasDto,
   OwnTracksLocationDto,
+  UpdateLocationAliasDto,
 } from "./location.dto.js";
+import { LocationAliasService } from "./location-alias.service.js";
+import { LocationContextService } from "./location-context.service.js";
 import { LocationDeviceService } from "./location-device.service.js";
 import { LocationIngestService } from "./location-ingest.service.js";
 import { OwnTracksAuthGuard } from "./owntracks-auth.guard.js";
@@ -57,6 +62,66 @@ export class LocationDeviceController {
     @Param("deviceId") deviceId: string
   ): Promise<void> {
     await this.devices.revoke(request.user.userId, deviceId);
+  }
+}
+
+@ApiTags("location-aliases")
+@ApiBearerAuth()
+@Controller("location-aliases")
+@UseGuards(AuthGuard)
+export class LocationAliasController {
+  constructor(private readonly aliases: LocationAliasService) {}
+
+  @Post()
+  create(
+    @Request() request: AuthenticatedOwnerRequest,
+    @Body() input: CreateLocationAliasDto
+  ) {
+    return this.aliases.create(request.user.userId, input);
+  }
+
+  @Get()
+  list(@Request() request: AuthenticatedOwnerRequest) {
+    return this.aliases.list(request.user.userId);
+  }
+
+  @Patch(":aliasId")
+  update(
+    @Request() request: AuthenticatedOwnerRequest,
+    @Param("aliasId") aliasId: string,
+    @Body() input: UpdateLocationAliasDto
+  ) {
+    return this.aliases.update(request.user.userId, aliasId, input);
+  }
+
+  @Delete(":aliasId")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async remove(
+    @Request() request: AuthenticatedOwnerRequest,
+    @Param("aliasId") aliasId: string
+  ): Promise<void> {
+    await this.aliases.remove(request.user.userId, aliasId);
+  }
+}
+
+@ApiTags("location-context")
+@ApiBearerAuth()
+@Controller("location-context")
+@UseGuards(AuthGuard)
+export class LocationContextController {
+  constructor(private readonly context: LocationContextService) {}
+
+  @Get("current")
+  async current(@Request() request: AuthenticatedOwnerRequest) {
+    const value = await this.context.current(request.user.userId);
+    return {
+      source: value.source,
+      city: value.city,
+      countryCode: value.countryCode,
+      timeZone: value.timeZone,
+      distanceCapability: value.distanceCapability,
+      lastSeenAt: value.lastSeenAt,
+    };
   }
 }
 

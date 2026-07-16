@@ -40,6 +40,7 @@ describe("LocationIngestService", () => {
   let config: any;
   let cipher: any;
   let index: any;
+  let derivation: any;
   let service: LocationIngestService;
 
   beforeEach(() => {
@@ -59,7 +60,14 @@ describe("LocationIngestService", () => {
     config = { requireEnabled: jest.fn() };
     cipher = { encrypt: jest.fn().mockReturnValue(ENVELOPE) };
     index = { mac: jest.fn().mockReturnValue("b".repeat(64)) };
-    service = new LocationIngestService(prisma, config, cipher, index);
+    derivation = { recomputeForSample: jest.fn().mockResolvedValue(undefined) };
+    service = new LocationIngestService(
+      prisma,
+      config,
+      cipher,
+      index,
+      derivation
+    );
   });
 
   it("does no DB, crypto, or MAC work when location ingest is disabled", async () => {
@@ -243,6 +251,36 @@ describe("LocationIngestService", () => {
       service.ingest(DEVICE, validLocation(), RECEIVED_AT)
     ).rejects.toThrow("synthetic database failure");
     expect(prisma.locationDevice.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("derives only a newly committed sample and keeps accepted ingest successful if derivation fails", async () => {
+    derivation.recomputeForSample.mockRejectedValue(
+      new Error("synthetic derivation failure")
+    );
+
+    await expect(
+      service.ingest(DEVICE, validLocation(), RECEIVED_AT)
+    ).resolves.toEqual([]);
+
+    const sampleId = tx.locationSample.create.mock.calls[0][0].data.id;
+    expect(derivation.recomputeForSample).toHaveBeenCalledWith(
+      DEVICE.ownerId,
+      DEVICE.id,
+      sampleId
+    );
+    expect(prisma.$transaction.mock.invocationCallOrder[0]).toBeLessThan(
+      derivation.recomputeForSample.mock.invocationCallOrder[0]
+    );
+
+    derivation.recomputeForSample.mockClear();
+    prisma.$transaction.mockRejectedValueOnce({
+      code: "P2002",
+      meta: { target: ["deviceId", "payloadMac"] },
+    });
+    await expect(
+      service.ingest(DEVICE, validLocation(), RECEIVED_AT)
+    ).resolves.toEqual([]);
+    expect(derivation.recomputeForSample).not.toHaveBeenCalled();
   });
 });
 

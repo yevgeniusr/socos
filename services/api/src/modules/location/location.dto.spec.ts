@@ -1,7 +1,11 @@
 import { plainToInstance } from "class-transformer";
 import { validate } from "class-validator";
 import { createApplicationValidationPipe } from "../../common/application-validation.pipe.js";
-import { OwnTracksLocationDto } from "./location.dto.js";
+import {
+  CreateLocationAliasDto,
+  OwnTracksLocationDto,
+  UpdateLocationAliasDto,
+} from "./location.dto.js";
 
 describe("OwnTracksLocationDto", () => {
   const nowSeconds = Math.floor(Date.now() / 1_000);
@@ -95,6 +99,66 @@ describe("OwnTracksLocationDto", () => {
   );
 });
 
-async function validateDto(input: object) {
-  return validate(plainToInstance(OwnTracksLocationDto, input));
+describe("location alias DTOs", () => {
+  it("accepts bounded Unicode aliases and IANA time zones", async () => {
+    expect(
+      await validateDto(
+        {
+          alias: "  Cafe\u0301 District  ",
+          city: "Synthetic City",
+          countryCode: "AE",
+          timeZone: "Asia/Dubai",
+        },
+        CreateLocationAliasDto
+      )
+    ).toHaveLength(0);
+    expect(
+      await validateDto({ city: "Updated City" }, UpdateLocationAliasDto)
+    ).toHaveLength(0);
+  });
+
+  it.each([
+    [
+      "blank alias",
+      { alias: "  ", city: "City", countryCode: "AE", timeZone: "UTC" },
+    ],
+    [
+      "blank city",
+      { alias: "Alias", city: "  ", countryCode: "AE", timeZone: "UTC" },
+    ],
+    [
+      "country casing",
+      { alias: "Alias", city: "City", countryCode: "ae", timeZone: "UTC" },
+    ],
+    [
+      "invalid country",
+      { alias: "Alias", city: "City", countryCode: "A1", timeZone: "UTC" },
+    ],
+    [
+      "invalid time zone",
+      {
+        alias: "Alias",
+        city: "City",
+        countryCode: "AE",
+        timeZone: "Mars/Olympus",
+      },
+    ],
+  ])("rejects %s", async (_name, input) => {
+    expect(await validateDto(input, CreateLocationAliasDto)).not.toHaveLength(
+      0
+    );
+  });
+
+  it("rejects explicit nulls in partial patches", async () => {
+    expect(
+      await validateDto({ alias: null }, UpdateLocationAliasDto)
+    ).not.toHaveLength(0);
+  });
+});
+
+async function validateDto(
+  input: object,
+  metatype: new () => object = OwnTracksLocationDto
+) {
+  return validate(plainToInstance(metatype, input));
 }

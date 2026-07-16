@@ -4,8 +4,11 @@ import {
   IsNumber,
   IsString,
   Length,
+  Matches,
   Max,
+  MaxLength,
   Min,
+  MinLength,
   Validate,
   ValidateIf,
   ValidatorConstraint,
@@ -39,6 +42,26 @@ class ValidCourse implements ValidatorConstraintInterface {
       value >= 0 &&
       value < 360
     );
+  }
+}
+
+@ValidatorConstraint({ name: "nonBlank", async: false })
+class NonBlank implements ValidatorConstraintInterface {
+  validate(value: unknown): boolean {
+    return typeof value === "string" && value.trim().length > 0;
+  }
+}
+
+@ValidatorConstraint({ name: "ianaTimeZone", async: false })
+class IanaTimeZone implements ValidatorConstraintInterface {
+  validate(value: unknown): boolean {
+    if (typeof value !== "string" || value.trim() !== value) return false;
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: value }).format();
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -130,6 +153,64 @@ export class CreateLocationDeviceDto {
   @Min(90)
   @Max(3650)
   derivedRetentionDays?: number;
+}
+
+export class CreateLocationAliasDto {
+  @PreserveJsonType()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(200)
+  @Validate(NonBlank)
+  alias!: string;
+
+  @PreserveJsonType()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(100)
+  @Validate(NonBlank)
+  city!: string;
+
+  @PreserveJsonType()
+  @IsString()
+  @Matches(/^[A-Z]{2}$/)
+  countryCode!: string;
+
+  @PreserveJsonType()
+  @IsString()
+  @MaxLength(100)
+  @Validate(IanaTimeZone)
+  timeZone!: string;
+}
+
+export class UpdateLocationAliasDto {
+  @PreserveJsonType()
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsString()
+  @MinLength(1)
+  @MaxLength(200)
+  @Validate(NonBlank)
+  alias?: string;
+
+  @PreserveJsonType()
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsString()
+  @MinLength(1)
+  @MaxLength(100)
+  @Validate(NonBlank)
+  city?: string;
+
+  @PreserveJsonType()
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsString()
+  @Matches(/^[A-Z]{2}$/)
+  countryCode?: string;
+
+  @PreserveJsonType()
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsString()
+  @MaxLength(100)
+  @Validate(IanaTimeZone)
+  timeZone?: string;
 }
 
 export type AuthenticatedOwnerRequest = { user: { userId: string } };

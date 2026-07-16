@@ -1,6 +1,8 @@
 import { HttpStatus } from "@nestjs/common";
 import { HTTP_CODE_METADATA } from "@nestjs/common/constants";
 import {
+  LocationAliasController,
+  LocationContextController,
   LocationDeviceController,
   OwnTracksController,
 } from "./location.controller.js";
@@ -79,5 +81,66 @@ describe("OwnTracksController", () => {
         OwnTracksController.prototype.ingest
       )
     ).toBe(HttpStatus.OK);
+  });
+});
+
+describe("human location context controllers", () => {
+  const request = { user: { userId: "jwt-owner" } };
+
+  it("derives every alias owner from JWT and forwards presentation DTOs only", async () => {
+    const aliases = {
+      create: jest.fn().mockResolvedValue({}),
+      list: jest.fn().mockResolvedValue([]),
+      update: jest.fn().mockResolvedValue({}),
+      remove: jest.fn().mockResolvedValue(undefined),
+    };
+    const controller = new LocationAliasController(aliases as any);
+    const create = {
+      alias: "Synthetic",
+      city: "City",
+      countryCode: "AE",
+      timeZone: "UTC",
+    };
+    const patch = { city: "Updated" };
+
+    await controller.create(request, create);
+    await controller.list(request);
+    await controller.update(request, "alias-id", patch);
+    await controller.remove(request, "alias-id");
+
+    expect(aliases.create).toHaveBeenCalledWith("jwt-owner", create);
+    expect(aliases.list).toHaveBeenCalledWith("jwt-owner");
+    expect(aliases.update).toHaveBeenCalledWith("jwt-owner", "alias-id", patch);
+    expect(aliases.remove).toHaveBeenCalledWith("jwt-owner", "alias-id");
+  });
+
+  it("returns only the coordinate-free current context whitelist", async () => {
+    const context = {
+      current: jest.fn().mockResolvedValue({
+        source: "sample",
+        city: null,
+        countryCode: null,
+        timeZone: null,
+        distanceCapability: true,
+        lastSeenAt: new Date("2026-07-16T12:00:00.000Z"),
+        origin: { lat: 1, lon: 2 },
+        coordinatesCiphertext: "forbidden",
+      }),
+    };
+    const controller = new LocationContextController(context as any);
+
+    const result = await controller.current(request);
+
+    expect(context.current).toHaveBeenCalledWith("jwt-owner");
+    expect(result).toEqual({
+      source: "sample",
+      city: null,
+      countryCode: null,
+      timeZone: null,
+      distanceCapability: true,
+      lastSeenAt: new Date("2026-07-16T12:00:00.000Z"),
+    });
+    expect(JSON.stringify(result)).not.toContain("lat");
+    expect(JSON.stringify(result)).not.toContain("cipher");
   });
 });

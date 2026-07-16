@@ -8,6 +8,7 @@ import type {
   AuthenticatedLocationDevice,
   OwnTracksLocationDto,
 } from "./location.dto.js";
+import { VisitDerivationService } from "./visit-derivation.service.js";
 
 const PAYLOAD_MAC_PURPOSE = "owntracks-payload";
 const COORDINATES_PURPOSE = "location-sample-coordinates";
@@ -18,7 +19,8 @@ export class LocationIngestService {
     private readonly prisma: PrismaService,
     private readonly config: PersonalDataConfigService,
     private readonly cipher: PersonalDataCipherService,
-    private readonly index: PersonalDataIndexService
+    private readonly index: PersonalDataIndexService,
+    private readonly derivation: VisitDerivationService
   ) {}
 
   async ingest(
@@ -49,6 +51,7 @@ export class LocationIngestService {
       }
     );
 
+    let newlyInserted = false;
     try {
       await this.prisma.$transaction(async (transaction) => {
         const current = await transaction.locationDevice.findFirst({
@@ -88,12 +91,25 @@ export class LocationIngestService {
           });
         }
       });
+      newlyInserted = true;
     } catch (error) {
       if (!isPayloadDuplicate(error)) throw error;
       await this.prisma.locationDevice.updateMany({
         where: monotonicLastSeenWhere(device, recordedAt),
         data: { lastSeenAt: recordedAt },
       });
+    }
+
+    if (newlyInserted) {
+      try {
+        await this.derivation.recomputeForSample(
+          device.ownerId,
+          device.id,
+          sampleId
+        );
+      } catch {
+        // The raw sample is already durable; derived context stabilizes on later samples.
+      }
     }
 
     return [];
