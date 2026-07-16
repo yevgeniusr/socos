@@ -1,5 +1,8 @@
 import { Injectable } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
+import { EventRecommendationService } from "../events/event-recommendation.service.js";
+import type { PlannedEventRecommendation } from "../events/event-recommendation.service.js";
+import { PersonalDataConfigService } from "../personal-data/personal-data-config.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { dateKeyToUtcDate, localDateKey } from "./brief-time.js";
 import {
@@ -13,7 +16,7 @@ import {
 } from "./relationship-health.js";
 import {
   presentBrief,
-  type DailyBriefV1,
+  type DailyBrief,
   type PersistedBriefBatch,
 } from "./briefs.presenter.js";
 
@@ -56,8 +59,8 @@ interface RankedPerson {
 }
 
 interface PlannedItem {
-  kind: "person" | "date";
-  contactId: string;
+  kind: "person" | "date" | "event";
+  contactId: string | null;
   sourceType: string;
   sourceId: string;
   rank: number;
@@ -65,6 +68,9 @@ interface PlannedItem {
   title: string;
   reason: string;
   evidence: Record<string, unknown>;
+  eventStartAt?: Date | null;
+  eventEndAt?: Date | null;
+  eventCity?: string | null;
   quest?: {
     title: string;
     completionType: "interaction" | "reminder";
@@ -126,10 +132,12 @@ function questTargetKey(completionType: string, targetId: string): string {
 export class BriefGeneratorService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly importantDates: ImportantDatesService
+    private readonly importantDates: ImportantDatesService,
+    private readonly eventRecommendations: EventRecommendationService,
+    private readonly personalDataConfig: PersonalDataConfigService
   ) {}
 
-  async generateForOwner(ownerId: string, now: Date): Promise<DailyBriefV1> {
+  async generateForOwner(ownerId: string, now: Date): Promise<DailyBrief> {
     let retryCount = 0;
     while (true) {
       try {
@@ -149,7 +157,7 @@ export class BriefGeneratorService {
   private async generateAttempt(
     ownerId: string,
     now: Date
-  ): Promise<DailyBriefV1> {
+  ): Promise<DailyBrief> {
     const owner = await this.loadOwner(ownerId);
     const localDate = dateKeyToUtcDate(localDateKey(now, owner.timeZone));
     const existing = await this.findBatch(ownerId, localDate);
@@ -190,6 +198,7 @@ export class BriefGeneratorService {
       dates,
       pendingQuestTargets
     );
+    const eventBriefEnabled = this.personalDataConfig.isEnabled("eventBrief");
 
     try {
       const batch = await this.prisma.$transaction(
@@ -218,6 +227,12 @@ export class BriefGeneratorService {
               ownerId,
               plannedQuestTargets
             );
+          const plannedEvents = eventBriefEnabled
+            ? await this.planEventItems(
+                await this.eventRecommendations.recommend(ownerId, now, tx)
+              )
+            : [];
+          const itemsToPersist = [...plannedItems, ...plannedEvents];
 
           const createdBatch = await tx.briefBatch.create({
             data: {
@@ -225,11 +240,11 @@ export class BriefGeneratorService {
               localDate,
               timeZone: owner.timeZone,
               status: "generating",
-              schemaVersion: "1.0",
+              schemaVersion: eventBriefEnabled ? "1.1" : "1.0",
             },
           });
           const persistedItems: Array<{ plan: PlannedItem; id: string }> = [];
-          for (const item of plannedItems) {
+          for (const item of itemsToPersist) {
             const persisted = await tx.briefItem.create({
               data: {
                 batchId: createdBatch.id,
@@ -243,6 +258,9 @@ export class BriefGeneratorService {
                 title: item.title,
                 reason: item.reason,
                 evidence: item.evidence as Prisma.InputJsonObject,
+                eventStartAt: item.eventStartAt,
+                eventEndAt: item.eventEndAt,
+                eventCity: item.eventCity,
                 status: "pending",
               },
             });
@@ -295,7 +313,7 @@ export class BriefGeneratorService {
   async getReadyForOwner(
     ownerId: string,
     now: Date
-  ): Promise<DailyBriefV1 | null> {
+  ): Promise<DailyBrief | null> {
     const owner = await this.prisma.user.findUnique({
       where: { id: ownerId },
       select: { timeZone: true },
@@ -601,5 +619,22 @@ export class BriefGeneratorService {
       };
     });
     return [...personItems, ...dateItems];
+  }
+
+  private planEventItems(events: PlannedEventRecommendation[]): PlannedItem[] {
+    return events.slice(0, 3).map((event, index) => ({
+      kind: "event",
+      contactId: null,
+      sourceType: "discovered_event",
+      sourceId: event.sourceId,
+      rank: index + 1,
+      score: event.score,
+      title: event.title,
+      reason: event.reason,
+      evidence: event.evidence as unknown as Record<string, unknown>,
+      eventStartAt: event.startAt,
+      eventEndAt: event.endAt,
+      eventCity: event.city,
+    }));
   }
 }

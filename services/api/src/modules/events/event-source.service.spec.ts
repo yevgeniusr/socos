@@ -241,4 +241,84 @@ describe("EventSourceService", () => {
       ).rejects.toBeInstanceOf(BadRequestException);
     }
   );
+
+  it("deletes event brief feedback and items before deleting the source in an owner-scoped serializable transaction", async () => {
+    const calls: string[] = [];
+    const tx = {
+      discoveredEvent: {
+        findMany: jest
+          .fn()
+          .mockResolvedValueOnce([
+            { id: "event-1" },
+            { id: "event-2" },
+          ])
+          .mockResolvedValueOnce([]),
+      },
+      briefFeedback: {
+        deleteMany: jest.fn(async () => {
+          calls.push("feedback");
+          return { count: 2 };
+        }),
+      },
+      briefItem: {
+        deleteMany: jest.fn(async () => {
+          calls.push("items");
+          return { count: 2 };
+        }),
+      },
+      eventSource: {
+        deleteMany: jest.fn(async () => {
+          calls.push("source");
+          return { count: 1 };
+        }),
+      },
+    };
+    const prisma = {
+      $transaction: jest.fn(async (callback: any) => callback(tx)),
+    };
+    const service = new EventSourceService(
+      prisma as never,
+      {} as never,
+      {} as never,
+      { requireEnabled: jest.fn() } as never,
+      config,
+      () => "source-id",
+      () => "external-id"
+    );
+
+    await service.remove("owner-1", "source-1");
+
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: "Serializable",
+    });
+    expect(tx.discoveredEvent.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { ownerId: "owner-1", sourceId: "source-1" },
+        select: { id: true },
+        orderBy: { id: "asc" },
+      })
+    );
+    expect(tx.briefFeedback.deleteMany).toHaveBeenCalledWith({
+      where: {
+        ownerId: "owner-1",
+        briefItem: {
+          kind: "event",
+          sourceType: "discovered_event",
+          sourceId: { in: ["event-1", "event-2"] },
+        },
+      },
+    });
+    expect(tx.briefItem.deleteMany).toHaveBeenCalledWith({
+      where: {
+        ownerId: "owner-1",
+        kind: "event",
+        sourceType: "discovered_event",
+        sourceId: { in: ["event-1", "event-2"] },
+      },
+    });
+    expect(tx.eventSource.deleteMany).toHaveBeenCalledWith({
+      where: { id: "source-1", ownerId: "owner-1" },
+    });
+    expect(calls).toEqual(["feedback", "items", "source"]);
+  });
 });

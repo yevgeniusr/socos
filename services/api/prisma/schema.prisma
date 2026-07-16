@@ -570,6 +570,9 @@ model BriefItem {
   title        String
   reason       String
   evidence     Json
+  eventStartAt DateTime?
+  eventEndAt   DateTime?
+  eventCity    String?
   status       String          @default("pending")
   snoozedUntil DateTime?
   actionedAt   DateTime?

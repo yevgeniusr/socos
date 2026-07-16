@@ -62,7 +62,7 @@ The following values may remain plaintext in cloud PostgreSQL because scheduling
 - Calendar start/end/date/time-zone, all-day, transparency, and source primary/selected flags.
 - Location recorded/received times, accuracy, battery, trigger, retention settings, visit time/radius/confidence, and coarse city/country/time-zone.
 - Operator-certified public event title/excerpt/URL/time/venue/address/city/country/coordinates/category/tags.
-- Brief event title/reason and redacted evidence described in Task 13.
+- Brief event title/reason, public event start/end snapshot, coarse event city snapshot, and redacted evidence described in Task 13.
 
 No private calendar/location display string or exact coordinate is included in these exceptions. An ICS host may be enabled only when an operator has certified that its event contents are public; a secret feed URL does not make private event contents eligible for plaintext storage.
 
@@ -642,24 +642,28 @@ When `EVENT_BRIEF_ENABLED` is not literal `true`, new batches remain persisted/p
 
 Event items use `kind='event'`, `contactId=null`, `sourceType='discovered_event'`, and internal `sourceId`. Evidence contains only score components, distance band, conflict result, context source/freshness band, matched public tag names, category, and planned coarse city. It contains no coordinates, exact address-derived context, Calendar identity, MAC, or ciphertext. Event items create no quests.
 
+Deleting an event source deliberately removes event BriefFeedback and event BriefItems linked to that source before deleting the source and cascading DiscoveredEvents. This is the Task 13 deletion exception to byte-equivalent ready-batch retries; a previously ready V1.1 brief can lose event items after its source is removed.
+
 `DailyBriefV1_1` is the V1 shape plus `schemaVersion: '1.1'` and:
 
 ```ts
 events: Array<{
   itemId: string;
   rank: number;
-  eventId: string;
+  source: { type: 'discovered_event'; id: string };
   title: string;
-  startAt: string;
-  endAt: string;
+  startsAt: string;
+  endsAt: string;
   city: string | null;
   reason: string;
   evidence: {
-    score: { time: number; distance: number; interests: number; social: number; contact: number; novelty: number; feedback: number };
+    components: { time: number; distance: number; interests: number; social: number; contact: number; novelty: number; feedback: number };
     distanceBand: '<2' | '2-10' | '10-25' | '25-50' | '>50' | 'unknown';
     conflict: 'clear';
-    contextSource: 'sample' | 'visit' | 'calendar' | 'fallback';
-    contextFreshness: 'fresh' | 'recent' | 'planned' | 'fallback';
+    context: {
+      source: 'sample' | 'visit' | 'calendar' | 'fallback';
+      freshness: 'fresh' | 'recent' | 'planned' | 'fallback';
+    };
     matchedTags: string[];
     category: string | null;
     plannedCity: string | null;

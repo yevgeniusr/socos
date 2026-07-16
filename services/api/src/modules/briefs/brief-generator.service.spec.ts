@@ -1,4 +1,9 @@
 import type { PrismaService } from "../prisma/prisma.service.js";
+import type { PersonalDataConfigService } from "../personal-data/personal-data-config.js";
+import type {
+  EventRecommendationService,
+  PlannedEventRecommendation,
+} from "../events/event-recommendation.service.js";
 import type { ImportantDateCandidate } from "./important-dates.service.js";
 import type { ImportantDatesService } from "./important-dates.service.js";
 import { BriefGeneratorService } from "./brief-generator.service.js";
@@ -58,10 +63,48 @@ function readyBatch(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function eventRecommendation(
+  overrides: Partial<PlannedEventRecommendation> = {}
+): PlannedEventRecommendation {
+  return {
+    kind: "event",
+    contactId: null,
+    sourceType: "discovered_event",
+    sourceId: "event-source-1",
+    rank: 1,
+    score: 91,
+    title: "Synthetic public event",
+    reason: "A public event matches your interests.",
+    startAt: new Date("2026-07-18T18:00:00.000Z"),
+    endAt: new Date("2026-07-18T20:00:00.000Z"),
+    city: "Dubai",
+    evidence: {
+      components: {
+        time: 20,
+        distance: 15,
+        interests: 5,
+        social: 8,
+        contact: 2,
+        novelty: 10,
+        feedback: 0,
+      },
+      distanceBand: "2-10",
+      conflict: "clear",
+      context: { source: "calendar", freshness: "planned" },
+      matchedTags: ["networking"],
+      category: "community",
+      plannedCity: "Dubai",
+    },
+    ...overrides,
+  };
+}
+
 function harness(
   options: {
     contacts?: ReturnType<typeof contact>[];
     dates?: ImportantDateCandidate[];
+    eventRecommendations?: PlannedEventRecommendation[];
+    eventBriefEnabled?: boolean;
     feedback?: Array<Record<string, unknown>>;
     pendingQuests?: Array<Record<string, unknown>>;
     transactionPendingQuests?: Array<Record<string, unknown>>;
@@ -95,7 +138,7 @@ function harness(
   };
   const items: Array<Record<string, unknown>> = [];
   const quests: Array<Record<string, unknown>> = [];
-  const batch = {
+  let batch = {
     id: "generated-brief",
     ownerId,
     schemaVersion: "1.0",
@@ -109,17 +152,18 @@ function harness(
       deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       create: jest
         .fn()
-        .mockImplementation(({ data }) =>
-          Promise.resolve({ ...batch, ...data })
-        ),
-      update: jest.fn().mockImplementation(({ data }) =>
-        Promise.resolve({
+        .mockImplementation(({ data }) => {
+          batch = { ...batch, ...data };
+          return Promise.resolve(batch);
+        }),
+      update: jest.fn().mockImplementation(({ data }) => {
+        batch = { ...batch, ...data };
+        return Promise.resolve({
           ...batch,
-          ...data,
           items: [...items],
           quests: [...quests],
-        })
-      ),
+        });
+      }),
     },
     briefItem: {
       create: jest.fn().mockImplementation(({ data }) => {
@@ -177,12 +221,31 @@ function harness(
   const importantDates = {
     collect: jest.fn().mockResolvedValue(options.dates ?? []),
   };
+  const eventRecommendations = {
+    recommend: jest.fn().mockResolvedValue(options.eventRecommendations ?? []),
+  };
+  const config = {
+    isEnabled: jest.fn(
+      (feature: string) => feature === "eventBrief" && !!options.eventBriefEnabled
+    ),
+  };
   const service = new BriefGeneratorService(
     prisma as unknown as PrismaService,
-    importantDates as unknown as ImportantDatesService
+    importantDates as unknown as ImportantDatesService,
+    eventRecommendations as unknown as EventRecommendationService,
+    config as unknown as PersonalDataConfigService
   );
 
-  return { service, prisma, importantDates, tx, items, quests };
+  return {
+    service,
+    prisma,
+    importantDates,
+    eventRecommendations,
+    config,
+    tx,
+    items,
+    quests,
+  };
 }
 
 describe("BriefGeneratorService", () => {
@@ -656,8 +719,9 @@ describe("BriefGeneratorService", () => {
   });
 
   it("returns an existing ready brief without writes or candidate queries", async () => {
-    const { service, prisma, importantDates } = harness({
+    const { service, prisma, importantDates, eventRecommendations } = harness({
       existing: readyBatch(),
+      eventBriefEnabled: true,
     });
 
     const first = await service.generateForOwner(ownerId, now);
@@ -667,6 +731,7 @@ describe("BriefGeneratorService", () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(prisma.contact.findMany).not.toHaveBeenCalled();
     expect(importantDates.collect).not.toHaveBeenCalled();
+    expect(eventRecommendations.recommend).not.toHaveBeenCalled();
   });
 
   it("returns a byte-equivalent persisted brief on a retry after generation", async () => {
@@ -715,5 +780,139 @@ describe("BriefGeneratorService", () => {
     await expect(service.getReadyForOwner(ownerId, now)).resolves.toBeNull();
 
     expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("preserves byte-equivalent V1 output and never calls event recommendations when the event brief flag is off", async () => {
+    const baseline = harness({
+      contacts: [contact({ id: "contact-1" })],
+      dates: [dateCandidate()],
+      eventBriefEnabled: false,
+    });
+
+    const result = await baseline.service.generateForOwner(ownerId, now);
+
+    expect(baseline.eventRecommendations.recommend).not.toHaveBeenCalled();
+    expect(baseline.tx.briefBatch.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ schemaVersion: "1.0" }),
+      })
+    );
+    expect(JSON.stringify(result)).toBe(
+      JSON.stringify({
+        schemaVersion: "1.0",
+        briefId: "generated-brief",
+        localDate: "2026-07-16",
+        timeZone: "UTC",
+        generatedAt: "2026-07-16T08:00:00.000Z",
+        people: [
+          {
+            itemId: "item-1",
+            rank: 1,
+            contact: { id: "contact-1", name: "Synthetic Person" },
+            health: { score: 50, band: "needs-attention" },
+            lastInteractionAt: "2026-04-17T08:00:00.000Z",
+            reason: "Preferred check-in cadence is due today.",
+            evidence: [
+              { code: "reason_code", value: "cadence_due" },
+              { code: "importance", value: 3 },
+              { code: "days_since_contact", value: 90 },
+              { code: "days_overdue", value: 0 },
+              { code: "pending_task_count", value: 0 },
+              { code: "important_date_days", value: null },
+            ],
+            state: "pending",
+          },
+        ],
+        dates: [
+          {
+            itemId: "item-2",
+            rank: 1,
+            contact: { id: "date-contact", name: "Synthetic Date" },
+            type: "birthday",
+            title: "Synthetic Date's birthday",
+            date: "2026-07-20",
+            daysAway: 4,
+            reason: "Synthetic Date's birthday is in 4 days",
+            state: "pending",
+          },
+        ],
+        quests: [
+          {
+            questId: "quest-1",
+            itemId: "item-1",
+            title: "Reach out to Synthetic Person",
+            completionType: "interaction",
+            xpReward: 15,
+            status: "pending",
+          },
+        ],
+        allowedActions: ["accept", "snooze", "dismiss", "complete"],
+      })
+    );
+  });
+
+  it("persists a V1.1 batch with at most three event items, snapshots, and no event quests", async () => {
+    const events = Array.from({ length: 4 }, (_, index) =>
+      eventRecommendation({
+        sourceId: `event-${index + 1}`,
+        rank: index + 1,
+        title: `Synthetic event ${index + 1}`,
+      })
+    );
+    const { service, tx, items, quests, eventRecommendations } = harness({
+      contacts: [contact({ id: "contact-1" })],
+      eventBriefEnabled: true,
+      eventRecommendations: events,
+    });
+
+    const result = await service.generateForOwner(ownerId, now);
+
+    expect(eventRecommendations.recommend).toHaveBeenCalledWith(
+      ownerId,
+      now,
+      tx
+    );
+    expect(tx.briefBatch.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ schemaVersion: "1.1" }),
+      })
+    );
+    expect(items.filter((item) => item.kind === "event")).toHaveLength(3);
+    expect(items.find((item) => item.kind === "event")).toMatchObject({
+      contactId: null,
+      kind: "event",
+      sourceType: "discovered_event",
+      sourceId: "event-1",
+      eventStartAt: new Date("2026-07-18T18:00:00.000Z"),
+      eventEndAt: new Date("2026-07-18T20:00:00.000Z"),
+      eventCity: "Dubai",
+    });
+    expect(quests).toHaveLength(1);
+    expect(quests.some((quest) => String(quest.targetId).startsWith("event-"))).toBe(
+      false
+    );
+    expect(result.schemaVersion).toBe("1.1");
+    expect((result as any).events).toHaveLength(3);
+  });
+
+  it("re-runs event recommendations inside each P2034 retry transaction", async () => {
+    const serializationConflict = Object.assign(
+      new Error("serialization conflict"),
+      { code: "P2034" }
+    );
+    const { service, prisma, eventRecommendations, tx } = harness({
+      contacts: [contact({ id: "retry-contact" })],
+      eventBriefEnabled: true,
+      eventRecommendations: [eventRecommendation()],
+    });
+    prisma.$transaction.mockImplementationOnce(async (callback) => {
+      await callback(tx);
+      throw serializationConflict;
+    });
+
+    await service.generateForOwner(ownerId, now);
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(eventRecommendations.recommend).toHaveBeenCalledTimes(2);
   });
 });

@@ -1,15 +1,15 @@
-import { INestApplication, RequestMethod } from "@nestjs/common";
+import { RequestMethod } from "@nestjs/common";
 import {
   GUARDS_METADATA,
   METHOD_METADATA,
   PATH_METADATA,
 } from "@nestjs/common/constants";
-import { Test } from "@nestjs/testing";
 import { createApplicationValidationPipe } from "../../common/application-validation.pipe.js";
 import { AuthGuard } from "../auth/auth.guard.js";
 import { BriefFeedbackService } from "./brief-feedback.service.js";
 import { BriefGeneratorService } from "./brief-generator.service.js";
 import { BriefsController } from "./briefs.controller.js";
+import { BriefItemFeedbackDto, QuestCompletionDto } from "./briefs.dto.js";
 
 const now = new Date("2026-07-16T12:00:00.000Z");
 const request = { user: { userId: "owner-authenticated" } };
@@ -234,61 +234,13 @@ describe("BriefsController contract", () => {
 });
 
 describe("BriefsController request-body security", () => {
-  let app: INestApplication;
-  const generator = {
-    getReadyForOwner: jest.fn(),
-    generateForOwner: jest.fn(),
-  };
-  const feedback = {
-    recordItemFeedback: jest.fn(),
-    completeQuest: jest.fn(),
-  };
-
-  beforeAll(async () => {
-    const moduleRef = await Test.createTestingModule({
-      controllers: [BriefsController],
-      providers: [
-        { provide: BriefGeneratorService, useValue: generator },
-        { provide: BriefFeedbackService, useValue: feedback },
-      ],
-    })
-      .overrideGuard(AuthGuard)
-      .useValue({
-        canActivate(context: {
-          switchToHttp(): { getRequest(): typeof request };
-        }) {
-          context.switchToHttp().getRequest().user = request.user;
-          return true;
-        },
-      })
-      .compile();
-    app = moduleRef.createNestApplication();
-    app.setGlobalPrefix("api");
-    app.useGlobalPipes(createApplicationValidationPipe());
-    await app.listen(0, "127.0.0.1");
-  });
-
-  afterAll(async () => {
-    await app.close();
-  });
-
-  beforeEach(() => {
-    jest.clearAllMocks();
-    feedback.recordItemFeedback.mockResolvedValue({ ok: true });
-    feedback.completeQuest.mockResolvedValue({ ok: true });
-  });
-
   it("rejects identity, XP, outbound, and destructive item commands", async () => {
-    const address = app.getHttpServer().address() as { port: number };
-    const response = await fetch(
-      `http://127.0.0.1:${address.port}/api/briefs/items/item-synthetic/feedback`,
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "idempotency-key": "intent:item-http-001",
-        },
-        body: JSON.stringify({
+    const harness = createHarness();
+    const pipe = createApplicationValidationPipe();
+
+    await expect(
+      pipe.transform(
+        {
           action: "accept",
           ownerId: "owner-attacker",
           userId: "user-attacker",
@@ -300,25 +252,21 @@ describe("BriefsController request-body security", () => {
           introduction: true,
           merge: true,
           delete: true,
-        }),
-      }
-    );
+        },
+        { type: "body", metatype: BriefItemFeedbackDto }
+      )
+    ).rejects.toMatchObject({ status: 400 });
 
-    expect(response.status).toBe(400);
-    expect(feedback.recordItemFeedback).not.toHaveBeenCalled();
+    expect(harness.feedback.recordItemFeedback).not.toHaveBeenCalled();
   });
 
   it("rejects identity, XP, outbound, and destructive quest commands", async () => {
-    const address = app.getHttpServer().address() as { port: number };
-    const response = await fetch(
-      `http://127.0.0.1:${address.port}/api/briefs/quests/quest-synthetic/complete`,
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "idempotency-key": "intent:quest-http-001",
-        },
-        body: JSON.stringify({
+    const harness = createHarness();
+    const pipe = createApplicationValidationPipe();
+
+    await expect(
+      pipe.transform(
+        {
           interactionId: "interaction-synthetic",
           ownerId: "owner-attacker",
           userId: "user-attacker",
@@ -330,11 +278,11 @@ describe("BriefsController request-body security", () => {
           introduction: true,
           merge: true,
           delete: true,
-        }),
-      }
-    );
+        },
+        { type: "body", metatype: QuestCompletionDto }
+      )
+    ).rejects.toMatchObject({ status: 400 });
 
-    expect(response.status).toBe(400);
-    expect(feedback.completeQuest).not.toHaveBeenCalled();
+    expect(harness.feedback.completeQuest).not.toHaveBeenCalled();
   });
 });

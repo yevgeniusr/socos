@@ -97,7 +97,7 @@ export class BriefFeedbackService {
       if (!existing) {
         throw error;
       }
-      return this.resolveItemReplay(existing, itemId, requestHash);
+      return this.resolveItemRaceReplay(ownerId, itemId, requestHash, existing);
     }
   }
 
@@ -211,13 +211,13 @@ export class BriefFeedbackService {
         where: { id: itemId, ownerId },
       });
       if (!replayedItem) throw new NotFoundException("Brief item not found");
-      await this.assertNonDemoContact(tx, ownerId, replayedItem.contactId);
+      await this.assertBriefItemResource(tx, ownerId, replayedItem);
       return replay;
     }
 
     const item = await tx.briefItem.findFirst({ where: { id: itemId, ownerId } });
     if (!item) throw new NotFoundException("Brief item not found");
-    await this.assertNonDemoContact(tx, ownerId, item.contactId);
+    await this.assertBriefItemResource(tx, ownerId, item);
     if (
       request.action === "accept" &&
       item.status !== "pending" &&
@@ -453,8 +453,38 @@ export class BriefFeedbackService {
     throw new ConflictException("Stored quest completion type is invalid");
   }
 
+  private async assertBriefItemResource(
+    tx: Pick<Prisma.TransactionClient, "contact" | "discoveredEvent">,
+    ownerId: string,
+    item: {
+      contactId: string | null;
+      kind: string;
+      sourceType: string;
+      sourceId: string | null;
+    }
+  ): Promise<void> {
+    if (!item.contactId) {
+      if (
+        item.kind !== "event" ||
+        item.sourceType !== "discovered_event" ||
+        !item.sourceId
+      ) {
+        throw new NotFoundException("Brief resource not found");
+      }
+      const count = await tx.discoveredEvent.count({
+        where: { id: item.sourceId, ownerId },
+      });
+      if (count !== 1) throw new NotFoundException("Brief resource not found");
+      return;
+    }
+    const count = await tx.contact.count({
+      where: { id: item.contactId, ownerId, isDemo: false },
+    });
+    if (count !== 1) throw new NotFoundException("Brief resource not found");
+  }
+
   private async assertNonDemoContact(
-    tx: Prisma.TransactionClient,
+    tx: Pick<Prisma.TransactionClient, "contact">,
     ownerId: string,
     contactId: string | null
   ): Promise<void> {
@@ -551,6 +581,21 @@ export class BriefFeedbackService {
     }
     const status = actionStatus(existing.action as BriefItemFeedbackAction);
     return itemResult(existing, status);
+  }
+
+  private async resolveItemRaceReplay(
+    ownerId: string,
+    itemId: string,
+    requestHash: string,
+    existing: FeedbackRecord
+  ): Promise<BriefFeedbackResult> {
+    const replay = this.resolveItemReplay(existing, itemId, requestHash);
+    const replayedItem = await this.prisma.briefItem.findFirst({
+      where: { id: itemId, ownerId },
+    });
+    if (!replayedItem) throw new NotFoundException("Brief item not found");
+    await this.assertBriefItemResource(this.prisma, ownerId, replayedItem);
+    return replay;
   }
 }
 

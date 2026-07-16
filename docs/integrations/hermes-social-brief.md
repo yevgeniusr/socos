@@ -1,4 +1,4 @@
-# Hermes Daily Social Brief v1
+# Hermes Daily Social Brief v1/v1.1
 
 Hermes reads a durable, owner-scoped social brief from SOCOS. Use environment
 variables for the API origin and bearer token; never store a token in a command
@@ -14,6 +14,51 @@ curl --fail --silent \
 means Hermes should post nothing and retry after the next scheduler interval.
 An authorized operator may explicitly request idempotent generation with
 `POST /api/briefs/generate`.
+
+Briefs with `schemaVersion: "1.0"` keep the original shape and do not include
+an `events` key. Briefs with `schemaVersion: "1.1"` include `events: []` even
+when no event suggestions are available. REST routes, MCP tool names, reply
+syntax, and mutation request bodies are unchanged; use the event `itemId` for
+accept, snooze, and dismiss just like person/date items.
+
+Each V1.1 event contains a public snapshot:
+
+```ts
+{
+  itemId: string;
+  rank: number;
+  source: { type: "discovered_event"; id: string };
+  title: string;
+  startsAt: string;
+  endsAt: string;
+  city: string | null;
+  reason: string;
+  evidence: {
+    components: {
+      time: number;
+      distance: number;
+      interests: number;
+      social: number;
+      contact: number;
+      novelty: number;
+      feedback: number;
+    };
+    distanceBand: "<2" | "2-10" | "10-25" | "25-50" | ">50" | "unknown";
+    conflict: "clear";
+    context: {
+      source: "sample" | "visit" | "calendar" | "fallback";
+      freshness: "fresh" | "recent" | "planned" | "fallback";
+    };
+    matchedTags: string[];
+    category: string | null;
+    plannedCity: string | null;
+  };
+  state: "pending" | "accepted" | "snoozed" | "dismissed";
+}
+```
+
+Event items never create quests. Completing quests remains limited to person/date
+brief quests backed by verified interaction or reminder evidence.
 
 ## Reply Mapping
 
@@ -38,6 +83,6 @@ award XP.
 
 ## Safety Boundary
 
-Daily Brief v1 can read recommendations, record item feedback, and submit CRM
+Daily Brief v1/v1.1 can read recommendations, record item feedback, and submit CRM
 evidence for quest completion. It cannot send a message, address a recipient,
 create an invitation or introduction, merge records, or delete records.

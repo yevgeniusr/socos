@@ -52,6 +52,24 @@ describe('agent interface constants', () => {
 });
 
 describe('server-owned contracts', () => {
+  it('exposes the versioned daily brief contract from the package root', () => {
+    const brief: publicApi.DailyBrief = {
+      schemaVersion: '1.1',
+      briefId: 'brief-synthetic',
+      localDate: '2026-07-16',
+      timeZone: 'UTC',
+      generatedAt: '2026-07-16T08:00:00.000Z',
+      people: [],
+      dates: [],
+      events: [],
+      quests: [],
+      allowedActions: ['accept', 'snooze', 'dismiss', 'complete'],
+    };
+
+    expect(brief.schemaVersion).toBe('1.1');
+    expect(brief.events).toEqual([]);
+  });
+
   it('parses a strict authenticated principal with unique scopes', () => {
     const principal = {
       ownerId: 'owner-synthetic',

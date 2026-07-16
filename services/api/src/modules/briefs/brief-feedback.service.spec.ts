@@ -22,15 +22,30 @@ type StoredFeedback = {
   createdAt: Date;
 };
 
-function createItemHarness(initialStatus = "pending") {
+function createItemHarness(
+  initialStatus = "pending",
+  options: {
+    item?: Partial<{
+      contactId: string | null;
+      kind: string;
+      sourceType: string;
+      sourceId: string | null;
+    }>;
+    discoveredEventOwnerId?: string | null;
+  } = {}
+) {
   const item = {
     id: "item-synthetic",
     ownerId,
     contactId: "contact-synthetic",
+    kind: "person",
+    sourceType: "contact",
+    sourceId: "contact-synthetic",
     status: initialStatus,
     snoozedUntil:
       initialStatus === "snoozed" ? new Date("2026-07-17T12:00:00.000Z") : null,
     actionedAt: null as Date | null,
+    ...options.item,
   };
   const feedback: StoredFeedback[] = [];
   const userUpdate = jest.fn();
@@ -38,6 +53,14 @@ function createItemHarness(initialStatus = "pending") {
 
   const transactionClient = {
     contact: { count: jest.fn().mockResolvedValue(1) },
+    discoveredEvent: {
+      count: jest.fn(async ({ where }: any) =>
+        where.id === item.sourceId &&
+        where.ownerId === options.discoveredEventOwnerId
+          ? 1
+          : 0
+      ),
+    },
     briefItem: {
       findFirst: jest.fn(async ({ where }: any) =>
         where.id === item.id && where.ownerId === item.ownerId ? item : null
@@ -369,6 +392,90 @@ describe("BriefFeedbackService item feedback", () => {
     ).resolves.toEqual(expect.objectContaining({ status: "accepted" }));
 
     expect(harness.prisma.$transaction).not.toHaveBeenCalled();
+    expect(harness.transactionClient.briefFeedback.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts null contact feedback only for an owner-scoped discovered event item", async () => {
+    const harness = createItemHarness("pending", {
+      item: {
+        contactId: null,
+        kind: "event",
+        sourceType: "discovered_event",
+        sourceId: "event-synthetic",
+      },
+      discoveredEventOwnerId: ownerId,
+    });
+
+    const result = await harness.service.recordItemFeedback(
+      ownerId,
+      harness.item.id,
+      "feedback:event-001",
+      { action: "accept" }
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        itemId: harness.item.id,
+        action: "accept",
+        status: "accepted",
+      })
+    );
+    expect(harness.transactionClient.contact.count).not.toHaveBeenCalled();
+    expect(harness.transactionClient.discoveredEvent.count).toHaveBeenCalledWith(
+      { where: { id: "event-synthetic", ownerId } }
+    );
+  });
+
+  it.each([
+    ["wrong kind", { kind: "person" }],
+    ["wrong source type", { sourceType: "calendar_event" }],
+    ["missing source id", { sourceId: null }],
+  ])("rejects null contact feedback for an event item with %s", async (_label, item) => {
+    const harness = createItemHarness("pending", {
+      item: {
+        contactId: null,
+        kind: "event",
+        sourceType: "discovered_event",
+        sourceId: "event-synthetic",
+        ...item,
+      },
+      discoveredEventOwnerId: ownerId,
+    });
+
+    await expect(
+      harness.service.recordItemFeedback(
+        ownerId,
+        harness.item.id,
+        "feedback:event-002",
+        { action: "accept" }
+      )
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(harness.transactionClient.briefItem.update).not.toHaveBeenCalled();
+  });
+
+  it("validates the event backing record on idempotent replay as well as first mutation", async () => {
+    const harness = createItemHarness("pending", {
+      item: {
+        contactId: null,
+        kind: "event",
+        sourceType: "discovered_event",
+        sourceId: "event-synthetic",
+      },
+      discoveredEventOwnerId: ownerId,
+    });
+    const request = [
+      ownerId,
+      harness.item.id,
+      "feedback:event-003",
+      { action: "dismiss" as const, reason: "Same request" },
+    ] as const;
+
+    await harness.service.recordItemFeedback(...request);
+    harness.transactionClient.discoveredEvent.count.mockResolvedValue(0);
+
+    await expect(
+      harness.service.recordItemFeedback(...request)
+    ).rejects.toBeInstanceOf(NotFoundException);
     expect(harness.transactionClient.briefFeedback.create).toHaveBeenCalledTimes(1);
   });
 });

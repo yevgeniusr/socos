@@ -1,7 +1,7 @@
-import type { DailyBriefV1 } from "@socos/agent-core";
+import type { DailyBrief, DailyBriefEventV1_1, DailyBriefV1 } from "@socos/agent-core";
 import type { BriefItemStatus, QuestStatus } from "./briefs.types.js";
 
-export type { DailyBriefV1 } from "@socos/agent-core";
+export type { DailyBrief, DailyBriefV1 } from "@socos/agent-core";
 
 export type RelationshipHealthBand =
   DailyBriefV1["people"][number]["health"]["band"];
@@ -17,6 +17,9 @@ interface PersistedBriefItem {
   reason: string;
   status: string;
   evidence: unknown;
+  eventStartAt?: Date | null;
+  eventEndAt?: Date | null;
+  eventCity?: string | null;
 }
 
 interface PersistedQuest {
@@ -71,12 +74,55 @@ const dateTypes = new Set([
   "celebration",
   "reminder",
 ]);
+const eventDistanceBands = new Set([
+  "<2",
+  "2-10",
+  "10-25",
+  "25-50",
+  ">50",
+  "unknown",
+]);
+const eventContextSources = new Set(["sample", "visit", "calendar", "fallback"]);
+const eventContextFreshness = new Set(["fresh", "recent", "planned", "fallback"]);
+const eventComponentKeys = [
+  "time",
+  "distance",
+  "interests",
+  "social",
+  "contact",
+  "novelty",
+  "feedback",
+];
+const eventEvidenceKeys = [
+  "components",
+  "distanceBand",
+  "conflict",
+  "context",
+  "matchedTags",
+  "category",
+  "plannedCity",
+];
 
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("Invalid brief evidence");
   }
   return value as Record<string, unknown>;
+}
+
+function exactKeys(
+  value: Record<string, unknown>,
+  keys: readonly string[],
+  message: string
+): void {
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  if (
+    actual.length !== expected.length ||
+    actual.some((key, index) => key !== expected[index])
+  ) {
+    throw new Error(message);
+  }
 }
 
 function itemStatus(value: string): BriefItemStatus {
@@ -144,11 +190,51 @@ function dateEvidence(value: unknown): DateEvidence {
   };
 }
 
-export function presentBrief(batch: PersistedBriefBatch): DailyBriefV1 {
+function eventEvidence(value: unknown): DailyBriefEventV1_1["evidence"] {
+  const evidence = record(value);
+  exactKeys(evidence, eventEvidenceKeys, "Invalid event evidence");
+  const components = record(evidence.components);
+  exactKeys(components, eventComponentKeys, "Invalid event evidence");
+  const context = record(evidence.context);
+  exactKeys(context, ["source", "freshness"], "Invalid event evidence");
+
+  if (
+    !eventComponentKeys.every((key) => typeof components[key] === "number") ||
+    !eventDistanceBands.has(evidence.distanceBand as string) ||
+    evidence.conflict !== "clear" ||
+    !eventContextSources.has(context.source as string) ||
+    !eventContextFreshness.has(context.freshness as string) ||
+    !Array.isArray(evidence.matchedTags) ||
+    !evidence.matchedTags.every((tag) => typeof tag === "string") ||
+    (evidence.category !== null && typeof evidence.category !== "string") ||
+    (evidence.plannedCity !== null && typeof evidence.plannedCity !== "string")
+  ) {
+    throw new Error("Invalid event evidence");
+  }
+
+  return {
+    components: Object.fromEntries(
+      eventComponentKeys.map((key) => [key, components[key] as number])
+    ) as DailyBriefEventV1_1["evidence"]["components"],
+    distanceBand:
+      evidence.distanceBand as DailyBriefEventV1_1["evidence"]["distanceBand"],
+    conflict: "clear",
+    context: {
+      source: context.source as DailyBriefEventV1_1["evidence"]["context"]["source"],
+      freshness:
+        context.freshness as DailyBriefEventV1_1["evidence"]["context"]["freshness"],
+    },
+    matchedTags: evidence.matchedTags as string[],
+    category: evidence.category as string | null,
+    plannedCity: evidence.plannedCity as string | null,
+  };
+}
+
+export function presentBrief(batch: PersistedBriefBatch): DailyBrief {
   if (
     batch.status !== "ready" ||
     !batch.generatedAt ||
-    batch.schemaVersion !== "1.0"
+    (batch.schemaVersion !== "1.0" && batch.schemaVersion !== "1.1")
   ) {
     throw new Error("Brief batch is not ready");
   }
@@ -197,10 +283,47 @@ export function presentBrief(batch: PersistedBriefBatch): DailyBriefV1 {
       };
     });
 
+  const events =
+    batch.schemaVersion === "1.1"
+      ? batch.items
+          .filter((item) => item.kind === "event")
+          .sort(
+            (left, right) =>
+              left.rank - right.rank || left.id.localeCompare(right.id)
+          )
+          .map((item) => {
+            if (
+              item.contactId !== null ||
+              item.sourceType !== "discovered_event" ||
+              !item.sourceId ||
+              !item.eventStartAt ||
+              !item.eventEndAt ||
+              item.eventEndAt <= item.eventStartAt
+            ) {
+              throw new Error("Invalid event brief item");
+            }
+            return {
+              itemId: item.id,
+              rank: item.rank,
+              source: { type: "discovered_event" as const, id: item.sourceId },
+              title: item.title,
+              startsAt: item.eventStartAt.toISOString(),
+              endsAt: item.eventEndAt.toISOString(),
+              city: item.eventCity ?? null,
+              reason: item.reason,
+              evidence: eventEvidence(item.evidence),
+              state: itemStatus(item.status),
+            };
+          })
+      : [];
+
   const itemOrder = new Map(
     batch.items.map((item) => [
       item.id,
-      { kind: item.kind === "person" ? 0 : 1, rank: item.rank },
+      {
+        kind: item.kind === "person" ? 0 : item.kind === "date" ? 1 : 2,
+        rank: item.rank,
+      },
     ])
   );
   const quests = [...batch.quests]
@@ -236,7 +359,7 @@ export function presentBrief(batch: PersistedBriefBatch): DailyBriefV1 {
       };
     });
 
-  return {
+  const base: DailyBriefV1 = {
     schemaVersion: "1.0",
     briefId: batch.id,
     localDate: batch.localDate.toISOString().slice(0, 10),
@@ -244,6 +367,19 @@ export function presentBrief(batch: PersistedBriefBatch): DailyBriefV1 {
     generatedAt: batch.generatedAt.toISOString(),
     people,
     dates,
+    quests,
+    allowedActions: ["accept", "snooze", "dismiss", "complete"],
+  };
+  if (batch.schemaVersion === "1.0") return base;
+  return {
+    schemaVersion: "1.1",
+    briefId: batch.id,
+    localDate: batch.localDate.toISOString().slice(0, 10),
+    timeZone: batch.timeZone,
+    generatedAt: batch.generatedAt.toISOString(),
+    people,
+    dates,
+    events,
     quests,
     allowedActions: ["accept", "snooze", "dismiss", "complete"],
   };

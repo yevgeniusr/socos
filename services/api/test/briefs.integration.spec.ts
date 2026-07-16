@@ -75,7 +75,12 @@ async function seedOwner(
 }
 
 function generatorFor(prisma: PrismaService): BriefGeneratorService {
-  return new BriefGeneratorService(prisma, new ImportantDatesService(prisma));
+  return new BriefGeneratorService(
+    prisma,
+    new ImportantDatesService(prisma),
+    { recommend: jest.fn().mockResolvedValue([]) } as never,
+    { isEnabled: jest.fn().mockReturnValue(false) } as never
+  );
 }
 
 describe("BriefFeedbackService PostgreSQL concurrency", () => {

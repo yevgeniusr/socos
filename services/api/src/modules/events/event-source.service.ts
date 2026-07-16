@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { Prisma } from "@prisma/client";
 import type { EncryptedValue } from "../personal-data/personal-data-cipher.service.js";
 import { PersonalDataCipherService } from "../personal-data/personal-data-cipher.service.js";
 import { PersonalDataConfigService } from "../personal-data/personal-data-config.js";
@@ -34,6 +35,8 @@ export const EVENT_EXTERNAL_SOURCE_ID_GENERATOR = Symbol(
 export type EventSourceIdGenerator = () => string;
 
 const URL_ERROR = "Invalid event source URL";
+const EVENT_DELETE_PAGE_SIZE = 500;
+const SERIALIZATION_RETRY_LIMIT = 2;
 
 @Injectable()
 export class EventSourceService {
@@ -173,10 +176,60 @@ export class EventSourceService {
 
   async remove(ownerId: string, id: string): Promise<void> {
     this.personalDataConfig.requireEnabled("eventDiscovery");
-    const deleted = await this.prisma.eventSource.deleteMany({
-      where: { id, ownerId },
-    });
-    if (deleted.count !== 1) throw sourceNotFound();
+    let retryCount = 0;
+    while (true) {
+      try {
+        await this.prisma.$transaction(
+          async (tx) => {
+            let cursor: string | undefined;
+            while (true) {
+              const page = await tx.discoveredEvent.findMany({
+                where: { ownerId, sourceId: id },
+                select: { id: true },
+                orderBy: { id: "asc" },
+                take: EVENT_DELETE_PAGE_SIZE,
+                ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+              });
+              const eventIds = page.map((event) => event.id);
+              if (eventIds.length > 0) {
+                await tx.briefFeedback.deleteMany({
+                  where: {
+                    ownerId,
+                    briefItem: {
+                      kind: "event",
+                      sourceType: "discovered_event",
+                      sourceId: { in: eventIds },
+                    },
+                  },
+                });
+                await tx.briefItem.deleteMany({
+                  where: {
+                    ownerId,
+                    kind: "event",
+                    sourceType: "discovered_event",
+                    sourceId: { in: eventIds },
+                  },
+                });
+              }
+              if (page.length < EVENT_DELETE_PAGE_SIZE) break;
+              cursor = page.at(-1)!.id;
+            }
+
+            const deleted = await tx.eventSource.deleteMany({
+              where: { id, ownerId },
+            });
+            if (deleted.count !== 1) throw sourceNotFound();
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        );
+        return;
+      } catch (error) {
+        if (!isSerializationConflict(error) || retryCount >= SERIALIZATION_RETRY_LIMIT) {
+          throw error;
+        }
+        retryCount += 1;
+      }
+    }
   }
 
   decryptAndRecertify(row: {
@@ -262,6 +315,14 @@ function normalizeOptional(value: unknown, max: number): string | null {
   if ([...normalized].length > max)
     throw new BadRequestException("Invalid event source");
   return normalized || null;
+}
+
+function isSerializationConflict(error: unknown): boolean {
+  return (
+    !!error &&
+    typeof error === "object" &&
+    (error as { code?: string }).code === "P2034"
+  );
 }
 
 function normalizeCountryCode(value: unknown): string | null {

@@ -142,6 +142,45 @@ export interface DailyBriefV1 {
   allowedActions: ['accept', 'snooze', 'dismiss', 'complete'];
 }
 
+export interface DailyBriefEventV1_1 {
+  itemId: string;
+  rank: number;
+  source: { type: 'discovered_event'; id: string };
+  title: string;
+  startsAt: string;
+  endsAt: string;
+  city: string | null;
+  reason: string;
+  evidence: {
+    components: {
+      time: number;
+      distance: number;
+      interests: number;
+      social: number;
+      contact: number;
+      novelty: number;
+      feedback: number;
+    };
+    distanceBand: '<2' | '2-10' | '10-25' | '25-50' | '>50' | 'unknown';
+    conflict: 'clear';
+    context: {
+      source: 'sample' | 'visit' | 'calendar' | 'fallback';
+      freshness: 'fresh' | 'recent' | 'planned' | 'fallback';
+    };
+    matchedTags: string[];
+    category: string | null;
+    plannedCity: string | null;
+  };
+  state: BriefItemState;
+}
+
+export interface DailyBriefV1_1 extends Omit<DailyBriefV1, 'schemaVersion'> {
+  schemaVersion: '1.1';
+  events: DailyBriefEventV1_1[];
+}
+
+export type DailyBrief = DailyBriefV1 | DailyBriefV1_1;
+
 export type BriefItemFeedbackInput =
   | { action: 'accept' }
   | { action: 'snooze'; snoozedUntil: string }

@@ -36,6 +36,10 @@ const eventDiscoveryMigrationPath = resolve(
   root,
   "services/api/prisma/migrations/20260716160000_event_discovery/migration.sql",
 );
+const eventBriefSnapshotsMigrationPath = resolve(
+  root,
+  "services/api/prisma/migrations/20260716170000_event_brief_snapshots/migration.sql",
+);
 const expectedBriefTables = [
   "BriefBatch",
   "BriefItem",
@@ -895,6 +899,15 @@ const expectedEventDiscoveryCheckPredicates = {
 const expectedEventDiscoveryChecks = Object.keys(
   expectedEventDiscoveryCheckPredicates,
 );
+const expectedEventBriefSnapshotColumns = [
+  ["eventStartAt", "timestamp without time zone", "YES", "DateTime"],
+  ["eventEndAt", "timestamp without time zone", "YES", "DateTime"],
+  ["eventCity", "text", "YES", "String"],
+];
+const expectedEventBriefSnapshotChecks = [
+  "BriefItem_eventSnapshotTime_check",
+  "BriefItem_eventSnapshotKind_check",
+];
 
 test("approval persistence derives executable data only from the proposal", () => {
   const schema = readFileSync(
@@ -1006,6 +1019,49 @@ test("event discovery schema declares the exact public and encrypted persistence
     /"(?:interestTags|feedUrl|providerEventId)Ciphertext"\s+BYTEA\s+(?:DEFAULT|NULL)/,
   );
   assert.doesNotMatch(migration, /"(?:id|updatedAt)"[^,\n]+DEFAULT/);
+});
+
+test("event brief snapshot schema declares public event time and coarse city snapshots", () => {
+  const schema = readFileSync(
+    resolve(root, "services/api/prisma/schema.prisma"),
+    "utf8",
+  );
+  assert.equal(
+    existsSync(eventBriefSnapshotsMigrationPath),
+    true,
+    "event brief snapshots migration file is missing",
+  );
+  const migration = existsSync(eventBriefSnapshotsMigrationPath)
+    ? readFileSync(eventBriefSnapshotsMigrationPath, "utf8")
+    : "";
+
+  for (const [column, , , prismaType] of expectedEventBriefSnapshotColumns) {
+    assert.match(schema, new RegExp(`\\s${column}\\s+${prismaType}\\?`));
+    if (prismaType === "DateTime") {
+      assert.match(migration, new RegExp(`"${column}" TIMESTAMP\\(3\\)`));
+    }
+  }
+  assert.match(migration, /"eventCity" TEXT/);
+  assert.match(
+    migration,
+    /CONSTRAINT "BriefItem_eventSnapshotTime_check" CHECK/,
+  );
+  assert.match(
+    migration,
+    /"eventEndAt" > "eventStartAt"/,
+  );
+  assert.match(
+    migration,
+    /CONSTRAINT "BriefItem_eventSnapshotKind_check" CHECK/,
+  );
+  assert.match(
+    migration,
+    /"kind" = 'event'[\s\S]*"eventStartAt" IS NOT NULL[\s\S]*"eventEndAt" IS NOT NULL/,
+  );
+  assert.match(
+    migration,
+    /"kind" <> 'event'[\s\S]*"eventStartAt" IS NULL[\s\S]*"eventEndAt" IS NULL[\s\S]*"eventCity" IS NULL/,
+  );
 });
 
 if (!databaseUrl) {
@@ -1123,6 +1179,53 @@ if (!databaseUrl) {
         `missing or invalid check ${name}`,
       );
     }
+  }
+
+  async function assertEventBriefSnapshotSchema(client) {
+    const columns = await client.query(
+      `SELECT column_name, data_type, is_nullable
+         FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'BriefItem'
+          AND column_name = ANY($1::text[])
+        ORDER BY column_name`,
+      [expectedEventBriefSnapshotColumns.map(([name]) => name)],
+    );
+    assert.deepEqual(
+      columns.rows.map((row) => [
+        row.column_name,
+        row.data_type,
+        row.is_nullable,
+      ]),
+      [...expectedEventBriefSnapshotColumns]
+        .map(([column, type, nullable]) => [column, type, nullable])
+        .sort((left, right) => left[0].localeCompare(right[0])),
+    );
+
+    const checks = await client.query(
+      `SELECT conname, pg_get_constraintdef(oid) AS definition
+         FROM pg_constraint
+        WHERE conname = ANY($1::text[])`,
+      [expectedEventBriefSnapshotChecks],
+    );
+    assert.deepEqual(
+      checks.rows.map(({ conname }) => conname).sort(),
+      [...expectedEventBriefSnapshotChecks].sort(),
+    );
+    const definitions = new Map(
+      checks.rows.map(({ conname, definition }) => [
+        conname,
+        definition.replaceAll('"', ""),
+      ]),
+    );
+    assert.match(
+      definitions.get("BriefItem_eventSnapshotTime_check") ?? "",
+      /eventStartAt IS NULL.+eventEndAt IS NULL.+eventStartAt IS NOT NULL.+eventEndAt IS NOT NULL.+eventEndAt > eventStartAt/,
+    );
+    assert.match(
+      definitions.get("BriefItem_eventSnapshotKind_check") ?? "",
+      /kind = 'event'.+eventStartAt IS NOT NULL.+eventEndAt IS NOT NULL.+kind <> 'event'.+eventStartAt IS NULL.+eventEndAt IS NULL.+eventCity IS NULL/,
+    );
   }
 
   async function assertAgentInterfaceSchema(client) {
@@ -2530,6 +2633,8 @@ if (!databaseUrl) {
       await client.query(eventMigration);
       await assertEventDiscoverySchema(client);
       await assertCalendarLocationSchema(client);
+      await client.query(readFileSync(eventBriefSnapshotsMigrationPath, "utf8"));
+      await assertEventBriefSnapshotSchema(client);
 
       const after = await client.query(
         `SELECT
@@ -2611,6 +2716,7 @@ if (!databaseUrl) {
     await withClient(assertCalendarLocationBehavior);
     await withClient(assertEventDiscoverySchema);
     await withClient(assertEventDiscoveryBehavior);
+    await withClient(assertEventBriefSnapshotSchema);
 
     execFileSync(
       "pnpm",
@@ -2624,5 +2730,6 @@ if (!databaseUrl) {
     await withClient(assertAgentInterfaceSchema);
     await withClient(assertCalendarLocationSchema);
     await withClient(assertEventDiscoverySchema);
+    await withClient(assertEventBriefSnapshotSchema);
   });
 }
