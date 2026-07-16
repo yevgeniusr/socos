@@ -2,7 +2,7 @@ import type {
   ProposalHistoryResponse,
   ProposalPreview,
 } from "@/lib/cockpit-contracts";
-import { proposalStatusCopy } from "../proposal-view";
+import { proposalReceipt, proposalStatusCopy } from "../proposal-view";
 
 type Proposal = ProposalHistoryResponse["proposals"][number];
 
@@ -74,6 +74,7 @@ export default function ProposalRow({
     proposal.status === "pending" &&
     proposal.actionType !== "unavailable" &&
     proposal.preview.type !== "unavailable";
+  const receipt = proposalReceipt(proposal);
   return (
     <li className="rounded-lg border border-outline-variant/30 bg-surface-container-low p-4">
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
@@ -85,9 +86,23 @@ export default function ProposalRow({
         </span>
       </div>
       <div className="mt-4 border-t border-outline-variant/20 pt-3 text-xs text-on-surface-variant">
-        <p className="font-bold text-on-surface">
-          {proposalStatusCopy(proposal)}
-        </p>
+        {receipt ? (
+          <section aria-label="Decision receipt">
+            <p className="font-bold text-on-surface">Decision receipt</p>
+            <dl className="mt-2 grid gap-1.5 sm:grid-cols-[6rem_1fr]">
+              <dt className="font-bold text-on-surface-variant">Decision</dt>
+              <dd className="text-on-surface">{receipt.decision}</dd>
+              <dt className="font-bold text-on-surface-variant">Execution</dt>
+              <dd className="text-on-surface">{receipt.execution}</dd>
+              <dt className="font-bold text-on-surface-variant">Progress</dt>
+              <dd className="text-on-surface">{receipt.progress}</dd>
+            </dl>
+          </section>
+        ) : (
+          <p className="font-bold text-on-surface">
+            {proposalStatusCopy(proposal)}
+          </p>
+        )}
         <p className="mt-1">
           Proposed by {proposal.client.name} ·{" "}
           {new Date(proposal.createdAt).toLocaleString()}
@@ -123,9 +138,6 @@ export default function ProposalRow({
                 Execution attempts: {proposal.grant.outbox.attempts}
                 {proposal.grant.outbox.completedAt
                   ? ` · completed ${new Date(proposal.grant.outbox.completedAt).toLocaleString()}`
-                  : ""}
-                {proposal.grant.outbox.lastErrorCode
-                  ? ` · error ${proposal.grant.outbox.lastErrorCode}`
                   : ""}
               </p>
             ) : null}

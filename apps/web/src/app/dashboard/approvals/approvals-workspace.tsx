@@ -1,16 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { apiJson } from "@/lib/api-client";
 import type { ProposalHistoryResponse, ProposalHistoryStatus } from "@/lib/cockpit-contracts";
 import ProposalRow from "./_components/proposal-row";
+import { proposalHistoryStatusAfterDecision } from "./proposal-view";
 
 const statuses: ProposalHistoryStatus[] = ["all", "pending", "approved", "rejected", "expired"];
 
 export default function ApprovalsWorkspace() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const requested = searchParams.get("status");
   const status: ProposalHistoryStatus = statuses.includes(requested as ProposalHistoryStatus) ? (requested as ProposalHistoryStatus) : "all";
@@ -40,7 +42,12 @@ export default function ApprovalsWorkspace() {
     setRowErrors((current) => ({ ...current, [id]: "" }));
     try {
       await apiJson(`/api/agent-proposals/${encodeURIComponent(id)}/${decision}`, { method: "POST" });
-      load();
+      const decidedStatus = proposalHistoryStatusAfterDecision(status, decision);
+      if (decidedStatus !== status) {
+        router.replace(`/dashboard/approvals?status=${decidedStatus}`);
+      } else {
+        load();
+      }
     } catch (reason) {
       setRowErrors((current) => ({ ...current, [id]: reason instanceof Error ? reason.message : `Could not ${decision} proposal.` }));
     } finally { setBusyId(null); }
