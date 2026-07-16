@@ -45,6 +45,7 @@ export type PreparedWatchStop = {
   resourceId: string;
   expiresAt: Date;
   accessToken: string | null;
+  refreshToken: string | null;
 };
 
 @Injectable()
@@ -298,12 +299,7 @@ export class CalendarWatchService {
       where: { ownerId },
     });
     if (!connection) return [];
-    let accessToken: string | null = null;
-    try {
-      accessToken = await this.authorize(connection);
-    } catch {
-      accessToken = null;
-    }
+    const refreshToken = this.decryptRefreshToken(connection);
     const watches = await this.prisma.calendarWatch.findMany({
       where: {
         ownerId,
@@ -325,7 +321,8 @@ export class CalendarWatchService {
         envelope(watch, "resourceId")
       ),
       expiresAt: watch.expiresAt,
-      accessToken,
+      accessToken: null,
+      refreshToken,
     }));
   }
 
@@ -533,9 +530,18 @@ export class CalendarWatchService {
   ): Promise<void> {
     for (const watch of prepared) {
       let stopped = watch.expiresAt <= now;
-      if (!stopped && watch.accessToken) {
+      let accessToken = watch.accessToken;
+      if (!stopped && !accessToken && watch.refreshToken) {
         try {
-          await this.provider.stopChannel(watch.accessToken, {
+          accessToken = (await this.provider.authorize(watch.refreshToken))
+            .accessToken;
+        } catch {
+          accessToken = null;
+        }
+      }
+      if (!stopped && accessToken) {
+        try {
+          await this.provider.stopChannel(accessToken, {
             channelId: watch.channelId,
             resourceId: watch.resourceId,
           });
@@ -804,17 +810,22 @@ export class CalendarWatchService {
       ),
       expiresAt: watch.expiresAt,
       accessToken,
+      refreshToken: null,
     }));
   }
 
   private async authorize(connection: any): Promise<string> {
-    const refreshToken = this.cipher.decrypt<string>(
+    return (await this.provider.authorize(this.decryptRefreshToken(connection)))
+      .accessToken;
+  }
+
+  private decryptRefreshToken(connection: any): string {
+    return this.cipher.decrypt<string>(
       REFRESH_TOKEN_PURPOSE,
       connection.ownerId,
       connection.id,
       envelope(connection, "refreshToken")
     );
-    return (await this.provider.authorize(refreshToken)).accessToken;
   }
 }
 

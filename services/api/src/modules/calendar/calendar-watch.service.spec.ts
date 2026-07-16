@@ -89,7 +89,7 @@ function harness() {
     jest.fn().mockReturnValueOnce("watch-new").mockReturnValue("channel-new"),
     jest.fn().mockReturnValue("token-new")
   );
-  return { service, prisma, tx, provider };
+  return { service, prisma, tx, provider, cipher };
 }
 
 describe("CalendarWatchService", () => {
@@ -391,8 +391,8 @@ describe("CalendarWatchService", () => {
     expect(tx.calendarSource.updateMany).toHaveBeenCalledTimes(3);
   });
 
-  it("prepares owner stops without mutating watch state", async () => {
-    const { service, prisma } = harness();
+  it("prepares owner stops without mutating watch state or authorizing provider access", async () => {
+    const { service, prisma, provider, cipher } = harness();
     prisma.googleCalendarConnection.findUnique.mockResolvedValue({
       id: "connection",
       ownerId: "owner",
@@ -401,11 +401,70 @@ describe("CalendarWatchService", () => {
       refreshTokenTag: envelope.tag,
       refreshTokenKeyVersion: 1,
     });
-    prisma.calendarWatch.findMany.mockResolvedValue([]);
+    prisma.calendarWatch.findMany.mockResolvedValue([
+      {
+        id: "active-watch",
+        channelId: "active-channel",
+        status: "active",
+        expiresAt: new Date("2026-07-17T12:00:00Z"),
+        resourceIdCiphertext: Buffer.from("resource"),
+        resourceIdIv: envelope.iv,
+        resourceIdTag: envelope.tag,
+        resourceIdKeyVersion: 1,
+      },
+    ]);
+    cipher.decrypt
+      .mockReturnValueOnce("refresh-token")
+      .mockReturnValueOnce("resource-id");
 
-    await service.prepareOwnerStops("owner", NOW);
+    const prepared = await service.prepareOwnerStops("owner", NOW);
 
     expect(prisma.calendarWatch.updateMany).not.toHaveBeenCalled();
+    expect(provider.authorize).not.toHaveBeenCalled();
+    expect(provider.stopChannel).not.toHaveBeenCalled();
+    expect(prepared).toEqual([
+      expect.objectContaining({
+        id: "active-watch",
+        resourceId: "resource-id",
+        accessToken: null,
+        refreshToken: "refresh-token",
+      }),
+    ]);
+  });
+
+  it("authorizes during post-commit prepared owner stop when no access token was supplied", async () => {
+    const { service, prisma, provider } = harness();
+    prisma.calendarWatch.deleteMany.mockResolvedValue({ count: 1 });
+
+    await service.stopPreparedBestEffort(
+      [
+        {
+          id: "active-watch",
+          ownerId: "owner",
+          connectionId: "connection",
+          channelId: "active-channel",
+          resourceId: "resource",
+          expiresAt: new Date("2026-07-17T12:00:00Z"),
+          accessToken: null,
+          refreshToken: "refresh-token",
+        },
+      ],
+      NOW
+    );
+
+    expect(provider.authorize).toHaveBeenCalledWith("refresh-token");
+    expect(provider.stopChannel).toHaveBeenCalledWith("access", {
+      channelId: "active-channel",
+      resourceId: "resource",
+    });
+    expect(prisma.calendarWatch.deleteMany).toHaveBeenCalledWith({
+      where: {
+        id: "active-watch",
+        ownerId: "owner",
+        connectionId: "connection",
+        status: "stopping",
+      },
+    });
   });
 
   it("prepares, transitions, and deletes an active event watch on deselection", async () => {
