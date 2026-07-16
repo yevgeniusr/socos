@@ -354,162 +354,360 @@ const expectedCalendarLocationColumns = {
 };
 
 const expectedCalendarLocationIndexes = [
-  "GoogleOAuthAttempt_stateMac_key",
-  "GoogleOAuthAttempt_id_ownerId_key",
-  "GoogleOAuthAttempt_ownerId_expiresAt_consumedAt_idx",
-  "GoogleCalendarConnection_ownerId_key",
-  "GoogleCalendarConnection_id_ownerId_key",
-  "GoogleCalendarConnection_status_calendarListPendingAt_calen_idx",
-  "CalendarSource_connectionId_externalIdMac_key",
-  "CalendarSource_id_ownerId_key",
-  "CalendarSource_ownerId_selected_idx",
-  "CalendarSource_pendingSyncAt_syncLeaseUntil_idx",
-  "CalendarWatch_channelId_key",
-  "CalendarWatch_id_ownerId_key",
-  "CalendarWatch_connectionId_targetType_targetKey_status_idx",
-  "CalendarWatch_status_expiresAt_idx",
-  "CalendarEvent_sourceId_externalEventIdMac_key",
-  "CalendarEvent_id_ownerId_key",
-  "CalendarEvent_ownerId_startAt_endAt_status_idx",
-  "CalendarEvent_sourceId_status_idx",
-  "LocationDevice_username_key",
-  "LocationDevice_ownerId_nameMac_key",
-  "LocationDevice_ownerId_externalDeviceIdMac_key",
-  "LocationDevice_id_ownerId_key",
-  "LocationDevice_ownerId_status_idx",
-  "LocationSample_deviceId_payloadMac_key",
-  "LocationSample_id_ownerId_key",
-  "LocationSample_ownerId_recordedAt_idx",
-  "LocationSample_deviceId_recordedAt_idx",
-  "DerivedVisit_deviceId_sourceMac_key",
-  "DerivedVisit_id_ownerId_key",
-  "DerivedVisit_ownerId_arrivedAt_departedAt_idx",
-  "DerivedVisit_deviceId_arrivedAt_idx",
-  "LocationAlias_ownerId_aliasMac_key",
-  "LocationAlias_id_ownerId_key",
-  "LocationAlias_ownerId_city_idx",
-  "CityStay_ownerId_source_sourceId_key",
-  "CityStay_id_ownerId_key",
-  "CityStay_ownerId_startsAt_endsAt_idx",
-  "PersonalDataDeletionAudit_idempotencyKeyMac_key",
-  "PersonalDataDeletionAudit_ownerMac_deletedAt_idx",
+  ["GoogleOAuthAttempt_stateMac_key", "GoogleOAuthAttempt", true, ["stateMac"]],
+  [
+    "GoogleOAuthAttempt_id_ownerId_key",
+    "GoogleOAuthAttempt",
+    true,
+    ["id", "ownerId"],
+  ],
+  [
+    "GoogleOAuthAttempt_ownerId_expiresAt_consumedAt_idx",
+    "GoogleOAuthAttempt",
+    false,
+    ["ownerId", "expiresAt", "consumedAt"],
+  ],
+  [
+    "GoogleCalendarConnection_ownerId_key",
+    "GoogleCalendarConnection",
+    true,
+    ["ownerId"],
+  ],
+  [
+    "GoogleCalendarConnection_id_ownerId_key",
+    "GoogleCalendarConnection",
+    true,
+    ["id", "ownerId"],
+  ],
+  [
+    "GoogleCalendarConnection_status_calendarListPendingAt_calen_idx",
+    "GoogleCalendarConnection",
+    false,
+    ["status", "calendarListPendingAt", "calendarListLeaseUntil"],
+  ],
+  [
+    "CalendarSource_connectionId_externalIdMac_key",
+    "CalendarSource",
+    true,
+    ["connectionId", "externalIdMac"],
+  ],
+  ["CalendarSource_id_ownerId_key", "CalendarSource", true, ["id", "ownerId"]],
+  [
+    "CalendarSource_ownerId_selected_idx",
+    "CalendarSource",
+    false,
+    ["ownerId", "selected"],
+  ],
+  [
+    "CalendarSource_pendingSyncAt_syncLeaseUntil_idx",
+    "CalendarSource",
+    false,
+    ["pendingSyncAt", "syncLeaseUntil"],
+  ],
+  ["CalendarWatch_channelId_key", "CalendarWatch", true, ["channelId"]],
+  ["CalendarWatch_id_ownerId_key", "CalendarWatch", true, ["id", "ownerId"]],
+  [
+    "CalendarWatch_connectionId_targetType_targetKey_status_idx",
+    "CalendarWatch",
+    false,
+    ["connectionId", "targetType", "targetKey", "status"],
+  ],
+  [
+    "CalendarWatch_status_expiresAt_idx",
+    "CalendarWatch",
+    false,
+    ["status", "expiresAt"],
+  ],
+  [
+    "CalendarEvent_sourceId_externalEventIdMac_key",
+    "CalendarEvent",
+    true,
+    ["sourceId", "externalEventIdMac"],
+  ],
+  ["CalendarEvent_id_ownerId_key", "CalendarEvent", true, ["id", "ownerId"]],
+  [
+    "CalendarEvent_ownerId_startAt_endAt_status_idx",
+    "CalendarEvent",
+    false,
+    ["ownerId", "startAt", "endAt", "status"],
+  ],
+  [
+    "CalendarEvent_sourceId_status_idx",
+    "CalendarEvent",
+    false,
+    ["sourceId", "status"],
+  ],
+  ["LocationDevice_username_key", "LocationDevice", true, ["username"]],
+  [
+    "LocationDevice_ownerId_nameMac_key",
+    "LocationDevice",
+    true,
+    ["ownerId", "nameMac"],
+  ],
+  [
+    "LocationDevice_ownerId_externalDeviceIdMac_key",
+    "LocationDevice",
+    true,
+    ["ownerId", "externalDeviceIdMac"],
+  ],
+  ["LocationDevice_id_ownerId_key", "LocationDevice", true, ["id", "ownerId"]],
+  [
+    "LocationDevice_ownerId_status_idx",
+    "LocationDevice",
+    false,
+    ["ownerId", "status"],
+  ],
+  [
+    "LocationSample_deviceId_payloadMac_key",
+    "LocationSample",
+    true,
+    ["deviceId", "payloadMac"],
+  ],
+  ["LocationSample_id_ownerId_key", "LocationSample", true, ["id", "ownerId"]],
+  [
+    "LocationSample_ownerId_recordedAt_idx",
+    "LocationSample",
+    false,
+    ["ownerId", "recordedAt"],
+  ],
+  [
+    "LocationSample_deviceId_recordedAt_idx",
+    "LocationSample",
+    false,
+    ["deviceId", "recordedAt"],
+  ],
+  [
+    "DerivedVisit_deviceId_sourceMac_key",
+    "DerivedVisit",
+    true,
+    ["deviceId", "sourceMac"],
+  ],
+  ["DerivedVisit_id_ownerId_key", "DerivedVisit", true, ["id", "ownerId"]],
+  [
+    "DerivedVisit_ownerId_arrivedAt_departedAt_idx",
+    "DerivedVisit",
+    false,
+    ["ownerId", "arrivedAt", "departedAt"],
+  ],
+  [
+    "DerivedVisit_deviceId_arrivedAt_idx",
+    "DerivedVisit",
+    false,
+    ["deviceId", "arrivedAt"],
+  ],
+  [
+    "LocationAlias_ownerId_aliasMac_key",
+    "LocationAlias",
+    true,
+    ["ownerId", "aliasMac"],
+  ],
+  ["LocationAlias_id_ownerId_key", "LocationAlias", true, ["id", "ownerId"]],
+  [
+    "LocationAlias_ownerId_city_idx",
+    "LocationAlias",
+    false,
+    ["ownerId", "city"],
+  ],
+  [
+    "CityStay_ownerId_source_sourceId_key",
+    "CityStay",
+    true,
+    ["ownerId", "source", "sourceId"],
+  ],
+  ["CityStay_id_ownerId_key", "CityStay", true, ["id", "ownerId"]],
+  [
+    "CityStay_ownerId_startsAt_endsAt_idx",
+    "CityStay",
+    false,
+    ["ownerId", "startsAt", "endsAt"],
+  ],
+  [
+    "PersonalDataDeletionAudit_idempotencyKeyMac_key",
+    "PersonalDataDeletionAudit",
+    true,
+    ["idempotencyKeyMac"],
+  ],
+  [
+    "PersonalDataDeletionAudit_ownerMac_deletedAt_idx",
+    "PersonalDataDeletionAudit",
+    false,
+    ["ownerMac", "deletedAt"],
+  ],
 ];
 
 const expectedCalendarLocationForeignKeys = [
   [
     "GoogleOAuthAttempt_ownerId_fkey",
-    /FOREIGN KEY \(ownerId\).*User\(id\).*ON DELETE CASCADE/,
+    "GoogleOAuthAttempt",
+    ["ownerId"],
+    "User",
+    ["id"],
   ],
   [
     "GoogleCalendarConnection_ownerId_fkey",
-    /FOREIGN KEY \(ownerId\).*User\(id\).*ON DELETE CASCADE/,
+    "GoogleCalendarConnection",
+    ["ownerId"],
+    "User",
+    ["id"],
   ],
   [
     "CalendarSource_connectionId_ownerId_fkey",
-    /FOREIGN KEY \(connectionId, ownerId\).*GoogleCalendarConnection\(id, ownerId\).*ON DELETE CASCADE/,
+    "CalendarSource",
+    ["connectionId", "ownerId"],
+    "GoogleCalendarConnection",
+    ["id", "ownerId"],
   ],
   [
     "CalendarSource_ownerId_fkey",
-    /FOREIGN KEY \(ownerId\).*User\(id\).*ON DELETE CASCADE/,
+    "CalendarSource",
+    ["ownerId"],
+    "User",
+    ["id"],
   ],
   [
     "CalendarWatch_connectionId_ownerId_fkey",
-    /FOREIGN KEY \(connectionId, ownerId\).*GoogleCalendarConnection\(id, ownerId\).*ON DELETE CASCADE/,
+    "CalendarWatch",
+    ["connectionId", "ownerId"],
+    "GoogleCalendarConnection",
+    ["id", "ownerId"],
   ],
-  [
-    "CalendarWatch_ownerId_fkey",
-    /FOREIGN KEY \(ownerId\).*User\(id\).*ON DELETE CASCADE/,
-  ],
+  ["CalendarWatch_ownerId_fkey", "CalendarWatch", ["ownerId"], "User", ["id"]],
   [
     "CalendarEvent_sourceId_ownerId_fkey",
-    /FOREIGN KEY \(sourceId, ownerId\).*CalendarSource\(id, ownerId\).*ON DELETE CASCADE/,
+    "CalendarEvent",
+    ["sourceId", "ownerId"],
+    "CalendarSource",
+    ["id", "ownerId"],
   ],
-  [
-    "CalendarEvent_ownerId_fkey",
-    /FOREIGN KEY \(ownerId\).*User\(id\).*ON DELETE CASCADE/,
-  ],
+  ["CalendarEvent_ownerId_fkey", "CalendarEvent", ["ownerId"], "User", ["id"]],
   [
     "LocationDevice_ownerId_fkey",
-    /FOREIGN KEY \(ownerId\).*User\(id\).*ON DELETE CASCADE/,
+    "LocationDevice",
+    ["ownerId"],
+    "User",
+    ["id"],
   ],
   [
     "LocationSample_deviceId_ownerId_fkey",
-    /FOREIGN KEY \(deviceId, ownerId\).*LocationDevice\(id, ownerId\).*ON DELETE CASCADE/,
+    "LocationSample",
+    ["deviceId", "ownerId"],
+    "LocationDevice",
+    ["id", "ownerId"],
   ],
   [
     "LocationSample_ownerId_fkey",
-    /FOREIGN KEY \(ownerId\).*User\(id\).*ON DELETE CASCADE/,
+    "LocationSample",
+    ["ownerId"],
+    "User",
+    ["id"],
   ],
   [
     "DerivedVisit_deviceId_ownerId_fkey",
-    /FOREIGN KEY \(deviceId, ownerId\).*LocationDevice\(id, ownerId\).*ON DELETE CASCADE/,
+    "DerivedVisit",
+    ["deviceId", "ownerId"],
+    "LocationDevice",
+    ["id", "ownerId"],
   ],
-  [
-    "DerivedVisit_ownerId_fkey",
-    /FOREIGN KEY \(ownerId\).*User\(id\).*ON DELETE CASCADE/,
-  ],
-  [
-    "LocationAlias_ownerId_fkey",
-    /FOREIGN KEY \(ownerId\).*User\(id\).*ON DELETE CASCADE/,
-  ],
-  [
-    "CityStay_ownerId_fkey",
-    /FOREIGN KEY \(ownerId\).*User\(id\).*ON DELETE CASCADE/,
-  ],
+  ["DerivedVisit_ownerId_fkey", "DerivedVisit", ["ownerId"], "User", ["id"]],
+  ["LocationAlias_ownerId_fkey", "LocationAlias", ["ownerId"], "User", ["id"]],
+  ["CityStay_ownerId_fkey", "CityStay", ["ownerId"], "User", ["id"]],
 ];
 
-const expectedCalendarLocationChecks = [
-  "GoogleOAuthAttempt_stateMac_check",
-  "GoogleOAuthAttempt_pkceEnvelope_check",
-  "GoogleCalendarConnection_refreshTokenEnvelope_check",
-  "GoogleCalendarConnection_status_check",
-  "GoogleCalendarConnection_calendarListSyncTokenEnvelope_check",
-  "CalendarSource_externalIdMac_check",
-  "CalendarSource_externalIdEnvelope_check",
-  "CalendarSource_nameEnvelope_check",
-  "CalendarSource_syncTokenEnvelope_check",
-  "CalendarWatch_targetType_check",
-  "CalendarWatch_status_check",
-  "CalendarWatch_resourceIdMac_check",
-  "CalendarWatch_resourceIdEnvelope_check",
-  "CalendarWatch_tokenMac_check",
-  "CalendarEvent_externalEventIdMac_check",
-  "CalendarEvent_externalEventIdEnvelope_check",
-  "CalendarEvent_status_check",
-  "CalendarEvent_transparency_check",
-  "CalendarEvent_recurringEventIdMac_check",
-  "CalendarEvent_recurringEventIdEnvelope_check",
-  "CalendarEvent_detailsEnvelope_check",
-  "CalendarEvent_timing_check",
-  "CalendarEvent_allDay_check",
-  "LocationDevice_nameMac_check",
-  "LocationDevice_nameEnvelope_check",
-  "LocationDevice_username_check",
-  "LocationDevice_credentialHash_check",
-  "LocationDevice_externalDeviceIdMac_check",
-  "LocationDevice_externalDeviceIdEnvelope_check",
-  "LocationDevice_status_check",
-  "LocationDevice_rawRetentionDays_check",
-  "LocationDevice_derivedRetentionDays_check",
-  "LocationSample_coordinatesEnvelope_check",
-  "LocationSample_accuracyM_check",
-  "LocationSample_batteryPercent_check",
-  "LocationSample_payloadMac_check",
-  "DerivedVisit_centroidEnvelope_check",
-  "DerivedVisit_radiusM_check",
-  "DerivedVisit_confidence_check",
-  "DerivedVisit_sourceMac_check",
-  "DerivedVisit_timeRange_check",
-  "LocationAlias_aliasMac_check",
-  "LocationAlias_aliasEnvelope_check",
-  "CityStay_source_check",
-  "CityStay_confidence_check",
-  "CityStay_timeRange_check",
-  "PersonalDataDeletionAudit_ownerMac_check",
-  "PersonalDataDeletionAudit_idempotencyKeyMac_check",
-  "PersonalDataDeletionAudit_requestMac_check",
-  "PersonalDataDeletionAudit_rowCounts_check",
-];
+const macPredicate = (field, optional = false) =>
+  optional
+    ? `(("${field}" IS NULL) OR ("${field}" ~ '^[0-9a-f]{64}$'::text))`
+    : `("${field}" ~ '^[0-9a-f]{64}$'::text)`;
+const requiredEnvelopePredicate = (base) =>
+  `(("${base}KeyVersion" > 0) AND (octet_length("${base}Iv") = 12) AND (octet_length("${base}Tag") = 16))`;
+const optionalEnvelopePredicate = (base) =>
+  `((num_nonnulls("${base}Ciphertext", "${base}Iv", "${base}Tag", "${base}KeyVersion") = ANY (ARRAY[0, 4])) AND (("${base}KeyVersion" IS NULL) OR (("${base}KeyVersion" > 0) AND (octet_length("${base}Iv") = 12) AND (octet_length("${base}Tag") = 16))))`;
+const enumPredicate = (field, values) =>
+  `(${field} = ANY (ARRAY[${values.map((value) => `'${value}'::text`).join(", ")}]))`;
+const maxFiniteDouble =
+  "('179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'::numeric)::double precision";
+
+const expectedCalendarLocationCheckPredicates = {
+  GoogleOAuthAttempt_stateMac_check: macPredicate("stateMac"),
+  GoogleOAuthAttempt_pkceEnvelope_check: requiredEnvelopePredicate("pkce"),
+  GoogleCalendarConnection_refreshTokenEnvelope_check:
+    requiredEnvelopePredicate("refreshToken"),
+  GoogleCalendarConnection_status_check: enumPredicate("status", [
+    "active",
+    "needs_reauth",
+    "disconnected",
+  ]),
+  GoogleCalendarConnection_calendarListSyncTokenEnvelope_check:
+    optionalEnvelopePredicate("calendarListSyncToken"),
+  CalendarSource_externalIdMac_check: macPredicate("externalIdMac"),
+  CalendarSource_externalIdEnvelope_check:
+    requiredEnvelopePredicate("externalId"),
+  CalendarSource_nameEnvelope_check: requiredEnvelopePredicate("name"),
+  CalendarSource_syncTokenEnvelope_check:
+    optionalEnvelopePredicate("syncToken"),
+  CalendarWatch_targetType_check: enumPredicate('"targetType"', [
+    "calendar_list",
+    "events",
+  ]),
+  CalendarWatch_status_check: enumPredicate("status", ["active", "stopping"]),
+  CalendarWatch_resourceIdMac_check: macPredicate("resourceIdMac"),
+  CalendarWatch_resourceIdEnvelope_check:
+    requiredEnvelopePredicate("resourceId"),
+  CalendarWatch_tokenMac_check: macPredicate("tokenMac"),
+  CalendarEvent_externalEventIdMac_check: macPredicate("externalEventIdMac"),
+  CalendarEvent_externalEventIdEnvelope_check:
+    requiredEnvelopePredicate("externalEventId"),
+  CalendarEvent_status_check: enumPredicate("status", [
+    "confirmed",
+    "tentative",
+    "cancelled",
+  ]),
+  CalendarEvent_transparency_check: enumPredicate("transparency", [
+    "opaque",
+    "transparent",
+  ]),
+  CalendarEvent_recurringEventIdMac_check: macPredicate(
+    "recurringEventIdMac",
+    true,
+  ),
+  CalendarEvent_recurringEventIdEnvelope_check:
+    optionalEnvelopePredicate("recurringEventId"),
+  CalendarEvent_detailsEnvelope_check: optionalEnvelopePredicate("details"),
+  CalendarEvent_timing_check: `(((("startAt" IS NULL) AND ("endAt" IS NULL) AND (status = 'cancelled'::text)) OR (("startAt" IS NOT NULL) AND ("endAt" IS NOT NULL) AND ("endAt" > "startAt"))) AND ((status = 'cancelled'::text) OR ("detailsCiphertext" IS NOT NULL)))`,
+  CalendarEvent_allDay_check: `(("allDay" AND ("startDate" IS NOT NULL) AND ("endDate" IS NOT NULL) AND ("endDate" > "startDate")) OR ((NOT "allDay") AND ("startDate" IS NULL) AND ("endDate" IS NULL)))`,
+  LocationDevice_nameMac_check: macPredicate("nameMac"),
+  LocationDevice_nameEnvelope_check: requiredEnvelopePredicate("name"),
+  LocationDevice_username_check: `(username ~ '^[A-Za-z0-9_-]{32}$'::text)`,
+  LocationDevice_credentialHash_check: `("credentialHash" ~ '^scrypt[$]32768[$]8[$]1[$][A-Za-z0-9_-]{22}[$][A-Za-z0-9_-]{43}$'::text)`,
+  LocationDevice_externalDeviceIdMac_check: macPredicate("externalDeviceIdMac"),
+  LocationDevice_externalDeviceIdEnvelope_check:
+    requiredEnvelopePredicate("externalDeviceId"),
+  LocationDevice_status_check: enumPredicate("status", ["active", "revoked"]),
+  LocationDevice_rawRetentionDays_check: `(("rawRetentionDays" >= 30) AND ("rawRetentionDays" <= 365))`,
+  LocationDevice_derivedRetentionDays_check: `(("derivedRetentionDays" >= 90) AND ("derivedRetentionDays" <= 3650))`,
+  LocationSample_coordinatesEnvelope_check:
+    requiredEnvelopePredicate("coordinates"),
+  LocationSample_accuracyM_check: `(("accuracyM" IS NULL) OR (("accuracyM" >= (0)::double precision) AND ("accuracyM" <= ${maxFiniteDouble})))`,
+  LocationSample_batteryPercent_check: `(("batteryPercent" IS NULL) OR (("batteryPercent" >= 0) AND ("batteryPercent" <= 100)))`,
+  LocationSample_payloadMac_check: macPredicate("payloadMac"),
+  DerivedVisit_centroidEnvelope_check: requiredEnvelopePredicate("centroid"),
+  DerivedVisit_radiusM_check: `(("radiusM" >= (0)::double precision) AND ("radiusM" <= ${maxFiniteDouble}))`,
+  DerivedVisit_confidence_check: `((confidence >= (0)::double precision) AND (confidence <= (1)::double precision))`,
+  DerivedVisit_sourceMac_check: macPredicate("sourceMac"),
+  DerivedVisit_timeRange_check: `(("departedAt" IS NULL) OR ("departedAt" > "arrivedAt"))`,
+  LocationAlias_aliasMac_check: macPredicate("aliasMac"),
+  LocationAlias_aliasEnvelope_check: requiredEnvelopePredicate("alias"),
+  CityStay_source_check: `(source = 'calendar'::text)`,
+  CityStay_confidence_check: `((confidence >= (0)::double precision) AND (confidence <= (1)::double precision))`,
+  CityStay_timeRange_check: `(("endsAt" IS NULL) OR ("endsAt" > "startsAt"))`,
+  PersonalDataDeletionAudit_ownerMac_check: macPredicate("ownerMac"),
+  PersonalDataDeletionAudit_idempotencyKeyMac_check:
+    macPredicate("idempotencyKeyMac"),
+  PersonalDataDeletionAudit_requestMac_check: macPredicate("requestMac"),
+  PersonalDataDeletionAudit_rowCounts_check: `(("calendarRowCount" >= 0) AND ("locationRowCount" >= 0) AND ("eventRowCount" >= 0))`,
+};
+const expectedCalendarLocationChecks = Object.keys(
+  expectedCalendarLocationCheckPredicates,
+);
 
 test("approval persistence derives executable data only from the proposal", () => {
   const schema = readFileSync(
@@ -829,26 +1027,77 @@ if (!databaseUrl) {
       }
     }
 
+    const expectedPrimaryKeys = tables
+      .map((table) => ({
+        name: `${table}_pkey`,
+        table,
+        columns: ["id"],
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
     const primaryKeys = await client.query(
-      `SELECT conname FROM pg_constraint
-        WHERE contype = 'p' AND conrelid = ANY($1::regclass[])`,
-      [tables.map((table) => `public."${table}"`)],
+      `SELECT c.conname AS name, t.relname AS table,
+              ARRAY(
+                SELECT a.attname
+                  FROM unnest(c.conkey) WITH ORDINALITY AS key(attnum, position)
+                  JOIN pg_attribute a
+                    ON a.attrelid = c.conrelid AND a.attnum = key.attnum
+                 ORDER BY key.position
+              )::text[] AS columns
+         FROM pg_constraint c
+         JOIN pg_class t ON t.oid = c.conrelid
+         JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE n.nspname = 'public' AND c.contype = 'p'
+          AND t.relname = ANY($1::text[])
+        ORDER BY c.conname`,
+      [tables],
     );
     assert.deepEqual(
-      primaryKeys.rows.map(({ conname }) => conname).sort(),
-      tables.map((table) => `${table}_pkey`).sort(),
-      "calendar/location primary-key names differ from the contract",
+      primaryKeys.rows,
+      expectedPrimaryKeys,
+      "calendar/location primary keys differ from the contract",
     );
 
+    const expectedIndexes = [
+      ...expectedPrimaryKeys.map(({ name, table, columns }) => ({
+        name,
+        table,
+        unique: true,
+        primary: true,
+        columns,
+      })),
+      ...expectedCalendarLocationIndexes.map(
+        ([name, table, unique, columns]) => ({
+          name,
+          table,
+          unique,
+          primary: false,
+          columns,
+        }),
+      ),
+    ].sort((left, right) => left.name.localeCompare(right.name));
     const indexes = await client.query(
-      `SELECT indexname, indexdef FROM pg_indexes
-        WHERE schemaname = 'public' AND indexname = ANY($1::text[])`,
-      [expectedCalendarLocationIndexes],
+      `SELECT idx.relname AS name, t.relname AS table,
+              i.indisunique AS unique, i.indisprimary AS primary,
+              ARRAY(
+                SELECT a.attname
+                  FROM unnest(i.indkey) WITH ORDINALITY AS key(attnum, position)
+                  JOIN pg_attribute a
+                    ON a.attrelid = i.indrelid AND a.attnum = key.attnum
+                 WHERE key.position <= i.indnkeyatts
+                 ORDER BY key.position
+              )::text[] AS columns
+         FROM pg_index i
+         JOIN pg_class idx ON idx.oid = i.indexrelid
+         JOIN pg_class t ON t.oid = i.indrelid
+         JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE n.nspname = 'public' AND t.relname = ANY($1::text[])
+        ORDER BY idx.relname`,
+      [tables],
     );
     assert.deepEqual(
-      indexes.rows.map(({ indexname }) => indexname).sort(),
-      [...expectedCalendarLocationIndexes].sort(),
-      "calendar/location indexes differ from the contract",
+      indexes.rows,
+      expectedIndexes,
+      "calendar/location index catalog differs from the contract",
     );
     const forbiddenWatchUnique = await client.query(
       `SELECT count(*)::int AS count FROM pg_indexes
@@ -858,244 +1107,71 @@ if (!databaseUrl) {
     );
     assert.equal(forbiddenWatchUnique.rows[0].count, 0);
 
-    const constraintNames = [
-      ...expectedCalendarLocationChecks,
-      ...expectedCalendarLocationForeignKeys.map(([name]) => name),
-    ];
-    const constraints = await client.query(
-      `SELECT conname, pg_get_constraintdef(oid) AS definition
-         FROM pg_constraint
-        WHERE conname = ANY($1::text[])`,
-      [constraintNames],
+    const checks = await client.query(
+      `SELECT c.conname AS name, pg_get_expr(c.conbin, c.conrelid, false) AS predicate
+         FROM pg_constraint c
+         JOIN pg_class t ON t.oid = c.conrelid
+         JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE n.nspname = 'public' AND c.contype = 'c'
+          AND t.relname = ANY($1::text[])
+        ORDER BY c.conname`,
+      [tables],
     );
-    const definitions = new Map(
-      constraints.rows.map(({ conname, definition }) => [
-        conname,
-        definition.replaceAll('"', ""),
-      ]),
-    );
-    const coveredChecks = new Set();
-    const assertCheck = (name, ...patterns) => {
-      const definition = definitions.get(name) ?? "";
-      assert.match(definition, /^CHECK /, `missing named check ${name}`);
-      for (const pattern of patterns) {
-        assert.match(definition, pattern, `invalid check ${name}`);
-      }
-      coveredChecks.add(name);
-    };
-    const macChecks = {
-      GoogleOAuthAttempt_stateMac_check: "stateMac",
-      CalendarSource_externalIdMac_check: "externalIdMac",
-      CalendarWatch_resourceIdMac_check: "resourceIdMac",
-      CalendarWatch_tokenMac_check: "tokenMac",
-      CalendarEvent_externalEventIdMac_check: "externalEventIdMac",
-      CalendarEvent_recurringEventIdMac_check: "recurringEventIdMac",
-      LocationDevice_nameMac_check: "nameMac",
-      LocationDevice_externalDeviceIdMac_check: "externalDeviceIdMac",
-      LocationSample_payloadMac_check: "payloadMac",
-      DerivedVisit_sourceMac_check: "sourceMac",
-      LocationAlias_aliasMac_check: "aliasMac",
-      PersonalDataDeletionAudit_ownerMac_check: "ownerMac",
-      PersonalDataDeletionAudit_idempotencyKeyMac_check: "idempotencyKeyMac",
-      PersonalDataDeletionAudit_requestMac_check: "requestMac",
-    };
-    for (const [name, field] of Object.entries(macChecks)) {
-      assertCheck(name, new RegExp(`${field}.*\\^\\[0-9a-f\\]\\{64\\}\\$`));
-    }
-    const requiredEnvelopeChecks = {
-      GoogleOAuthAttempt_pkceEnvelope_check: [
-        "pkceKeyVersion",
-        "pkceIv",
-        "pkceTag",
-      ],
-      GoogleCalendarConnection_refreshTokenEnvelope_check: [
-        "refreshTokenKeyVersion",
-        "refreshTokenIv",
-        "refreshTokenTag",
-      ],
-      CalendarSource_externalIdEnvelope_check: [
-        "externalIdKeyVersion",
-        "externalIdIv",
-        "externalIdTag",
-      ],
-      CalendarSource_nameEnvelope_check: [
-        "nameKeyVersion",
-        "nameIv",
-        "nameTag",
-      ],
-      CalendarWatch_resourceIdEnvelope_check: [
-        "resourceIdKeyVersion",
-        "resourceIdIv",
-        "resourceIdTag",
-      ],
-      CalendarEvent_externalEventIdEnvelope_check: [
-        "externalEventIdKeyVersion",
-        "externalEventIdIv",
-        "externalEventIdTag",
-      ],
-      LocationDevice_nameEnvelope_check: [
-        "nameKeyVersion",
-        "nameIv",
-        "nameTag",
-      ],
-      LocationDevice_externalDeviceIdEnvelope_check: [
-        "externalDeviceIdKeyVersion",
-        "externalDeviceIdIv",
-        "externalDeviceIdTag",
-      ],
-      LocationSample_coordinatesEnvelope_check: [
-        "coordinatesKeyVersion",
-        "coordinatesIv",
-        "coordinatesTag",
-      ],
-      DerivedVisit_centroidEnvelope_check: [
-        "centroidKeyVersion",
-        "centroidIv",
-        "centroidTag",
-      ],
-      LocationAlias_aliasEnvelope_check: [
-        "aliasKeyVersion",
-        "aliasIv",
-        "aliasTag",
-      ],
-    };
-    for (const [name, [keyVersion, ivField, tagField]] of Object.entries(
-      requiredEnvelopeChecks,
-    )) {
-      assertCheck(
-        name,
-        new RegExp(`${keyVersion} > 0`),
-        new RegExp(`octet_length\\(${ivField}\\) = 12`),
-        new RegExp(`octet_length\\(${tagField}\\) = 16`),
-      );
-    }
-    const optionalEnvelopeChecks = {
-      GoogleCalendarConnection_calendarListSyncTokenEnvelope_check: [
-        "calendarListSyncTokenKeyVersion",
-        "calendarListSyncTokenIv",
-        "calendarListSyncTokenTag",
-      ],
-      CalendarSource_syncTokenEnvelope_check: [
-        "syncTokenKeyVersion",
-        "syncTokenIv",
-        "syncTokenTag",
-      ],
-      CalendarEvent_recurringEventIdEnvelope_check: [
-        "recurringEventIdKeyVersion",
-        "recurringEventIdIv",
-        "recurringEventIdTag",
-      ],
-      CalendarEvent_detailsEnvelope_check: [
-        "detailsKeyVersion",
-        "detailsIv",
-        "detailsTag",
-      ],
-    };
-    for (const [name, [keyVersion, ivField, tagField]] of Object.entries(
-      optionalEnvelopeChecks,
-    )) {
-      assertCheck(
-        name,
-        /num_nonnulls/,
-        /ANY \(ARRAY\[0, 4\]\)/,
-        new RegExp(`${keyVersion} > 0`),
-        new RegExp(`octet_length\\(${ivField}\\) = 12`),
-        new RegExp(`octet_length\\(${tagField}\\) = 16`),
-      );
-    }
-    assertCheck(
-      "GoogleCalendarConnection_status_check",
-      /active/,
-      /needs_reauth/,
-      /disconnected/,
-    );
-    assertCheck("CalendarWatch_targetType_check", /calendar_list/, /events/);
-    assertCheck("CalendarWatch_status_check", /active/, /stopping/);
-    assertCheck(
-      "CalendarEvent_status_check",
-      /confirmed/,
-      /tentative/,
-      /cancelled/,
-    );
-    assertCheck("CalendarEvent_transparency_check", /opaque/, /transparent/);
-    assertCheck("LocationDevice_status_check", /active/, /revoked/);
-    assertCheck("LocationDevice_username_check", /A-Za-z0-9_-/, /\{32\}/);
-    assertCheck(
-      "LocationDevice_credentialHash_check",
-      /scrypt/,
-      /32768/,
-      /\{22\}/,
-      /\{43\}/,
-    );
-    assertCheck(
-      "LocationDevice_rawRetentionDays_check",
-      /rawRetentionDays >= 30/,
-      /rawRetentionDays <= 365/,
-    );
-    assertCheck(
-      "LocationDevice_derivedRetentionDays_check",
-      /derivedRetentionDays >= 90/,
-      /derivedRetentionDays <= 3650/,
-    );
-    assertCheck(
-      "LocationSample_accuracyM_check",
-      /accuracyM >=/,
-      /accuracyM <=/,
-    );
-    assertCheck(
-      "LocationSample_batteryPercent_check",
-      /batteryPercent >= 0/,
-      /batteryPercent <= 100/,
-    );
-    assertCheck("DerivedVisit_radiusM_check", /radiusM >=/, /radiusM <=/);
-    assertCheck(
-      "DerivedVisit_confidence_check",
-      /confidence >=/,
-      /confidence <=/,
-    );
-    assertCheck(
-      "DerivedVisit_timeRange_check",
-      /departedAt IS NULL/,
-      /departedAt > arrivedAt/,
-    );
-    assertCheck("CityStay_source_check", /source = 'calendar'/);
-    assertCheck("CityStay_confidence_check", /confidence >=/, /confidence <=/);
-    assertCheck(
-      "CityStay_timeRange_check",
-      /endsAt IS NULL/,
-      /endsAt > startsAt/,
-    );
-    assertCheck(
-      "CalendarEvent_timing_check",
-      /status = 'cancelled'/,
-      /endAt > startAt/,
-      /detailsCiphertext IS NOT NULL/,
-    );
-    assertCheck(
-      "CalendarEvent_allDay_check",
-      /allDay/,
-      /endDate > startDate/,
-      /startDate IS NULL/,
-      /endDate IS NULL/,
-    );
-    assertCheck(
-      "PersonalDataDeletionAudit_rowCounts_check",
-      /calendarRowCount >= 0/,
-      /locationRowCount >= 0/,
-      /eventRowCount >= 0/,
-    );
+    const expectedChecks = Object.entries(
+      expectedCalendarLocationCheckPredicates,
+    )
+      .map(([name, predicate]) => ({ name, predicate }))
+      .sort((left, right) => left.name.localeCompare(right.name));
     assert.deepEqual(
-      [...coveredChecks].sort(),
-      [...expectedCalendarLocationChecks].sort(),
-      "every named calendar/location check must have a semantic assertion",
+      checks.rows,
+      expectedChecks,
+      "calendar/location check catalog differs from the exact canonical predicates",
     );
-    for (const [name, pattern] of expectedCalendarLocationForeignKeys) {
-      assert.match(
-        definitions.get(name) ?? "",
-        pattern,
-        `missing or invalid FK ${name}`,
-      );
-    }
+
+    const foreignKeys = await client.query(
+      `SELECT c.conname AS name, t.relname AS table,
+              ARRAY(
+                SELECT a.attname
+                  FROM unnest(c.conkey) WITH ORDINALITY AS key(attnum, position)
+                  JOIN pg_attribute a
+                    ON a.attrelid = c.conrelid AND a.attnum = key.attnum
+                 ORDER BY key.position
+              )::text[] AS columns,
+              rt.relname AS "referencedTable",
+              ARRAY(
+                SELECT a.attname
+                  FROM unnest(c.confkey) WITH ORDINALITY AS key(attnum, position)
+                  JOIN pg_attribute a
+                    ON a.attrelid = c.confrelid AND a.attnum = key.attnum
+                 ORDER BY key.position
+              )::text[] AS "referencedColumns",
+              CASE c.confdeltype WHEN 'c' THEN 'CASCADE' ELSE c.confdeltype::text END AS "deleteAction",
+              CASE c.confupdtype WHEN 'c' THEN 'CASCADE' ELSE c.confupdtype::text END AS "updateAction"
+         FROM pg_constraint c
+         JOIN pg_class t ON t.oid = c.conrelid
+         JOIN pg_class rt ON rt.oid = c.confrelid
+         JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE n.nspname = 'public' AND c.contype = 'f'
+          AND t.relname = ANY($1::text[])
+        ORDER BY c.conname`,
+      [tables],
+    );
+    const expectedForeignKeys = expectedCalendarLocationForeignKeys
+      .map(([name, table, columns, referencedTable, referencedColumns]) => ({
+        name,
+        table,
+        columns,
+        referencedTable,
+        referencedColumns,
+        deleteAction: "CASCADE",
+        updateAction: "CASCADE",
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+    assert.deepEqual(
+      foreignKeys.rows,
+      expectedForeignKeys,
+      "calendar/location foreign-key catalog differs from the contract",
+    );
 
     const trigger = await client.query(
       `SELECT p.proname, t.tgname, pg_get_triggerdef(t.oid) AS definition
