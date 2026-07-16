@@ -110,11 +110,16 @@ export default function Home() {
                 The live product is invite-only while Yev imports his Monica archive and connects Hermes, Calendar, and Pixel. This sample shows the intended daily cockpit without exposing real contacts.
               </p>
             </div>
-            <Link href="/auth/signup" className="shrink-0">
-              <button className="w-full lg:w-auto bg-[#c0c1ff] text-[#0b1326] px-8 py-3 rounded-xl font-extrabold hover:brightness-110 transition-all">
+            <div className="flex w-full shrink-0 flex-col gap-3 sm:w-auto sm:flex-row">
+              <Link href="/sample-workspace" className="w-full lg:w-auto bg-[#4edea3] text-[#0b1326] px-8 py-3 rounded-xl font-extrabold hover:brightness-110 transition-all text-center">
+                Open sample workspace
+              </Link>
+              <Link href="/auth/signup" className="w-full lg:w-auto">
+                <button className="w-full bg-[#c0c1ff] text-[#0b1326] px-8 py-3 rounded-xl font-extrabold hover:brightness-110 transition-all">
                 Request invite access
-              </button>
-            </Link>
+                </button>
+              </Link>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_0.8fr] gap-6">
@@ -194,6 +199,17 @@ export default function Home() {
                     </div>
                   ))}
                 </div>
+              </div>
+
+              <div className="bg-[#131b2e] border border-[#464554]/20 rounded-2xl p-6">
+                <h3 className="font-extrabold text-lg mb-4" style={{ fontFamily: 'Manrope' }}>Launch status and access</h3>
+                <div className="space-y-3 text-sm text-[#c7c4d7] leading-relaxed">
+                  <p>Private alpha is free while Yev validates the personal workflow. Pricing is not active yet.</p>
+                  <p>Use the read-only workspace to inspect one full Socos loop before asking for an invite.</p>
+                </div>
+                <Link href="/sample-workspace" className="mt-5 inline-flex w-full justify-center rounded-xl bg-[#4edea3] px-5 py-3 text-sm font-extrabold text-[#081225] hover:brightness-110">
+                  View complete sample loop
+                </Link>
               </div>
             </div>
           </div>

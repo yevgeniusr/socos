@@ -166,6 +166,9 @@ export default function SignupPage() {
         <Link href="/#demo" className="inline-flex font-semibold text-primary hover:underline">
           View sample brief before signing up
         </Link>
+        <Link href="/sample-workspace" className="inline-flex font-semibold text-primary hover:underline">
+          Open read-only sample workspace
+        </Link>
       </div>
     </div>
     </div>

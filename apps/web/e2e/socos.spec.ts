@@ -32,6 +32,25 @@ test.describe('SOCOS CRM', () => {
     await expect(page.getByText('View sample brief before signing up')).toBeVisible();
   });
 
+  test('public sample workspace proves the core workflow before invite signup', async ({ page }) => {
+    await page.goto('/');
+    await page.getByText('Watch Demo').first().click();
+    await page.getByRole('link', { name: 'Open sample workspace' }).click();
+
+    await expect(page).toHaveURL(/\/sample-workspace/);
+    await expect(page.getByRole('heading', { name: 'Sample relationship workspace' })).toBeVisible();
+    await expect(page.getByText('Captured interaction')).toBeVisible();
+    await expect(page.getByText('AI memory extraction')).toBeVisible();
+    await expect(page.getByText('Approval before outbound action')).toBeVisible();
+    await expect(page.getByText('Launch status and access')).toBeVisible();
+    await expect(page.getByText('Data controls')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Request invite access' }).first()).toBeVisible();
+
+    await page.goto('/auth/signup');
+    await page.getByRole('link', { name: 'Open read-only sample workspace' }).click();
+    await expect(page).toHaveURL(/\/sample-workspace/);
+  });
+
   test.describe('authentication', () => {
     test.beforeEach(async ({ page }) => {
       // Clear localStorage before each auth test
