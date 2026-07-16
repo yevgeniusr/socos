@@ -189,6 +189,12 @@ describe("VisitDerivationService adapter", () => {
         where: { id: "sample-id", ownerId: OWNER, deviceId: DEVICE },
       })
     );
+    expect(tx.locationSample.findMany.mock.calls[0][0].select).toEqual(
+      expect.objectContaining({ receivedAt: true })
+    );
+    expect(tx.derivedVisit.findMany.mock.calls[0][0].select).toEqual(
+      expect.objectContaining({ updatedAt: true })
+    );
     expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
       maxWait: 10_000,
       timeout: 120_000,
@@ -392,12 +398,6 @@ describe("VisitDerivationService adapter", () => {
       sourceMac: homeMac,
       departedAt: instant(12),
     });
-    const staleFuture = storedVisit({
-      id: "visit-stale-future",
-      arrivedAt: instant(30),
-      departedAt: instant(35),
-      sourceMac: "s".repeat(64),
-    });
     const rows = [
       sampleRow("home-0", 0),
       sampleRow("home-5", 5),
@@ -419,9 +419,7 @@ describe("VisitDerivationService adapter", () => {
       predecessor: rows[4]!,
       visits: (where) => {
         const threshold = where.OR[1].departedAt.gte as Date;
-        return threshold <= instant(12)
-          ? [closedHome, staleFuture]
-          : [staleFuture];
+        return threshold <= instant(12) ? [closedHome] : [];
       },
       rows,
       currentVisits: new Map([[homeMac, closedHome]]),
@@ -470,13 +468,7 @@ describe("VisitDerivationService adapter", () => {
         sourceMac: awayMac,
       }),
     });
-    expect(txAt22.derivedVisit.deleteMany).toHaveBeenCalledWith({
-      where: {
-        id: { in: [staleFuture.id] },
-        ownerId: OWNER,
-        deviceId: DEVICE,
-      },
-    });
+    expect(txAt22.derivedVisit.deleteMany).not.toHaveBeenCalled();
   });
 
   it("persists the exact centroid, radius, and source from all retained open support", async () => {
@@ -599,6 +591,88 @@ describe("VisitDerivationService adapter", () => {
     );
     expect(cipher.encrypt).not.toHaveBeenCalled();
   });
+
+  it("performs no derived mutations when any intersecting visit lacks opening support", async () => {
+    const supportedMac = "p".repeat(64);
+    const supported = storedVisit({ sourceMac: supportedMac });
+    const unsupported = storedVisit({
+      id: "visit-unsupported-closed",
+      arrivedAt: instant(2),
+      departedAt: instant(8),
+      sourceMac: "u".repeat(64),
+    });
+    const rows = [
+      sampleRow("home-0", 0),
+      sampleRow("home-5", 5),
+      sampleRow("home-10", 10),
+    ];
+    const tx = replayTransaction({
+      inserted: rows[2]!,
+      predecessor: rows[1]!,
+      visits: () => [supported, unsupported],
+      rows,
+      currentVisits: new Map([[supportedMac, supported]]),
+    });
+    const service = new VisitDerivationService(
+      { $transaction: (operation: any) => operation(tx) } as any,
+      coordinateCipher() as any,
+      { mac: jest.fn().mockReturnValue(supportedMac) } as any
+    );
+
+    await service.recomputeForSample(OWNER, DEVICE, "home-10");
+
+    expectNoDerivedMutations(tx);
+  });
+
+  it("treats an accuracy-excluded arrival row as incomplete visit support", async () => {
+    const open = storedVisit();
+    const rows = [
+      { ...sampleRow("excluded-opening", 0), accuracyM: 200.000_001 },
+      sampleRow("home-5", 5),
+      sampleRow("home-10", 10),
+    ];
+    const tx = replayTransaction({
+      inserted: rows[2]!,
+      predecessor: rows[1]!,
+      visits: () => [open],
+      rows,
+      currentVisits: new Map(),
+    });
+    const service = new VisitDerivationService(
+      { $transaction: (operation: any) => operation(tx) } as any,
+      coordinateCipher() as any,
+      { mac: jest.fn() } as any
+    );
+
+    await service.recomputeForSample(OWNER, DEVICE, "home-10");
+
+    expectNoDerivedMutations(tx);
+  });
+
+  it("rejects a late-received same-time row as support for expired closed history", async () => {
+    const closed = storedVisit({ departedAt: instant(12) });
+    const rows = [
+      { ...sampleRow("late-opening", 0), receivedAt: instant(21) },
+      sampleRow("home-5", 5),
+      sampleRow("home-10", 10),
+    ];
+    const tx = replayTransaction({
+      inserted: rows[2]!,
+      predecessor: rows[1]!,
+      visits: () => [closed],
+      rows,
+      currentVisits: new Map(),
+    });
+    const service = new VisitDerivationService(
+      { $transaction: (operation: any) => operation(tx) } as any,
+      coordinateCipher() as any,
+      { mac: jest.fn() } as any
+    );
+
+    await service.recomputeForSample(OWNER, DEVICE, "home-10");
+
+    expectNoDerivedMutations(tx);
+  });
 });
 
 function transactionHarness(options: { withVisit?: boolean } = {}) {
@@ -628,6 +702,7 @@ function sampleRow(id: string, minute: number) {
   return {
     id,
     recordedAt: instant(minute),
+    receivedAt: instant(minute),
     accuracyM: 10,
     coordinatesCiphertext: Buffer.from(id),
     coordinatesIv: Buffer.alloc(12),
@@ -649,8 +724,15 @@ function storedVisit(overrides: Record<string, unknown> = {}) {
     confidence: 1,
     sourceMac: "a".repeat(64),
     derivationVersion: 1,
+    updatedAt: instant(20),
     ...overrides,
   };
+}
+
+function expectNoDerivedMutations(tx: ReturnType<typeof replayTransaction>) {
+  expect(tx.derivedVisit.create).not.toHaveBeenCalled();
+  expect(tx.derivedVisit.updateMany).not.toHaveBeenCalled();
+  expect(tx.derivedVisit.deleteMany).not.toHaveBeenCalled();
 }
 
 function persistedOpenHarness(

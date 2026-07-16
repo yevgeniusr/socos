@@ -41,6 +41,7 @@ export type DerivationMetrics = {
 type StoredSample = {
   id: string;
   recordedAt: Date;
+  receivedAt: Date;
   accuracyM: number | null;
   coordinatesCiphertext: Uint8Array;
   coordinatesIv: Uint8Array;
@@ -60,6 +61,7 @@ type StoredVisit = {
   confidence: number;
   sourceMac: string;
   derivationVersion: number;
+  updatedAt: Date;
 };
 
 @Injectable()
@@ -203,6 +205,14 @@ export class VisitDerivationService {
           orderBy: [{ recordedAt: "asc" }, { id: "asc" }],
           select: storedSampleSelect,
         })) as StoredSample[];
+        if (
+          intersecting.some(
+            (visit) => !hasExactOpeningSupport(visit, storedSamples)
+          )
+        ) {
+          return;
+        }
+
         const samples = storedSamples.map((sample) => {
           const coordinates = this.cipher.decrypt<{ lat: number; lon: number }>(
             "location-sample-coordinates",
@@ -220,17 +230,7 @@ export class VisitDerivationService {
         });
 
         const keepIds = new Set<string>();
-        const unsupportedOpenVisits = intersecting.filter(
-          (visit) =>
-            visit.departedAt === null &&
-            !storedSamples.some(
-              (sample) =>
-                sample.recordedAt.getTime() === visit.arrivedAt.getTime()
-            )
-        );
-        for (const visit of unsupportedOpenVisits) keepIds.add(visit.id);
-        const candidates =
-          unsupportedOpenVisits.length > 0 ? [] : deriveVisits(samples);
+        const candidates = deriveVisits(samples);
 
         for (const candidate of candidates) {
           const canonical = sourceIdentity(deviceId, candidate.sampleIds);
@@ -546,6 +546,18 @@ function mergeVisits(
   );
 }
 
+function hasExactOpeningSupport(
+  visit: StoredVisit,
+  samples: readonly StoredSample[]
+): boolean {
+  return samples.some(
+    (sample) =>
+      sample.recordedAt.getTime() === visit.arrivedAt.getTime() &&
+      (sample.accuracyM === null || sample.accuracyM <= 200) &&
+      sample.receivedAt <= visit.updatedAt
+  );
+}
+
 function envelope(
   value: StoredSample | StoredVisit,
   prefix: "coordinates" | "centroid"
@@ -562,6 +574,7 @@ function envelope(
 const storedSampleSelect = {
   id: true,
   recordedAt: true,
+  receivedAt: true,
   accuracyM: true,
   coordinatesCiphertext: true,
   coordinatesIv: true,
@@ -581,4 +594,5 @@ const storedVisitSelect = {
   confidence: true,
   sourceMac: true,
   derivationVersion: true,
+  updatedAt: true,
 } as const;
