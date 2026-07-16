@@ -636,6 +636,202 @@ function createQuestHarness(
   };
 }
 
+function createQuestActionHarness(
+  completionType: "interaction" | "reminder" | "invalid" = "interaction"
+) {
+  const contact = {
+    id: "contact-synthetic",
+    ownerId,
+    firstName: "Synthetic",
+    lastName: "Person",
+    isDemo: false,
+  };
+  const reminder = {
+    id: "reminder-synthetic",
+    ownerId,
+    contactId: contact.id,
+    title: "Synthetic follow-up",
+    description: "Private reminder body",
+    scheduledAt: new Date("2026-07-18T08:00:00.000Z"),
+    status: "pending",
+  };
+  const quest = {
+    id: `quest-${completionType}`,
+    ownerId,
+    completionType,
+    targetId: completionType === "reminder" ? reminder.id : contact.id,
+    briefItem: { contactId: contact.id },
+  };
+
+  const prisma = {
+    quest: {
+      findFirst: jest.fn(async ({ where }: any) =>
+        where.id === quest.id && where.ownerId === quest.ownerId ? quest : null
+      ),
+    },
+    contact: {
+      findFirst: jest.fn(async ({ where }: any) =>
+        where.id === contact.id &&
+        where.ownerId === contact.ownerId &&
+        where.isDemo === false &&
+        contact.isDemo === false
+          ? contact
+          : null
+      ),
+    },
+    reminder: {
+      findFirst: jest.fn(async ({ where }: any) =>
+        where.id === reminder.id &&
+        where.ownerId === reminder.ownerId &&
+        where.contactId === reminder.contactId &&
+        where.contact?.ownerId === ownerId &&
+        where.contact?.isDemo === false
+          ? reminder
+          : null
+      ),
+    },
+  };
+
+  return {
+    contact,
+    prisma,
+    quest,
+    reminder,
+    service: new BriefFeedbackService(prisma as unknown as PrismaService),
+  };
+}
+
+describe("BriefFeedbackService quest action targets", () => {
+  it("returns the minimal non-demo interaction target", async () => {
+    const harness = createQuestActionHarness("interaction");
+
+    await expect(
+      harness.service.getQuestAction(ownerId, harness.quest.id)
+    ).resolves.toEqual({
+      questId: "quest-interaction",
+      completionType: "interaction",
+      contact: { id: "contact-synthetic", name: "Synthetic Person" },
+    });
+
+    expect(harness.prisma.quest.findFirst).toHaveBeenCalledWith({
+      where: { id: harness.quest.id, ownerId },
+      select: {
+        id: true,
+        completionType: true,
+        targetId: true,
+        briefItem: { select: { contactId: true } },
+      },
+    });
+    expect(harness.prisma.contact.findFirst).toHaveBeenCalledWith({
+      where: { id: harness.contact.id, ownerId, isDemo: false },
+      select: { id: true, firstName: true, lastName: true },
+    });
+    expect(harness.prisma.reminder.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("returns the exact minimal reminder target for the brief-item contact", async () => {
+    const harness = createQuestActionHarness("reminder");
+
+    await expect(
+      harness.service.getQuestAction(ownerId, harness.quest.id)
+    ).resolves.toEqual({
+      questId: "quest-reminder",
+      completionType: "reminder",
+      contact: { id: "contact-synthetic", name: "Synthetic Person" },
+      reminder: {
+        id: "reminder-synthetic",
+        title: "Synthetic follow-up",
+        scheduledAt: new Date("2026-07-18T08:00:00.000Z"),
+        status: "pending",
+      },
+    });
+
+    expect(harness.prisma.reminder.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: harness.quest.targetId,
+        ownerId,
+        contactId: harness.contact.id,
+        contact: { ownerId, isDemo: false },
+      },
+      select: {
+        id: true,
+        title: true,
+        scheduledAt: true,
+        status: true,
+      },
+    });
+  });
+
+  it.each([
+    [
+      "foreign quest",
+      (h: ReturnType<typeof createQuestActionHarness>) => {
+        h.quest.ownerId = "owner-foreign";
+      },
+    ],
+    [
+      "missing contact",
+      (h: ReturnType<typeof createQuestActionHarness>) => {
+        h.contact.id = "contact-missing";
+      },
+    ],
+    [
+      "demo contact",
+      (h: ReturnType<typeof createQuestActionHarness>) => {
+        h.contact.isDemo = true;
+      },
+    ],
+    [
+      "mismatched interaction contact",
+      (h: ReturnType<typeof createQuestActionHarness>) => {
+        h.quest.targetId = "contact-other";
+      },
+    ],
+    [
+      "mismatched reminder contact",
+      (h: ReturnType<typeof createQuestActionHarness>) => {
+        h.reminder.contactId = "contact-other";
+      },
+    ],
+    [
+      "missing reminder",
+      (h: ReturnType<typeof createQuestActionHarness>) => {
+        h.reminder.id = "reminder-missing";
+      },
+    ],
+    [
+      "invalid reminder status",
+      (h: ReturnType<typeof createQuestActionHarness>) => {
+        h.reminder.status = "skipped";
+      },
+    ],
+    [
+      "invalid stored completion type",
+      (h: ReturnType<typeof createQuestActionHarness>) => {
+        h.quest.completionType = "invalid";
+      },
+    ],
+  ])("returns the same not-found response for a %s", async (_label, mutate) => {
+    const harness = createQuestActionHarness(
+      _label.includes("reminder") ? "reminder" : "interaction"
+    );
+    mutate(harness);
+
+    let response: unknown;
+    try {
+      await harness.service.getQuestAction(ownerId, harness.quest.id);
+    } catch (error) {
+      response = (error as NotFoundException).getResponse();
+    }
+
+    expect(response).toEqual({
+      statusCode: 404,
+      message: "Quest action not found",
+      error: "Not Found",
+    });
+  });
+});
+
 describe("BriefFeedbackService quest completion", () => {
   beforeEach(() => {
     jest.useFakeTimers().setSystemTime(now);

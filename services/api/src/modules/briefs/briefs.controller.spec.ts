@@ -36,6 +36,7 @@ function createHarness() {
     generateForOwner: jest.fn(),
   };
   const feedback = {
+    getQuestAction: jest.fn(),
     recordItemFeedback: jest.fn(),
     completeQuest: jest.fn(),
   };
@@ -84,6 +85,7 @@ describe("BriefsController contract", () => {
       .sort();
 
     expect(routes).toEqual([
+      "GET quests/:questId/action",
       "GET today",
       "POST generate",
       "POST items/:itemId/feedback",
@@ -195,6 +197,25 @@ describe("BriefsController contract", () => {
       "quest-synthetic",
       "intent:quest-001",
       { interactionId: "interaction-synthetic" }
+    );
+  });
+
+  it("reads a quest action target for only the authenticated owner", async () => {
+    const harness = createHarness();
+    const result = {
+      questId: "quest-synthetic",
+      completionType: "interaction" as const,
+      contact: { id: "contact-synthetic", name: "Synthetic Person" },
+    };
+    harness.feedback.getQuestAction.mockResolvedValue(result);
+
+    await expect(
+      harness.controller.questAction(request, "quest-synthetic")
+    ).resolves.toEqual(result);
+
+    expect(harness.feedback.getQuestAction).toHaveBeenCalledWith(
+      request.user.userId,
+      "quest-synthetic"
     );
   });
 

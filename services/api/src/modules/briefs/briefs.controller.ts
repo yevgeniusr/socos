@@ -77,6 +77,15 @@ export class BriefsController {
     );
   }
 
+  @Get("quests/:questId/action")
+  @ApiOperation({ summary: "Get a verified quest action target" })
+  questAction(
+    @Request() request: AuthenticatedRequest,
+    @Param("questId") questId: string
+  ) {
+    return this.feedback.getQuestAction(request.user.userId, questId);
+  }
+
   @Post("quests/:questId/complete")
   @ApiOperation({ summary: "Complete a quest with verified CRM evidence" })
   @ApiHeader({ name: "Idempotency-Key", required: true })

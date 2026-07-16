@@ -299,6 +299,42 @@ test("accepts the authenticated and idempotent daily brief controller", () => {
   assert.equal(result.status, 0, result.stderr);
 });
 
+test("keeps the quest action target read owner-scoped and least privilege", () => {
+  const controller = readFileSync(
+    resolve(repoRoot, "services/api/src/modules/briefs/briefs.controller.ts"),
+    "utf8",
+  );
+  const service = readFileSync(
+    resolve(
+      repoRoot,
+      "services/api/src/modules/briefs/brief-feedback.service.ts",
+    ),
+    "utf8",
+  );
+  const controllerMethod = controller.slice(
+    controller.indexOf('@Get("quests/:questId/action")'),
+    controller.indexOf('@Post("quests/:questId/complete")'),
+  );
+  const serviceMethod = service.slice(
+    service.indexOf("async getQuestAction("),
+    service.indexOf("async recordItemFeedback("),
+  );
+
+  assert.match(controllerMethod, /request\.user\.userId/);
+  assert.doesNotMatch(controllerMethod, /@(?:Body|Query|Headers)\s*\(/);
+  assert.match(serviceMethod, /where:\s*\{\s*id:\s*questId,\s*ownerId\s*\}/);
+  assert.match(serviceMethod, /isDemo:\s*false/);
+  assert.doesNotMatch(serviceMethod, /\binclude\s*:/);
+  assert.doesNotMatch(
+    serviceMethod,
+    /\b(?:description|bio|photo|ownerId):\s*true/,
+  );
+  assert.doesNotMatch(
+    serviceMethod,
+    /\.(?:create|update|delete)(?:Many)?\s*\(/,
+  );
+});
+
 test("rejects dynamic daily brief paths that cannot be audited", () => {
   const directory = createTrackedFixture(
     "services/api/src/modules/briefs/briefs.controller.ts",

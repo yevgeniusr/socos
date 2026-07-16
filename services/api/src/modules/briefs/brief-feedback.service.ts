@@ -44,6 +44,24 @@ export interface QuestCompletionResult {
   xpAwarded: number;
 }
 
+export type QuestAction =
+  | {
+      questId: string;
+      completionType: "interaction";
+      contact: { id: string; name: string };
+    }
+  | {
+      questId: string;
+      completionType: "reminder";
+      contact: { id: string; name: string };
+      reminder: {
+        id: string;
+        title: string;
+        scheduledAt: Date;
+        status: "pending" | "completed";
+      };
+    };
+
 type FeedbackRecord = {
   id: string;
   briefItemId: string | null;
@@ -57,6 +75,79 @@ type FeedbackRecord = {
 @Injectable()
 export class BriefFeedbackService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async getQuestAction(ownerId: string, questId: string): Promise<QuestAction> {
+    const quest = await this.prisma.quest.findFirst({
+      where: { id: questId, ownerId },
+      select: {
+        id: true,
+        completionType: true,
+        targetId: true,
+        briefItem: { select: { contactId: true } },
+      },
+    });
+    const contactId = quest?.briefItem.contactId;
+    if (
+      !quest ||
+      !contactId ||
+      (quest.completionType !== "interaction" &&
+        quest.completionType !== "reminder") ||
+      (quest.completionType === "interaction" && quest.targetId !== contactId)
+    ) {
+      throw questActionNotFound();
+    }
+
+    const contact = await this.prisma.contact.findFirst({
+      where: { id: contactId, ownerId, isDemo: false },
+      select: { id: true, firstName: true, lastName: true },
+    });
+    if (!contact) throw questActionNotFound();
+
+    const targetContact = {
+      id: contact.id,
+      name: [contact.firstName, contact.lastName].filter(Boolean).join(" "),
+    };
+    if (quest.completionType === "interaction") {
+      return {
+        questId: quest.id,
+        completionType: "interaction",
+        contact: targetContact,
+      };
+    }
+
+    const reminder = await this.prisma.reminder.findFirst({
+      where: {
+        id: quest.targetId,
+        ownerId,
+        contactId,
+        contact: { ownerId, isDemo: false },
+      },
+      select: {
+        id: true,
+        title: true,
+        scheduledAt: true,
+        status: true,
+      },
+    });
+    if (
+      !reminder ||
+      (reminder.status !== "pending" && reminder.status !== "completed")
+    ) {
+      throw questActionNotFound();
+    }
+
+    return {
+      questId: quest.id,
+      completionType: "reminder",
+      contact: targetContact,
+      reminder: {
+        id: reminder.id,
+        title: reminder.title,
+        scheduledAt: reminder.scheduledAt,
+        status: reminder.status,
+      },
+    };
+  }
 
   async recordItemFeedback(
     ownerId: string,
@@ -678,6 +769,10 @@ function questAlreadyCompleted(): ConflictException {
     code: "QUEST_ALREADY_COMPLETED",
     message: "Quest has already been completed",
   });
+}
+
+function questActionNotFound(): NotFoundException {
+  return new NotFoundException("Quest action not found");
 }
 
 class QuestClaimLostError extends Error {}
