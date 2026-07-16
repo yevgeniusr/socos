@@ -70,9 +70,40 @@ second deployment reported no pending migrations.
 ## Deployment
 
 `services/api/start.sh` fails closed: it runs `prisma migrate deploy` and starts
-NestJS only after migration success. After the cloud restore proof and credential
-rotation are complete, deploy the commit through Coolify and perform read-only
-smoke checks:
+NestJS only after migration success. The current repository has seven checked-in
+migrations. After the cloud restore proof and credential rotation are complete,
+set the expected full commit SHA, run the read-only source preflight, deploy, and
+perform read-only smoke checks:
+
+```bash
+git fetch origin main
+expected_commit=$(git rev-parse origin/main)
+COOLIFY_EXPECTED_COMMIT_SHA="$expected_commit" \
+  scripts/coolify.sh deploy swwcg80gkw4k0k4oco8w8wgw
+```
+
+When Coolify reports `git_commit_sha=HEAD`, the source is not pinned to the
+expected revision. The preflight proves only that the application deploys
+`main`; exact commit identity remains a post-deployment verification. If Coolify
+exposes a full revision pin, the wrapper requires it to equal the expected SHA
+before POSTing the deployment.
+
+Require the preflight marker and all three deployment markers, then record them
+in the deployment log:
+
+```text
+deployment_preflight=main source_revision=HEAD verification=post-deploy
+deployment_uuid=<Coolify deployment UUID>
+deployment_status=finished
+deployment_commit=<the exact expected full SHA>
+```
+
+The wrapper fails if the finished deployment reports a missing/non-full commit
+or a commit other than `COOLIFY_EXPECTED_COMMIT_SHA`. Coolify may activate the
+new deployment before that mismatch is observable, so this check detects a bad
+activation; it does not prevent one when the source is configured as `HEAD`.
+Omitting the variable still reports the deployment UUID and deployed commit but
+does not claim branch or revision pinning.
 
 ```text
 GET /                         -> 200

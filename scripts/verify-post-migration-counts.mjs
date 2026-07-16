@@ -5,11 +5,22 @@ import { resolve } from 'node:path';
 
 const databaseUrl = process.env.DATABASE_URL;
 const metadataPath = process.argv[2];
-const expectedMigrationCount = Number.parseInt(process.env.EXPECTED_MIGRATION_COUNT ?? '5', 10);
-const allowedNewTables = new Set(['DMSceneResponse', 'DMSession', 'DungeonMasterScenario']);
+const expectedMigrationCount = 7;
+const agentInterfaceTables = [
+  'ActionOutbox',
+  'ActionProposal',
+  'AgentClient',
+  'AgentCredential',
+  'AgentIdempotencyRecord',
+  'ApprovalGrant',
+  'MutationAuditEvent',
+];
+const allowedNewTables = new Set([
+  ...agentInterfaceTables,
+]);
 
-if (!databaseUrl || !metadataPath || !Number.isSafeInteger(expectedMigrationCount)) {
-  console.error('DATABASE_URL, aggregate metadata, and a valid migration count are required.');
+if (!databaseUrl || !metadataPath) {
+  console.error('DATABASE_URL and aggregate metadata are required.');
   process.exit(64);
 }
 
@@ -35,6 +46,16 @@ try {
   before = parseMetadata(readFileSync(resolve(metadataPath), 'utf8'));
 } catch {
   console.error('Pre-migration aggregate metadata is invalid.');
+  process.exit(65);
+}
+
+const beforeMigrationCount = before.get('_prisma_migrations');
+if (beforeMigrationCount !== 6 && beforeMigrationCount !== 7) {
+  console.error('Pre-migration aggregate metadata must include migration history count 6 or 7.');
+  process.exit(65);
+}
+if (beforeMigrationCount === 7 && agentInterfaceTables.some((table) => !before.has(table))) {
+  console.error('Seven-migration metadata must include all agent-interface tables.');
   process.exit(65);
 }
 
@@ -77,7 +98,6 @@ try {
 }
 
 let valid = before.size > 0;
-const beforeMigrationCount = before.get('_prisma_migrations');
 for (const [table, count] of before) {
   if (table !== '_prisma_migrations') valid &&= after.get(table) === count;
 }
@@ -91,8 +111,8 @@ for (const table of allowedNewTables) {
   }
 }
 valid &&= after.get('_prisma_migrations') === expectedMigrationCount;
-valid &&= beforeMigrationCount === undefined
-  || beforeMigrationCount === expectedMigrationCount - 1;
+valid &&= beforeMigrationCount === expectedMigrationCount - 1
+  || beforeMigrationCount === expectedMigrationCount;
 for (const table of after.keys()) {
   valid &&= before.has(table) || allowedNewTables.has(table) || table === '_prisma_migrations';
 }

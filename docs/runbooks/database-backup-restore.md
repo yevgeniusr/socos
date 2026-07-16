@@ -18,17 +18,60 @@ The Socos PostgreSQL resource has an enabled Coolify backup schedule:
 - Backup configuration: `b85nxfljaz0xpo9xqa57lfr4`
 
 Before a schema deployment, use the configured Coolify context to trigger a new
-execution and wait for `status=success`. Do not use `--show-sensitive` or print
-the database resource response.
+execution and wait for that exact execution's `status=success`. Do not use
+`--show-sensitive` or print the database resource response. The CLI cannot
+decode the current execution response because Coolify returns `size` as a
+string. Use the authenticated raw API, immediately project only UUID, status,
+and timestamps, and bind the trigger to exactly one new UUID:
 
 ```bash
-coolify database backup trigger zwkk0scogckskkwss8oo48k4 b85nxfljaz0xpo9xqa57lfr4
-coolify database backup executions zwkk0scogckskkwss8oo48k4 b85nxfljaz0xpo9xqa57lfr4
+database_uuid=zwkk0scogckskkwss8oo48k4
+backup_uuid=b85nxfljaz0xpo9xqa57lfr4
+COOLIFY_BASE_URL=${COOLIFY_BASE_URL:-https://qed.quest}
+: "${COOLIFY_TOKEN:?COOLIFY_TOKEN must come from the runner secret store}"
+before=$(mktemp)
+current=$(mktemp)
+trap 'rm -f "$before" "$current"' EXIT
+
+backup_executions() {
+  curl --fail --silent --show-error \
+    -H "Authorization: Bearer $COOLIFY_TOKEN" \
+    -H 'Accept: application/json' \
+    "$COOLIFY_BASE_URL/api/v1/databases/$database_uuid/backups/$backup_uuid/executions" |
+    jq -ec '
+      if (.executions | type) == "array" then
+        [.executions[] | {uuid, status, created_at, updated_at}]
+      else
+        error("unexpected backup execution response")
+      end
+    '
+}
+
+backup_executions | jq -r '.[].uuid' | sort > "$before"
+coolify database backup trigger "$database_uuid" "$backup_uuid" --format json >/dev/null
+
+for _ in $(seq 1 120); do
+  executions=$(backup_executions)
+  jq -r '.[].uuid' <<<"$executions" | sort > "$current"
+  new_uuid=$(comm -13 "$before" "$current")
+  new_count=$(printf '%s\n' "$new_uuid" | sed '/^$/d' | wc -l | tr -d ' ')
+  [ "$new_count" -le 1 ] || { echo "Ambiguous backup executions." >&2; exit 1; }
+  if [ "$new_count" -eq 1 ]; then
+    status=$(jq -er --arg uuid "$new_uuid" \
+      '.[] | select(.uuid == $uuid) | .status' <<<"$executions")
+    case "$status" in
+      success) printf 'backup_execution_uuid=%s backup_status=success\n' "$new_uuid"; break ;;
+      failed|cancelled) printf 'backup_status=%s\n' "$status" >&2; exit 1 ;;
+    esac
+  fi
+  sleep 5
+done
+[ "${status:-}" = success ] || { echo "Backup polling timed out." >&2; exit 1; }
 ```
 
-The CLI version in use may fail to decode newer Coolify response fields. In
-that case, inspect only `uuid`, `status`, and timestamps through the authenticated
-API and keep the bearer token out of command output and shell history.
+The helper never emits the token, `size`, paths, filenames, or the full API
+response. Any unexpected response shape, multiple new UUIDs, terminal failure,
+or timeout stops the deployment.
 
 ## Independent Recovery Proof
 
@@ -37,12 +80,22 @@ its secret store, use an encrypted cloud volume for `BACKUP_DIR`, and destroy th
 runner and volume after verification.
 
 ```bash
-BACKUP_DIR=/secure-ephemeral/socos-backups \
-  DATABASE_URL="$PRODUCTION_DATABASE_URL" \
-  scripts/backup-postgres.sh
+BACKUP_DIR=/secure-ephemeral/socos-backups
+backup_output=$(DATABASE_URL="$PRODUCTION_DATABASE_URL" \
+  BACKUP_DIR="$BACKUP_DIR" scripts/backup-postgres.sh)
+printf '%s\n' "$backup_output"
+BACKUP_FILE=$(printf '%s\n' "$backup_output" | sed -n 's/^backup_file=//p')
+[ -f "$BACKUP_FILE" ] || { echo "Backup artifact was not published." >&2; exit 1; }
 
 ADMIN_DATABASE_URL="$CLOUD_ADMIN_DATABASE_URL" \
   scripts/verify-postgres-backup.sh "$BACKUP_FILE"
+
+# The default freshness guard requires the completed artifact to be over two
+# minutes old before encrypted upload and byte-for-byte remote verification.
+sleep 180
+SOURCE_DIR="$(dirname "$BACKUP_FILE")" \
+  RCLONE_REMOTE="$RCLONE_CRYPT_REMOTE" \
+  scripts/offsite-backup.sh
 ```
 
 Expected output is `backup_status=created`, then
@@ -58,9 +111,12 @@ deleted separately; the verifier reports the generated database identifier as
 ## Off-Host Replication
 
 The production host runs `scripts/offsite-backup.sh` after the Coolify backup
-window. An `rclone crypt` remote encrypts file contents, names, and directory
-names before upload to Google Drive. The job verifies plaintext source bytes
-against the encrypted remote and applies a 30-day off-host retention policy.
+window. It accepts Coolify `*.dmp` files and the complete independently verified
+bundle: `*.dump`, `*.dump.sha256`, and `*.dump.metadata.tsv`. A dump without both
+sidecars, or sidecars without their dump, cannot satisfy the freshness gate. An
+`rclone crypt` remote encrypts file contents, names, and directory names before
+upload to Google Drive. The job cryptchecks all three bundle files and expires
+sidecars before their dump so an interrupted retention pass cannot orphan them.
 The crypt password is held in the production root-only rclone config and
 separately in the operator's macOS Keychain. No decrypted dump is stored on the
 operator workstation.
@@ -92,15 +148,18 @@ as the verifier. Then run:
 DATABASE_URL="$RESTORED_DATABASE_URL" pnpm --filter @socos/api exec prisma migrate deploy
 DATABASE_URL="$RESTORED_DATABASE_URL" pnpm --filter @socos/api exec prisma validate
 DATABASE_URL="$RESTORED_DATABASE_URL" node scripts/compare-schema.mjs
-DATABASE_URL="$RESTORED_DATABASE_URL" node scripts/verify-post-migration-counts.mjs "$PRE_MIGRATION_METADATA"
+EXPECTED_MIGRATION_COUNT=7 DATABASE_URL="$RESTORED_DATABASE_URL" \
+  node scripts/verify-post-migration-counts.mjs "$PRE_MIGRATION_METADATA"
 ```
 
 Require `schema_status=match statements=0` and
 `migration_counts_status=preserved`. The count verifier requires every
-preexisting public table count to remain identical, allows only the three known
-empty DM tables, and requires exactly four migration-history rows. Drop the
-disposable database before declaring the drill successful. If any command
-fails, stop the deployment and retain only redacted schema metadata logs.
+preexisting public table count to remain identical. For the current rollout it
+accepts either migration history `6 -> 7` or the idempotent `7 -> 7` no-op,
+requires newly introduced agent-interface tables to be empty, and requires
+exactly seven migration-history rows. Drop the disposable database before
+declaring the drill successful. If any command fails, stop the deployment and
+retain only redacted schema metadata logs.
 
 ## Current Operational Gate
 

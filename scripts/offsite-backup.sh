@@ -36,10 +36,32 @@ if [ ! -d "$SOURCE_DIR" ]; then
   exit 66
 fi
 
-if ! find "$SOURCE_DIR" -type f -name '*.dmp' \
+invalid_bundle=$(find "$SOURCE_DIR" -type f \
+  \( -name '*.dump' -o -name '*.dump.sha256' -o -name '*.dump.metadata.tsv' \) \
+  -exec sh -c '
+    for file do
+      case "$file" in
+        *.dump.sha256) base=${file%.sha256}; [ -f "$base" ] || printf "%s\n" "$file" ;;
+        *.dump.metadata.tsv) base=${file%.metadata.tsv}; [ -f "$base" ] || printf "%s\n" "$file" ;;
+        *.dump) [ -f "$file.sha256" ] && [ -f "$file.metadata.tsv" ] || printf "%s\n" "$file" ;;
+      esac
+    done
+  ' sh {} +)
+if [ -n "$invalid_bundle" ]; then
+  echo "Every independent backup must be a complete dump bundle." >&2
+  exit 67
+fi
+
+recent_dmp=$(find "$SOURCE_DIR" -type f -name '*.dmp' \
   -mmin "+$MIN_SOURCE_AGE_MINUTES" \
   -mmin "-$MAX_SOURCE_AGE_MINUTES" \
-  -print -quit | grep -q .; then
+  -print -quit)
+recent_dump=$(find "$SOURCE_DIR" -type f -name '*.dump' \
+  -mmin "+$MIN_SOURCE_AGE_MINUTES" \
+  -mmin "-$MAX_SOURCE_AGE_MINUTES" \
+  -exec sh -c '[ -f "$1.sha256" ] && [ -f "$1.metadata.tsv" ]' sh {} \; \
+  -print -quit)
+if [ -z "$recent_dmp" ] && [ -z "$recent_dump" ]; then
   echo "No recent completed PostgreSQL backup is available; retention was skipped." >&2
   exit 67
 fi
@@ -57,7 +79,9 @@ fi
 # Repair any duplicates left by an interrupted Google Drive upload before the
 # copy operation tries to compare destination objects by name.
 rclone mkdir "$RCLONE_REMOTE"
-rclone dedupe "$RCLONE_REMOTE" --dedupe-mode newest --include '*.dmp'
+rclone dedupe "$RCLONE_REMOTE" --dedupe-mode newest \
+  --include '*.dmp' --include '*.dump' \
+  --include '*.dump.sha256' --include '*.dump.metadata.tsv'
 
 rclone copy "$SOURCE_DIR" "$RCLONE_REMOTE" \
   --include '*.dmp' \
@@ -66,9 +90,19 @@ rclone copy "$SOURCE_DIR" "$RCLONE_REMOTE" \
   --transfers 2 \
   --checkers 4
 
+rclone copy "$SOURCE_DIR" "$RCLONE_REMOTE" \
+  --include '*.dump' \
+  --include '*.dump.sha256' \
+  --include '*.dump.metadata.tsv' \
+  --checksum \
+  --transfers 2 \
+  --checkers 4
+
 # Google Drive permits duplicate object names after an interrupted upload.
 # Keep the newest encrypted object before the integrity comparison.
-rclone dedupe "$RCLONE_REMOTE" --dedupe-mode newest --include '*.dmp'
+rclone dedupe "$RCLONE_REMOTE" --dedupe-mode newest \
+  --include '*.dmp' --include '*.dump' \
+  --include '*.dump.sha256' --include '*.dump.metadata.tsv'
 
 # Verify plaintext source bytes against the encrypted remote without writing
 # a decrypted dump outside the production host.
@@ -77,10 +111,28 @@ rclone cryptcheck "$SOURCE_DIR" "$RCLONE_REMOTE" \
   --min-age "${MIN_SOURCE_AGE_MINUTES}m" \
   --one-way
 
+rclone cryptcheck "$SOURCE_DIR" "$RCLONE_REMOTE" \
+  --include '*.dump' \
+  --include '*.dump.sha256' \
+  --include '*.dump.metadata.tsv' \
+  --one-way
+
 rclone delete "$RCLONE_REMOTE" --include '*.dmp' --min-age "${RETENTION_DAYS}d"
+
+# Expire independent backups as a bundle. Delete the dump last so an interrupted
+# retention pass cannot leave sidecars without their dump.
+rclone lsf "$RCLONE_REMOTE" --files-only \
+  --include '*.dump' --min-age "${RETENTION_DAYS}d" |
+  while IFS= read -r old_dump; do
+    [ -n "$old_dump" ] || continue
+    rclone deletefile "$RCLONE_REMOTE/$old_dump.metadata.tsv"
+    rclone deletefile "$RCLONE_REMOTE/$old_dump.sha256"
+    rclone deletefile "$RCLONE_REMOTE/$old_dump"
+  done
 rclone rmdirs "$RCLONE_REMOTE" --leave-root
 
-if ! rclone lsf "$RCLONE_REMOTE" --files-only --include '*.dmp' | grep -q .; then
+if ! rclone lsf "$RCLONE_REMOTE" --files-only \
+  --include '*.dmp' --include '*.dump' | grep -q .; then
   echo "Off-host retention left no verified PostgreSQL backup." >&2
   exit 69
 fi

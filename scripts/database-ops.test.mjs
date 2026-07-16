@@ -276,71 +276,19 @@ test('restore verification reports cleanup failure after a restore error', () =>
   assert.match(result.stderr, /database deletion failed/);
 });
 
-test('post-migration verifier preserves old counts and permits only known empty tables', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'socos-post-migration-test-'));
-  const bin = join(dir, 'bin');
-  execFileSync('mkdir', ['-p', bin]);
-  const before = join(dir, 'before.tsv');
-  writeFileSync(before, 'table_name\trow_count\nContact\t106\nInteraction\t13\n');
-  executable(
-    bin,
-    'psql',
-    "printf 'table_name\\trow_count\\nContact\\t106\\nDMSceneResponse\\t0\\nDMSession\\t0\\nDungeonMasterScenario\\t0\\nInteraction\\t13\\n_prisma_migrations\\t5\\n'",
-  );
-
-  const result = run('scripts/verify-post-migration-counts.mjs', {
-    args: [before],
-    env: {
-      DATABASE_URL: 'postgresql://secret-user:secret-password@example.invalid/socos',
-      PATH: `${bin}:${process.env.PATH}`,
-    },
-  });
-
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(
-    result.stdout.trim(),
-    'migration_counts_status=preserved existing_tables=2 new_empty_tables=3 migrations=5',
-  );
-  assert.doesNotMatch(`${result.stdout}${result.stderr}`, /secret-user|secret-password/);
-});
-
-test('post-migration verifier rejects changed rows and populated new tables', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'socos-post-migration-failure-test-'));
-  const bin = join(dir, 'bin');
-  execFileSync('mkdir', ['-p', bin]);
-  const before = join(dir, 'before.tsv');
-  writeFileSync(before, 'table_name\trow_count\nContact\t106\nInteraction\t13\n');
-  executable(
-    bin,
-    'psql',
-    "printf 'table_name\\trow_count\\nContact\\t105\\nDMSceneResponse\\t1\\nDMSession\\t0\\nDungeonMasterScenario\\t0\\nInteraction\\t13\\n_prisma_migrations\\t5\\n'",
-  );
-
-  const result = run('scripts/verify-post-migration-counts.mjs', {
-    args: [before],
-    env: {
-      DATABASE_URL: 'postgresql://secret-user:secret-password@example.invalid/socos',
-      PATH: `${bin}:${process.env.PATH}`,
-    },
-  });
-
-  assert.equal(result.status, 2);
-  assert.equal(result.stderr.trim(), 'Post-migration aggregate verification failed.');
-});
-
-test('post-migration verifier preserves DM tables during ongoing migrations', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'socos-post-migration-ongoing-test-'));
+test('post-migration verifier supports the current agent-interface rollout', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'socos-agent-migration-test-'));
   const bin = join(dir, 'bin');
   execFileSync('mkdir', ['-p', bin]);
   const before = join(dir, 'before.tsv');
   writeFileSync(
     before,
-    'table_name\trow_count\nContact\t106\nDMSceneResponse\t2\nDMSession\t1\nDungeonMasterScenario\t3\nInteraction\t13\n_prisma_migrations\t4\n',
+    'table_name\trow_count\nContact\t106\nDMSceneResponse\t2\nDMSession\t1\nDungeonMasterScenario\t3\n_prisma_migrations\t6\n',
   );
   executable(
     bin,
     'psql',
-    "printf 'table_name\\trow_count\\nContact\\t106\\nDMSceneResponse\\t2\\nDMSession\\t1\\nDungeonMasterScenario\\t3\\nInteraction\\t13\\n_prisma_migrations\\t5\\n'",
+    "printf 'table_name\\trow_count\\nActionOutbox\\t0\\nActionProposal\\t0\\nAgentClient\\t0\\nAgentCredential\\t0\\nAgentIdempotencyRecord\\t0\\nApprovalGrant\\t0\\nContact\\t106\\nDMSceneResponse\\t2\\nDMSession\\t1\\nDungeonMasterScenario\\t3\\nMutationAuditEvent\\t0\\n_prisma_migrations\\t7\\n'",
   );
 
   const result = run('scripts/verify-post-migration-counts.mjs', {
@@ -354,8 +302,64 @@ test('post-migration verifier preserves DM tables during ongoing migrations', ()
   assert.equal(result.status, 0, result.stderr);
   assert.equal(
     result.stdout.trim(),
-    'migration_counts_status=preserved existing_tables=5 new_empty_tables=0 migrations=5',
+    'migration_counts_status=preserved existing_tables=4 new_empty_tables=7 migrations=7',
   );
+});
+
+test('post-migration verifier supports a seven-migration no-op and preserves counts', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'socos-agent-noop-test-'));
+  const bin = join(dir, 'bin');
+  execFileSync('mkdir', ['-p', bin]);
+  const before = join(dir, 'before.tsv');
+  const metadata =
+    'table_name\trow_count\nActionOutbox\t1\nActionProposal\t2\nAgentClient\t3\nAgentCredential\t3\nAgentIdempotencyRecord\t4\nApprovalGrant\t1\nContact\t106\nDMSceneResponse\t2\nDMSession\t1\nDungeonMasterScenario\t3\nMutationAuditEvent\t8\n_prisma_migrations\t7\n';
+  writeFileSync(before, metadata);
+  executable(bin, 'psql', `printf '${metadata.replaceAll('\n', '\\n')}'`);
+
+  const result = run('scripts/verify-post-migration-counts.mjs', {
+    args: [before],
+    env: {
+      DATABASE_URL: 'postgresql://secret-user:secret-password@example.invalid/socos',
+      PATH: `${bin}:${process.env.PATH}`,
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(
+    result.stdout.trim(),
+    'migration_counts_status=preserved existing_tables=11 new_empty_tables=0 migrations=7',
+  );
+});
+
+test('post-migration verifier rejects metadata without migration history', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'socos-missing-history-test-'));
+  const before = join(dir, 'before.tsv');
+  writeFileSync(before, 'table_name\trow_count\nContact\t106\n');
+
+  const result = run('scripts/verify-post-migration-counts.mjs', {
+    args: [before],
+    env: { DATABASE_URL: 'postgresql://example.invalid/socos' },
+  });
+
+  assert.equal(result.status, 65);
+  assert.match(result.stderr, /migration history/i);
+});
+
+test('post-migration verifier rejects count-seven metadata missing an agent table', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'socos-incomplete-agent-metadata-test-'));
+  const before = join(dir, 'before.tsv');
+  writeFileSync(
+    before,
+    'table_name\trow_count\nActionProposal\t0\nAgentClient\t0\nAgentCredential\t0\nAgentIdempotencyRecord\t0\nApprovalGrant\t0\nContact\t106\nMutationAuditEvent\t0\n_prisma_migrations\t7\n',
+  );
+
+  const result = run('scripts/verify-post-migration-counts.mjs', {
+    args: [before],
+    env: { DATABASE_URL: 'postgresql://example.invalid/socos' },
+  });
+
+  assert.equal(result.status, 65);
+  assert.match(result.stderr, /agent-interface tables/i);
 });
 
 test('contact provenance migration is forward-only and owner-scoped', () => {
@@ -459,20 +463,48 @@ test('off-host backup replication requires encryption-aware verification', () =>
   assert.match(script, /rclone cryptcheck/);
   assert.match(script, /--one-way/);
   assert.match(script, /rclone delete/);
+  assert.match(script, /--include '\*\.dmp'/);
+  assert.match(script, /--include '\*\.dump'/);
+  assert.match(script, /--include '\*\.dump\.sha256'/);
+  assert.match(script, /--include '\*\.dump\.metadata\.tsv'/);
+  assert.match(
+    script,
+    /rclone copy[\s\S]*?--include '\*\.dump'[\s\S]*?--include '\*\.dump\.sha256'[\s\S]*?--include '\*\.dump\.metadata\.tsv'/,
+  );
+  assert.match(
+    script,
+    /rclone cryptcheck[\s\S]*?--include '\*\.dump'[\s\S]*?--include '\*\.dump\.sha256'[\s\S]*?--include '\*\.dump\.metadata\.tsv'/,
+  );
+  assert.match(
+    script,
+    /deletefile "\$RCLONE_REMOTE\/\$old_dump\.metadata\.tsv"[\s\S]*deletefile "\$RCLONE_REMOTE\/\$old_dump\.sha256"[\s\S]*deletefile "\$RCLONE_REMOTE\/\$old_dump"/,
+  );
   assert.doesNotMatch(script, /password|token|access_key|secret_key/i);
 });
 
-function prepareOffsiteTest({ backend = 'crypt', cryptcheckFails = false, stale = false } = {}) {
+function prepareOffsiteTest({
+  backend = 'crypt',
+  cryptcheckFails = false,
+  extension = 'dmp',
+  incompleteBundle = false,
+  sidecarsOnly = false,
+  remoteExpiredBundle = false,
+  stale = false,
+} = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'socos-offsite-test-'));
   const bin = join(dir, 'bin');
   const source = join(dir, 'source');
   const log = join(dir, 'rclone.log');
   execFileSync('mkdir', ['-p', bin, source]);
-  const dump = join(source, 'backup.dmp');
-  writeFileSync(dump, 'encrypted-offsite-fixture');
+  const dump = join(source, `backup.${extension}`);
+  if (!sidecarsOnly) writeFileSync(dump, 'encrypted-offsite-fixture');
+  if (extension === 'dump') {
+    writeFileSync(`${dump}.sha256`, 'synthetic-checksum');
+    if (!incompleteBundle) writeFileSync(`${dump}.metadata.tsv`, 'table_name\trow_count\n');
+  }
   const age = stale ? 48 * 60 * 60 * 1000 : 60 * 60 * 1000;
   const modified = new Date(Date.now() - age);
-  utimesSync(dump, modified, modified);
+  for (const file of readdirSync(source)) utimesSync(join(source, file), modified, modified);
   executable(
     bin,
     'rclone',
@@ -480,7 +512,10 @@ function prepareOffsiteTest({ backend = 'crypt', cryptcheckFails = false, stale 
 case "$1" in
   config) printf '[synthetic]\\ntype = ${backend}\\n' ;;
   cryptcheck) [ "${cryptcheckFails ? '1' : '0'}" = 0 ] ;;
-  lsf) printf 'backup.dmp\\n' ;;
+  lsf) case "$*" in
+    *--min-age*) if [ "${remoteExpiredBundle ? '1' : '0'}" = 1 ]; then printf 'expired.dump\\n'; fi ;;
+    *) printf 'backup.dmp\\n' ;;
+  esac ;;
 esac`,
   );
   return { bin, source, log };
@@ -516,9 +551,98 @@ test('off-host backup verifies before scoped retention', () => {
 
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(readFileSync(fixture.log, 'utf8').trim().split('\n'), [
-    'config', 'mkdir', 'dedupe', 'copy', 'dedupe', 'cryptcheck', 'delete', 'rmdirs', 'lsf',
+    'config', 'mkdir', 'dedupe', 'copy', 'copy', 'dedupe', 'cryptcheck', 'cryptcheck',
+    'delete', 'lsf', 'rmdirs', 'lsf',
   ]);
   assert.match(result.stdout, /offsite_backup_status=verified/);
+});
+
+test('off-host backup replicates an independently created dump artifact', () => {
+  const fixture = prepareOffsiteTest({ extension: 'dump' });
+  const result = run('scripts/offsite-backup.sh', {
+    env: {
+      SOURCE_DIR: fixture.source,
+      RCLONE_REMOTE: 'encrypted:socos-postgres-backups',
+      MIN_SOURCE_AGE_MINUTES: '1',
+      MAX_SOURCE_AGE_MINUTES: '120',
+      PATH: `${fixture.bin}:${process.env.PATH}`,
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /offsite_backup_status=verified/);
+});
+
+test('off-host backup rejects incomplete dump bundles and orphaned sidecars', () => {
+  for (const fixture of [
+    prepareOffsiteTest({ extension: 'dump', incompleteBundle: true }),
+    prepareOffsiteTest({ extension: 'dump', sidecarsOnly: true }),
+  ]) {
+    const result = run('scripts/offsite-backup.sh', {
+      env: {
+        SOURCE_DIR: fixture.source,
+        RCLONE_REMOTE: 'encrypted:socos-postgres-backups',
+        MIN_SOURCE_AGE_MINUTES: '1',
+        MAX_SOURCE_AGE_MINUTES: '120',
+        PATH: `${fixture.bin}:${process.env.PATH}`,
+      },
+    });
+
+    assert.equal(result.status, 67);
+    assert.equal(existsSync(fixture.log), false);
+  }
+});
+
+test('off-host backup rejects invalid dump artifacts beside a valid Coolify dump', () => {
+  const fixture = prepareOffsiteTest();
+  const incomplete = join(fixture.source, 'incomplete.dump');
+  writeFileSync(incomplete, 'incomplete');
+  writeFileSync(`${incomplete}.sha256`, 'checksum-only');
+  const result = run('scripts/offsite-backup.sh', {
+    env: {
+      SOURCE_DIR: fixture.source,
+      RCLONE_REMOTE: 'encrypted:socos-postgres-backups',
+      MIN_SOURCE_AGE_MINUTES: '1',
+      MAX_SOURCE_AGE_MINUTES: '120',
+      PATH: `${fixture.bin}:${process.env.PATH}`,
+    },
+  });
+  assert.equal(result.status, 67);
+  assert.equal(existsSync(fixture.log), false);
+});
+
+test('off-host backup rejects each orphan sidecar form before rclone', () => {
+  for (const suffix of ['.dump.sha256', '.dump.metadata.tsv']) {
+    const fixture = prepareOffsiteTest();
+    writeFileSync(join(fixture.source, `orphan${suffix}`), 'orphan');
+    const result = run('scripts/offsite-backup.sh', {
+      env: {
+        SOURCE_DIR: fixture.source,
+        RCLONE_REMOTE: 'encrypted:socos-postgres-backups',
+        MIN_SOURCE_AGE_MINUTES: '1',
+        MAX_SOURCE_AGE_MINUTES: '120',
+        PATH: `${fixture.bin}:${process.env.PATH}`,
+      },
+    });
+    assert.equal(result.status, 67);
+    assert.equal(existsSync(fixture.log), false);
+  }
+});
+
+test('off-host backup expires remote bundles with a Coolify-only local source', () => {
+  const fixture = prepareOffsiteTest({ remoteExpiredBundle: true });
+  const result = run('scripts/offsite-backup.sh', {
+    env: {
+      SOURCE_DIR: fixture.source,
+      RCLONE_REMOTE: 'encrypted:socos-postgres-backups',
+      MIN_SOURCE_AGE_MINUTES: '1',
+      MAX_SOURCE_AGE_MINUTES: '120',
+      PATH: `${fixture.bin}:${process.env.PATH}`,
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const commands = readFileSync(fixture.log, 'utf8').trim().split('\n');
+  assert.equal(commands.filter((command) => command === 'deletefile').length, 3);
 });
 
 test('off-host backup skips retention on stale source or failed verification', () => {
