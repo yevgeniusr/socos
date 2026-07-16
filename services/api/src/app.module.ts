@@ -29,6 +29,7 @@ import { BriefsModule } from './modules/briefs/briefs.module.js';
 import { AgentAuthModule } from './modules/agent-auth/agent-auth.module.js';
 import { AgentSecurityModule } from './modules/agent-security/agent-security.module.js';
 import { McpModule } from './modules/mcp/mcp.module.js';
+import { PersonalDataModule } from './modules/personal-data/personal-data.module.js';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { McpModule } from './modules/mcp/mcp.module.js';
     AgentAuthModule,
     AgentSecurityModule,
     McpModule,
+    PersonalDataModule,
   ],
   controllers: [
     HealthController,

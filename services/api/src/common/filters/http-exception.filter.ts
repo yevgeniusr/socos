@@ -68,13 +68,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
             request: {
               method: request.method,
               url: requestPath,
-              headers: sentryRequestHeaders(request.headers),
             },
           }));
           scope.setContext("request", {
             method: request.method,
             url: requestPath,
-            headers: redactCredentialHeaders(request.headers),
           });
           Sentry.captureException(exception);
         });
@@ -125,17 +123,5 @@ function redactCredentialHeaders(
       name,
       CREDENTIAL_HEADER_NAME.test(name) ? REDACTED_HEADER_VALUE : value,
     ])
-  );
-}
-
-function sentryRequestHeaders(
-  headers: Request["headers"]
-): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(redactCredentialHeaders(headers)).flatMap(([name, value]) =>
-      value === undefined
-        ? []
-        : [[name, Array.isArray(value) ? value.join(", ") : value]]
-    )
   );
 }

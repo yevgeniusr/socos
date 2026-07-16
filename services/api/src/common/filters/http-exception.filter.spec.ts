@@ -178,7 +178,16 @@ describe("AllExceptionsFilter", () => {
       url: "/api/integrations/google-calendar/connect?code=synthetic-sensitive-query",
       originalUrl:
         "/api/integrations/google-calendar/connect?code=synthetic-sensitive-query",
-      headers: { authorization: "Bearer synthetic-sensitive-token" },
+      headers: {
+        authorization: "Bearer synthetic-sensitive-token",
+        referer:
+          "https://example.test/callback?code=synthetic-sensitive-referer-code",
+        "x-original-url":
+          "/api/events?feed=synthetic-sensitive-private-ics-url",
+        "x-forwarded-uri":
+          "/api/integrations/google-calendar/callback?state=synthetic-sensitive-forwarded-state",
+        "arbitrary-header": "synthetic-sensitive-arbitrary-header",
+      },
       body: { code: "synthetic-sensitive-body" },
       query: { code: "synthetic-sensitive-query" },
     };
@@ -205,28 +214,26 @@ describe("AllExceptionsFilter", () => {
     expect(sentryCurrentScope.clear).toHaveBeenCalledTimes(1);
     expect(sentryCurrentScope.addEventProcessor).toHaveBeenCalledTimes(1);
     const sanitizeEvent = sentryCurrentScope.addEventProcessor.mock.calls[0][0];
-    expect(
-      sanitizeEvent({
-        request: {
-          data: "synthetic-sensitive-body",
-          query_string: "code=synthetic-sensitive-query",
-        },
-      })
-    ).toEqual({
+    const processedEvent = sanitizeEvent({
+      request: {
+        data: "synthetic-sensitive-body",
+        query_string: "code=synthetic-sensitive-query",
+      },
+    });
+    expect(processedEvent).toEqual({
       request: {
         method: "POST",
         url: "/api/integrations/google-calendar/connect",
-        headers: { authorization: "[REDACTED]" },
       },
     });
     expect(sentryCurrentScope.setContext).toHaveBeenCalledWith("request", {
       method: "POST",
       url: "/api/integrations/google-calendar/connect",
-      headers: { authorization: "[REDACTED]" },
     });
     const sentryPayload = JSON.stringify({
       exception: capture.mock.calls[0][0],
-      request: sentryCurrentScope.setContext.mock.calls[0][1],
+      processedEvent,
+      context: sentryCurrentScope.setContext.mock.calls[0][1],
     });
     for (const secret of [
       "synthetic-sensitive-provider-message",
@@ -235,6 +242,10 @@ describe("AllExceptionsFilter", () => {
       "synthetic-sensitive-token",
       "synthetic-sensitive-body",
       "synthetic-sensitive-query",
+      "synthetic-sensitive-referer-code",
+      "synthetic-sensitive-private-ics-url",
+      "synthetic-sensitive-forwarded-state",
+      "synthetic-sensitive-arbitrary-header",
     ]) {
       expect(sentryPayload).not.toContain(secret);
     }
