@@ -1,55 +1,195 @@
-import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { createRequire } from 'node:module';
-import { readFileSync } from 'node:fs';
-import { basename, resolve } from 'node:path';
-import test from 'node:test';
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
+import { basename, resolve } from "node:path";
+import test from "node:test";
 
-const root = resolve(import.meta.dirname, '..');
+const root = resolve(import.meta.dirname, "..");
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const migrationPaths = [
-  'services/api/prisma/migrations/20260327000000_initial_schema/migration.sql',
-  'services/api/prisma/migrations/20260331000000_add_celebrations/migration.sql',
+  "services/api/prisma/migrations/20260327000000_initial_schema/migration.sql",
+  "services/api/prisma/migrations/20260331000000_add_celebrations/migration.sql",
 ];
 const reconciliationPath = resolve(
   root,
-  'services/api/prisma/migrations/20260715000000_reconcile_production_schema/migration.sql',
+  "services/api/prisma/migrations/20260715000000_reconcile_production_schema/migration.sql",
 );
 const preBriefMigrationPaths = [
-  'services/api/prisma/migrations/20260715000000_reconcile_production_schema/migration.sql',
-  'services/api/prisma/migrations/20260716000000_persist_dm_debrief/migration.sql',
-  'services/api/prisma/migrations/20260716120000_add_contact_provenance/migration.sql',
+  "services/api/prisma/migrations/20260715000000_reconcile_production_schema/migration.sql",
+  "services/api/prisma/migrations/20260716000000_persist_dm_debrief/migration.sql",
+  "services/api/prisma/migrations/20260716120000_add_contact_provenance/migration.sql",
 ];
 const dailyBriefMigrationPath = resolve(
   root,
-  'services/api/prisma/migrations/20260716130000_daily_social_brief/migration.sql',
+  "services/api/prisma/migrations/20260716130000_daily_social_brief/migration.sql",
 );
-const expectedBriefTables = ['BriefBatch', 'BriefItem', 'Quest', 'BriefFeedback', 'XpTransaction'];
+const agentInterfaceMigrationPath = resolve(
+  root,
+  "services/api/prisma/migrations/20260716140000_agent_interface/migration.sql",
+);
+const expectedBriefTables = [
+  "BriefBatch",
+  "BriefItem",
+  "Quest",
+  "BriefFeedback",
+  "XpTransaction",
+];
 const expectedUniqueIndexes = [
-  'BriefBatch_ownerId_localDate_key',
-  'BriefFeedback_ownerId_idempotencyKey_key',
-  'XpTransaction_ownerId_sourceType_sourceId_key',
+  "BriefBatch_ownerId_localDate_key",
+  "BriefFeedback_ownerId_idempotencyKey_key",
+  "XpTransaction_ownerId_sourceType_sourceId_key",
 ];
 const expectedChecks = [
-  ['User_briefHourLocal_check', /briefHourLocal >= 0.+briefHourLocal <= 23/],
-  ['Contact_importance_check', /importance >= 1.+importance <= 5/],
-  ['Contact_preferredCadenceDays_check', /preferredCadenceDays >= 7.+preferredCadenceDays <= 365/],
-  ['Quest_xpReward_check', /xpReward.*>= 0/],
-  ['BriefFeedback_target_check', /num_nonnulls\(briefItemId, questId\) = 1/],
+  ["User_briefHourLocal_check", /briefHourLocal >= 0.+briefHourLocal <= 23/],
+  ["Contact_importance_check", /importance >= 1.+importance <= 5/],
+  [
+    "Contact_preferredCadenceDays_check",
+    /preferredCadenceDays >= 7.+preferredCadenceDays <= 365/,
+  ],
+  ["Quest_xpReward_check", /xpReward.*>= 0/],
+  ["BriefFeedback_target_check", /num_nonnulls\(briefItemId, questId\) = 1/],
+];
+const expectedAgentTables = [
+  "AgentClient",
+  "AgentCredential",
+  "AgentIdempotencyRecord",
+  "ActionProposal",
+  "ApprovalGrant",
+  "MutationAuditEvent",
+  "ActionOutbox",
+];
+const expectedAgentUniqueIndexes = [
+  "AgentClient_id_ownerId_key",
+  "AgentCredential_tokenPrefix_key",
+  "AgentIdempotencyRecord_clientId_operation_idempotencyKey_key",
+  "ActionProposal_id_ownerId_clientId_key",
+  "ApprovalGrant_proposalId_key",
+  "ApprovalGrant_id_ownerId_clientId_key",
+  "ApprovalGrant_proposalId_ownerId_clientId_key",
+  "ActionOutbox_grantId_key",
+  "ActionOutbox_grantId_ownerId_clientId_key",
+];
+const expectedAgentExpiryIndexes = [
+  "AgentCredential_expiresAt_idx",
+  "AgentIdempotencyRecord_expiresAt_idx",
+  "ActionProposal_expiresAt_idx",
+  "ApprovalGrant_expiresAt_idx",
+];
+const expectedAgentChecks = [
+  ["AgentClient_status_check", /status.*active.*revoked/],
+  ["AgentCredential_tokenHash_check", /char_length\(tokenHash\) = 64/],
+  [
+    "AgentIdempotencyRecord_status_check",
+    /status.*in_progress.*completed.*failed/,
+  ],
+  [
+    "ActionProposal_status_check",
+    /status.*pending.*approved.*rejected.*expired.*cancelled/,
+  ],
+  [
+    "ActionProposal_riskLevel_check",
+    /riskLevel = 'approval_required'/,
+  ],
+  [
+    "ActionProposal_actionType_check",
+    /actionType.*message.*introduction.*invitation.*merge.*delete/,
+  ],
+  ["ApprovalGrant_status_check", /status.*active.*consumed.*revoked.*expired/],
+  ["MutationAuditEvent_outcome_check", /outcome.*succeeded.*rejected.*failed/],
+  [
+    "ActionOutbox_status_check",
+    /status.*pending.*processing.*completed.*failed.*cancelled/,
+  ],
+  ["ActionOutbox_attempts_check", /attempts >= 0/],
+];
+const expectedAgentForeignKeys = [
+  [
+    "AgentCredential_clientId_ownerId_fkey",
+    /FOREIGN KEY \(clientId, ownerId\).*AgentClient\(id, ownerId\)/,
+  ],
+  [
+    "AgentIdempotencyRecord_clientId_ownerId_fkey",
+    /FOREIGN KEY \(clientId, ownerId\).*AgentClient\(id, ownerId\)/,
+  ],
+  [
+    "ActionProposal_clientId_ownerId_fkey",
+    /FOREIGN KEY \(clientId, ownerId\).*AgentClient\(id, ownerId\)/,
+  ],
+  [
+    "ApprovalGrant_clientId_ownerId_fkey",
+    /FOREIGN KEY \(clientId, ownerId\).*AgentClient\(id, ownerId\)/,
+  ],
+  [
+    "ApprovalGrant_proposalId_ownerId_clientId_fkey",
+    /FOREIGN KEY \(proposalId, ownerId, clientId\).*ActionProposal\(id, ownerId, clientId\)/,
+  ],
+  [
+    "MutationAuditEvent_ownerId_fkey",
+    /FOREIGN KEY \(ownerId\).*User\(id\).*ON DELETE RESTRICT/,
+  ],
+  [
+    "MutationAuditEvent_clientId_ownerId_fkey",
+    /FOREIGN KEY \(clientId, ownerId\).*AgentClient\(id, ownerId\).*ON DELETE RESTRICT/,
+  ],
+  [
+    "ActionOutbox_clientId_ownerId_fkey",
+    /FOREIGN KEY \(clientId, ownerId\).*AgentClient\(id, ownerId\)/,
+  ],
+  [
+    "ActionOutbox_grantId_ownerId_clientId_fkey",
+    /FOREIGN KEY \(grantId, ownerId, clientId\).*ApprovalGrant\(id, ownerId, clientId\)/,
+  ],
 ];
 
+test("approval persistence derives executable data only from the proposal", () => {
+  const schema = readFileSync(
+    resolve(root, "services/api/prisma/schema.prisma"),
+    "utf8",
+  );
+  const migration = readFileSync(agentInterfaceMigrationPath, "utf8");
+  const grantModel = schema.match(/model ApprovalGrant \{[\s\S]*?\n\}/)?.[0] ?? "";
+  const outboxModel = schema.match(/model ActionOutbox \{[\s\S]*?\n\}/)?.[0] ?? "";
+  const grantTable =
+    migration.match(/CREATE TABLE "ApprovalGrant" \([\s\S]*?\n\);/)?.[0] ?? "";
+  const outboxTable =
+    migration.match(/CREATE TABLE "ActionOutbox" \([\s\S]*?\n\);/)?.[0] ?? "";
+
+  assert.doesNotMatch(grantModel, /^\s+(?:actionType|payloadHash)\s/m);
+  assert.doesNotMatch(
+    outboxModel,
+    /^\s+(?:actionType|payloadHash|payload)\s/m,
+  );
+  assert.doesNotMatch(grantTable, /^\s+"(?:actionType|payloadHash)"\s/m);
+  assert.doesNotMatch(
+    outboxTable,
+    /^\s+"(?:actionType|payloadHash|payload)"\s/m,
+  );
+  assert.match(
+    migration,
+    /CONSTRAINT "ActionProposal_riskLevel_check" CHECK \("riskLevel" = 'approval_required'\)/,
+  );
+  assert.doesNotMatch(migration, /pg_trigger_depth\s*\(/);
+});
+
 if (!databaseUrl) {
-  test('migration safety integration requires TEST_DATABASE_URL', { skip: true }, () => {});
+  test(
+    "migration safety integration requires TEST_DATABASE_URL",
+    { skip: true },
+    () => {},
+  );
 } else {
   const parsedUrl = new URL(databaseUrl);
   assert.match(
     basename(parsedUrl.pathname),
     /^socos_migration_test_[a-z0-9_]+$/,
-    'integration tests refuse to use a database without the socos_migration_test_ prefix',
+    "integration tests refuse to use a database without the socos_migration_test_ prefix",
   );
 
-  const requireFromApi = createRequire(resolve(root, 'services/api/package.json'));
-  const { Client } = requireFromApi('pg');
+  const requireFromApi = createRequire(
+    resolve(root, "services/api/package.json"),
+  );
+  const { Client } = requireFromApi("pg");
 
   async function withClient(callback) {
     const client = new Client({ connectionString: databaseUrl });
@@ -62,9 +202,9 @@ if (!databaseUrl) {
   }
 
   async function resetLegacySchema(client) {
-    await client.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+    await client.query("DROP SCHEMA public CASCADE; CREATE SCHEMA public;");
     for (const path of migrationPaths) {
-      await client.query(readFileSync(resolve(root, path), 'utf8'));
+      await client.query(readFileSync(resolve(root, path), "utf8"));
     }
   }
 
@@ -89,18 +229,26 @@ if (!databaseUrl) {
 
   async function assertDailyBriefSchema(client) {
     for (const table of expectedBriefTables) {
-      assert.equal(await tableExists(client, table), true, `missing table ${table}`);
+      assert.equal(
+        await tableExists(client, table),
+        true,
+        `missing table ${table}`,
+      );
     }
 
-    for (const column of ['importance', 'preferredCadenceDays']) {
+    for (const column of ["importance", "preferredCadenceDays"]) {
       assert.equal(
-        await columnExists(client, 'Contact', column),
+        await columnExists(client, "Contact", column),
         true,
         `missing Contact.${column}`,
       );
     }
-    for (const column of ['timeZone', 'briefHourLocal']) {
-      assert.equal(await columnExists(client, 'User', column), true, `missing User.${column}`);
+    for (const column of ["timeZone", "briefHourLocal"]) {
+      assert.equal(
+        await columnExists(client, "User", column),
+        true,
+        `missing User.${column}`,
+      );
     }
 
     const indexes = await client.query(
@@ -113,7 +261,11 @@ if (!databaseUrl) {
       [...expectedUniqueIndexes].sort(),
     );
     for (const { indexname, indexdef } of indexes.rows) {
-      assert.match(indexdef, /^CREATE UNIQUE INDEX /, `${indexname} must remain unique`);
+      assert.match(
+        indexdef,
+        /^CREATE UNIQUE INDEX /,
+        `${indexname} must remain unique`,
+      );
     }
 
     const checks = await client.query(
@@ -123,10 +275,77 @@ if (!databaseUrl) {
       [expectedChecks.map(([name]) => name)],
     );
     const definitions = new Map(
-      checks.rows.map(({ conname, definition }) => [conname, definition.replaceAll('"', '')]),
+      checks.rows.map(({ conname, definition }) => [
+        conname,
+        definition.replaceAll('"', ""),
+      ]),
     );
     for (const [name, pattern] of expectedChecks) {
-      assert.match(definitions.get(name) ?? '', pattern, `missing or invalid check ${name}`);
+      assert.match(
+        definitions.get(name) ?? "",
+        pattern,
+        `missing or invalid check ${name}`,
+      );
+    }
+  }
+
+  async function assertAgentInterfaceSchema(client) {
+    for (const table of expectedAgentTables) {
+      assert.equal(
+        await tableExists(client, table),
+        true,
+        `missing table ${table}`,
+      );
+    }
+
+    const expectedIndexes = [
+      ...expectedAgentUniqueIndexes,
+      ...expectedAgentExpiryIndexes,
+    ];
+    const indexes = await client.query(
+      `SELECT indexname, indexdef FROM pg_indexes
+        WHERE schemaname = 'public' AND indexname = ANY($1::text[])`,
+      [expectedIndexes],
+    );
+    assert.deepEqual(
+      indexes.rows.map(({ indexname }) => indexname).sort(),
+      [...expectedIndexes].sort(),
+    );
+    for (const { indexname, indexdef } of indexes.rows) {
+      if (expectedAgentUniqueIndexes.includes(indexname)) {
+        assert.match(
+          indexdef,
+          /^CREATE UNIQUE INDEX /,
+          `${indexname} must remain unique`,
+        );
+      }
+    }
+
+    const constraintNames = [
+      ...expectedAgentChecks.map(([name]) => name),
+      ...expectedAgentForeignKeys.map(([name]) => name),
+    ];
+    const constraints = await client.query(
+      `SELECT conname, pg_get_constraintdef(oid) AS definition
+         FROM pg_constraint
+        WHERE conname = ANY($1::text[])`,
+      [constraintNames],
+    );
+    const definitions = new Map(
+      constraints.rows.map(({ conname, definition }) => [
+        conname,
+        definition.replaceAll('"', ""),
+      ]),
+    );
+    for (const [name, pattern] of [
+      ...expectedAgentChecks,
+      ...expectedAgentForeignKeys,
+    ]) {
+      assert.match(
+        definitions.get(name) ?? "",
+        pattern,
+        `missing or invalid constraint ${name}`,
+      );
     }
   }
 
@@ -221,7 +440,168 @@ if (!databaseUrl) {
     );
   }
 
-  test('reconciliation refuses a populated legacy schema without changing it', async () => {
+  async function assertAgentOwnerConsistency(client) {
+    await client.query(
+      `INSERT INTO "AgentClient" ("id", "ownerId", "name", "scopes", "updatedAt")
+       VALUES
+         ('agent-client-owned', 'upgraded-user', 'Owned client', ARRAY['contacts:read'], CURRENT_TIMESTAMP),
+         ('agent-client-foreign', 'foreign-owner', 'Foreign client', ARRAY['contacts:read'], CURRENT_TIMESTAMP);`,
+    );
+
+    await assert.rejects(
+      client.query(
+        `INSERT INTO "AgentCredential" (
+           "id", "ownerId", "clientId", "tokenPrefix", "tokenHash"
+         ) VALUES (
+           'credential-cross-owner', 'foreign-owner', 'agent-client-owned',
+           'credential-cross-owner', repeat('a', 64)
+         )`,
+      ),
+      /foreign key constraint/,
+    );
+    await client.query(
+      `INSERT INTO "AgentCredential" (
+         "id", "ownerId", "clientId", "tokenPrefix", "tokenHash"
+       ) VALUES (
+         'credential-owned', 'upgraded-user', 'agent-client-owned',
+         'credential-prefix-owned', repeat('b', 64)
+       )`,
+    );
+    await assert.rejects(
+      client.query(
+        `INSERT INTO "AgentCredential" (
+           "id", "ownerId", "clientId", "tokenPrefix", "tokenHash"
+         ) VALUES (
+           'credential-duplicate-prefix', 'foreign-owner', 'agent-client-foreign',
+           'credential-prefix-owned', repeat('c', 64)
+         )`,
+      ),
+      /unique constraint/,
+    );
+
+    await client.query(
+      `INSERT INTO "AgentIdempotencyRecord" (
+         "id", "ownerId", "clientId", "operation", "idempotencyKey",
+         "requestHash", "expiresAt", "updatedAt"
+       ) VALUES (
+         'idempotency-owned', 'upgraded-user', 'agent-client-owned', 'contacts.search',
+         'intent-001', repeat('d', 64), CURRENT_TIMESTAMP + INTERVAL '1 day', CURRENT_TIMESTAMP
+       )`,
+    );
+    await assert.rejects(
+      client.query(
+        `INSERT INTO "AgentIdempotencyRecord" (
+           "id", "ownerId", "clientId", "operation", "idempotencyKey",
+           "requestHash", "expiresAt", "updatedAt"
+         ) VALUES (
+           'idempotency-duplicate', 'upgraded-user', 'agent-client-owned', 'contacts.search',
+           'intent-001', repeat('e', 64), CURRENT_TIMESTAMP + INTERVAL '1 day', CURRENT_TIMESTAMP
+         )`,
+      ),
+      /unique constraint/,
+    );
+
+    await client.query(
+      `INSERT INTO "ActionProposal" (
+         "id", "ownerId", "clientId", "actionType", "riskLevel", "payloadHash",
+         "payload", "preview", "expiresAt", "updatedAt"
+       ) VALUES (
+         'proposal-owned', 'upgraded-user', 'agent-client-owned', 'message', 'approval_required',
+         repeat('f', 64), '{}'::jsonb, '{}'::jsonb,
+         CURRENT_TIMESTAMP + INTERVAL '1 hour', CURRENT_TIMESTAMP
+       )`,
+    );
+    await assert.rejects(
+      client.query(
+        `INSERT INTO "ActionProposal" (
+           "id", "ownerId", "clientId", "actionType", "riskLevel", "payloadHash",
+           "payload", "preview", "expiresAt", "updatedAt"
+         ) VALUES (
+           'proposal-invalid-risk', 'upgraded-user', 'agent-client-owned', 'message', 'read',
+           repeat('1', 64), '{}'::jsonb, '{}'::jsonb,
+           CURRENT_TIMESTAMP + INTERVAL '1 hour', CURRENT_TIMESTAMP
+         )`,
+      ),
+      /check constraint/,
+    );
+    await assert.rejects(
+      client.query(
+        `INSERT INTO "ApprovalGrant" (
+           "id", "ownerId", "clientId", "proposalId", "expiresAt", "updatedAt"
+         ) VALUES (
+           'grant-cross-owner', 'foreign-owner', 'agent-client-foreign', 'proposal-owned',
+           CURRENT_TIMESTAMP + INTERVAL '30 minutes', CURRENT_TIMESTAMP
+         )`,
+      ),
+      /foreign key constraint/,
+    );
+    await client.query(
+      `INSERT INTO "ApprovalGrant" (
+         "id", "ownerId", "clientId", "proposalId", "expiresAt", "updatedAt"
+       ) VALUES (
+         'grant-owned', 'upgraded-user', 'agent-client-owned', 'proposal-owned',
+         CURRENT_TIMESTAMP + INTERVAL '30 minutes', CURRENT_TIMESTAMP
+       )`,
+    );
+    await assert.rejects(
+      client.query(
+        `INSERT INTO "ActionOutbox" (
+           "id", "ownerId", "clientId", "grantId", "updatedAt"
+         ) VALUES (
+           'outbox-cross-owner', 'foreign-owner', 'agent-client-foreign', 'grant-owned',
+           CURRENT_TIMESTAMP
+         )`,
+      ),
+      /foreign key constraint/,
+    );
+    await assert.rejects(
+      client.query(
+        `INSERT INTO "MutationAuditEvent" (
+           "id", "ownerId", "clientId", "operation", "outcome", "metadata"
+         ) VALUES (
+           'audit-cross-owner', 'foreign-owner', 'agent-client-owned',
+           'contacts.search', 'rejected', '{}'::jsonb
+         )`,
+      ),
+      /foreign key constraint/,
+    );
+    await client.query(
+      `INSERT INTO "MutationAuditEvent" (
+         "id", "ownerId", "clientId", "operation", "outcome", "metadata"
+       ) VALUES (
+         'audit-owned', 'upgraded-user', 'agent-client-owned',
+         'contacts.search', 'succeeded', '{}'::jsonb
+       )`,
+    );
+    await assert.rejects(
+      client.query(
+        `UPDATE "MutationAuditEvent" SET "outcome" = 'failed' WHERE "id" = 'audit-owned'`,
+      ),
+      /append-only/,
+    );
+    await assert.rejects(
+      client.query(
+        `DELETE FROM "MutationAuditEvent" WHERE "id" = 'audit-owned'`,
+      ),
+      /append-only/,
+    );
+    await assert.rejects(
+      client.query(
+        `DELETE FROM "AgentClient" WHERE "id" = 'agent-client-owned'`,
+      ),
+      /foreign key constraint/,
+    );
+    await assert.rejects(
+      client.query(`DELETE FROM "User" WHERE "id" = 'upgraded-user'`),
+      /foreign key constraint/,
+    );
+    const retainedAudit = await client.query(
+      `SELECT count(*)::int AS count FROM "MutationAuditEvent" WHERE "id" = 'audit-owned'`,
+    );
+    assert.equal(retainedAudit.rows[0].count, 1);
+  }
+
+  test("reconciliation refuses a populated legacy schema without changing it", async () => {
     await withClient(async (client) => {
       await resetLegacySchema(client);
       await client.query(
@@ -230,48 +610,66 @@ if (!databaseUrl) {
       );
 
       await assert.rejects(
-        client.query(readFileSync(reconciliationPath, 'utf8')),
+        client.query(readFileSync(reconciliationPath, "utf8")),
         /Refusing to convert a populated legacy schema/,
       );
-      await client.query('ROLLBACK');
+      await client.query("ROLLBACK");
 
-      assert.equal(await columnExists(client, 'Contact', 'name'), true);
-      assert.equal(await columnExists(client, 'Contact', 'firstName'), false);
-      assert.equal(await columnExists(client, 'DungeonMasterScenario', 'id'), false);
+      assert.equal(await columnExists(client, "Contact", "name"), true);
+      assert.equal(await columnExists(client, "Contact", "firstName"), false);
+      assert.equal(
+        await columnExists(client, "DungeonMasterScenario", "id"),
+        false,
+      );
     });
   });
 
-  test('an injected late migration failure rolls back every reconciliation change', async () => {
+  test("an injected late migration failure rolls back every reconciliation change", async () => {
     await withClient(async (client) => {
       await resetLegacySchema(client);
-      const migration = readFileSync(reconciliationPath, 'utf8');
+      const migration = readFileSync(reconciliationPath, "utf8");
       const injected = migration.replace(
         /\nCOMMIT;\s*$/,
         '\nCREATE TABLE "RollbackProbe" ("id" INTEGER);\nSELECT 1 / 0;\nCOMMIT;\n',
       );
-      assert.notEqual(injected, migration, 'failure injection point was not found');
+      assert.notEqual(
+        injected,
+        migration,
+        "failure injection point was not found",
+      );
 
       await assert.rejects(client.query(injected), /division by zero/);
-      await client.query('ROLLBACK');
+      await client.query("ROLLBACK");
 
-      assert.equal(await columnExists(client, 'Contact', 'name'), true);
-      assert.equal(await columnExists(client, 'Contact', 'firstName'), false);
-      assert.equal(await columnExists(client, 'RollbackProbe', 'id'), false);
-      assert.equal(await columnExists(client, 'DungeonMasterScenario', 'id'), false);
+      assert.equal(await columnExists(client, "Contact", "name"), true);
+      assert.equal(await columnExists(client, "Contact", "firstName"), false);
+      assert.equal(await columnExists(client, "RollbackProbe", "id"), false);
+      assert.equal(
+        await columnExists(client, "DungeonMasterScenario", "id"),
+        false,
+      );
     });
   });
 
-  test('reconciliation preserves a populated current-shape database', async () => {
+  test("reconciliation preserves a populated current-shape database", async () => {
     await withClient(async (client) => {
-      await client.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+      await client.query("DROP SCHEMA public CASCADE; CREATE SCHEMA public;");
     });
     execFileSync(
-      'pnpm',
-      ['--filter', '@socos/api', 'exec', 'prisma', 'db', 'push', '--skip-generate'],
+      "pnpm",
+      [
+        "--filter",
+        "@socos/api",
+        "exec",
+        "prisma",
+        "db",
+        "push",
+        "--skip-generate",
+      ],
       {
         cwd: root,
         env: { ...process.env, DATABASE_URL: databaseUrl },
-        stdio: 'pipe',
+        stdio: "pipe",
       },
     );
     await withClient(async (client) => {
@@ -293,11 +691,11 @@ if (!databaseUrl) {
          VALUES ('current-shape-reminder', 'current-shape-contact', 'current-shape-user', 'followup', 'preserve-reminder', CURRENT_TIMESTAMP + INTERVAL '1 day', CURRENT_TIMESTAMP);`,
       );
 
-      await client.query(readFileSync(reconciliationPath, 'utf8'));
+      await client.query(readFileSync(reconciliationPath, "utf8"));
 
       const preserved = await client.query(
         'SELECT count(*)::int AS count FROM "User" WHERE id = $1',
-        ['current-shape-user'],
+        ["current-shape-user"],
       );
       assert.equal(preserved.rows[0].count, 1);
       const related = await client.query(
@@ -307,19 +705,22 @@ if (!databaseUrl) {
            (SELECT "title" FROM "Reminder" WHERE "id" = 'current-shape-reminder') AS reminder`,
       );
       assert.deepEqual(related.rows[0], {
-        bio: 'preserve-me',
-        interaction: 'preserve-interaction',
-        reminder: 'preserve-reminder',
+        bio: "preserve-me",
+        interaction: "preserve-interaction",
+        reminder: "preserve-reminder",
       });
-      assert.equal(await columnExists(client, 'DungeonMasterScenario', 'id'), true);
+      assert.equal(
+        await columnExists(client, "DungeonMasterScenario", "id"),
+        true,
+      );
     });
   });
 
-  test('upgraded migration deployment adds the daily brief schema', async () => {
+  test("upgraded migration deployment adds daily brief and agent interface schemas", async () => {
     await withClient(async (client) => {
       await resetLegacySchema(client);
       for (const path of preBriefMigrationPaths) {
-        await client.query(readFileSync(resolve(root, path), 'utf8'));
+        await client.query(readFileSync(resolve(root, path), "utf8"));
       }
 
       await client.query(
@@ -357,9 +758,12 @@ if (!databaseUrl) {
             ) FROM "Contact" WHERE "id" = 'upgraded-contact') AS "contactRecord"`,
       );
 
-      assert.equal(await tableExists(client, 'BriefBatch'), false);
-      await client.query(readFileSync(dailyBriefMigrationPath, 'utf8'));
+      assert.equal(await tableExists(client, "BriefBatch"), false);
+      await client.query(readFileSync(dailyBriefMigrationPath, "utf8"));
       await assertDailyBriefSchema(client);
+      assert.equal(await tableExists(client, "AgentClient"), false);
+      await client.query(readFileSync(agentInterfaceMigrationPath, "utf8"));
+      await assertAgentInterfaceSchema(client);
 
       const after = await client.query(
         `SELECT
@@ -386,42 +790,65 @@ if (!databaseUrl) {
              WHERE "id" = 'upgraded-contact') AS "preferredCadenceDays"`,
       );
       assert.deepEqual(defaults.rows[0], {
-        timeZone: 'UTC',
+        timeZone: "UTC",
         briefHourLocal: 8,
         importance: 3,
         preferredCadenceDays: 90,
       });
       for (const table of expectedBriefTables) {
-        const rows = await client.query(`SELECT count(*)::int AS count FROM "${table}"`);
-        assert.equal(rows.rows[0].count, 0, `${table} must start empty after upgrade`);
+        const rows = await client.query(
+          `SELECT count(*)::int AS count FROM "${table}"`,
+        );
+        assert.equal(
+          rows.rows[0].count,
+          0,
+          `${table} must start empty after upgrade`,
+        );
       }
 
       await assertOwnerConsistency(client);
+      await assertAgentOwnerConsistency(client);
     });
 
-    const output = execFileSync('node', ['scripts/compare-schema.mjs'], {
+    const output = execFileSync("node", ["scripts/compare-schema.mjs"], {
       cwd: root,
       env: { ...process.env, DATABASE_URL: databaseUrl },
-      encoding: 'utf8',
+      encoding: "utf8",
     });
-    assert.equal(output.trim(), 'schema_status=match statements=0');
+    assert.equal(output.trim(), "schema_status=match statements=0");
   });
 
-  test('fresh migration deployment reaches the checked-in Prisma schema', async () => {
+  test("fresh migration deployment reaches the checked-in Prisma schema", async () => {
     await withClient(async (client) => {
-      await client.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+      await client.query("DROP SCHEMA public CASCADE; CREATE SCHEMA public;");
     });
-    execFileSync('pnpm', ['--filter', '@socos/api', 'exec', 'prisma', 'migrate', 'deploy'], {
+    execFileSync(
+      "pnpm",
+      ["--filter", "@socos/api", "exec", "prisma", "migrate", "deploy"],
+      {
+        cwd: root,
+        env: { ...process.env, DATABASE_URL: databaseUrl },
+        stdio: "pipe",
+      },
+    );
+    const output = execFileSync("node", ["scripts/compare-schema.mjs"], {
       cwd: root,
       env: { ...process.env, DATABASE_URL: databaseUrl },
-      stdio: 'pipe',
+      encoding: "utf8",
     });
-    const output = execFileSync('node', ['scripts/compare-schema.mjs'], {
-      cwd: root,
-      env: { ...process.env, DATABASE_URL: databaseUrl },
-      encoding: 'utf8',
-    });
-    assert.equal(output.trim(), 'schema_status=match statements=0');
+    assert.equal(output.trim(), "schema_status=match statements=0");
     await withClient(assertDailyBriefSchema);
+    await withClient(assertAgentInterfaceSchema);
+
+    execFileSync(
+      "pnpm",
+      ["--filter", "@socos/api", "exec", "prisma", "migrate", "deploy"],
+      {
+        cwd: root,
+        env: { ...process.env, DATABASE_URL: databaseUrl },
+        stdio: "pipe",
+      },
+    );
+    await withClient(assertAgentInterfaceSchema);
   });
 }

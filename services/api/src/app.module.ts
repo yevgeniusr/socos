@@ -26,6 +26,8 @@ import { AgentToolsModule } from './modules/agent-tools/agent-tools.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
 import { NotificationSchedulerModule } from './modules/notifications/notification-scheduler.module.js';
 import { BriefsModule } from './modules/briefs/briefs.module.js';
+import { AgentAuthModule } from './modules/agent-auth/agent-auth.module.js';
+import { AgentSecurityModule } from './modules/agent-security/agent-security.module.js';
 
 @Module({
   imports: [
@@ -38,6 +40,8 @@ import { BriefsModule } from './modules/briefs/briefs.module.js';
     RemindersModule,
     AgentToolsModule,
     BriefsModule,
+    AgentAuthModule,
+    AgentSecurityModule,
   ],
   controllers: [
     HealthController,

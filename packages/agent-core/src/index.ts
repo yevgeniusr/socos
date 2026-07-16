@@ -4,3 +4,4 @@
  */
 
 export * from './tools/index.js';
+export * from './agent-interface/index.js';

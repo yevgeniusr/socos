@@ -25,17 +25,24 @@ model User {
   updatedAt      DateTime  @updatedAt
 
   // Relations
-  contacts       Contact[]
-  interactions   Interaction[]
-  reminders      Reminder[]
-  achievements   UserAchievement[]
-  vaults         Vault[]
-  sessions       Session[]
-  briefBatches   BriefBatch[]
-  briefItems     BriefItem[]
-  quests         Quest[]
-  briefFeedback  BriefFeedback[]
-  xpTransactions XpTransaction[]
+  contacts                Contact[]
+  interactions            Interaction[]
+  reminders               Reminder[]
+  achievements            UserAchievement[]
+  vaults                  Vault[]
+  sessions                Session[]
+  briefBatches            BriefBatch[]
+  briefItems              BriefItem[]
+  quests                  Quest[]
+  briefFeedback           BriefFeedback[]
+  xpTransactions          XpTransaction[]
+  agentClients            AgentClient[]
+  agentCredentials        AgentCredential[]
+  agentIdempotencyRecords AgentIdempotencyRecord[]
+  actionProposals         ActionProposal[]
+  approvalGrants          ApprovalGrant[]
+  mutationAuditEvents     MutationAuditEvent[]
+  actionOutboxRecords     ActionOutbox[]
 }
 
 // ==================== VAULT ====================
@@ -242,6 +249,156 @@ model XpTransaction {
 
   @@unique([ownerId, sourceType, sourceId], map: "XpTransaction_ownerId_sourceType_sourceId_key")
   @@index([ownerId, createdAt])
+}
+
+// ==================== AUTHENTICATED AGENT INTERFACE ====================
+
+model AgentClient {
+  id          String    @id @default(cuid())
+  ownerId     String
+  owner       User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  scopes      String[]  @default([])
+  status      String    @default("active")
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  credentials        AgentCredential[]
+  idempotencyRecords AgentIdempotencyRecord[]
+  proposals          ActionProposal[]
+  approvalGrants     ApprovalGrant[]
+  auditEvents        MutationAuditEvent[]
+  outboxRecords      ActionOutbox[]
+
+  @@unique([id, ownerId])
+  @@index([ownerId, status])
+}
+
+model AgentCredential {
+  id          String      @id @default(cuid())
+  ownerId     String
+  owner       User        @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  clientId    String
+  client      AgentClient @relation(fields: [clientId, ownerId], references: [id, ownerId], onDelete: Cascade)
+  tokenPrefix String      @unique
+  tokenHash   String
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  lastUsedAt  DateTime?
+  createdAt   DateTime    @default(now())
+
+  @@index([ownerId, clientId])
+  @@index([expiresAt])
+}
+
+model AgentIdempotencyRecord {
+  id             String      @id @default(cuid())
+  ownerId        String
+  owner          User        @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  clientId       String
+  client         AgentClient @relation(fields: [clientId, ownerId], references: [id, ownerId], onDelete: Cascade)
+  operation      String
+  idempotencyKey String
+  requestHash    String
+  status         String      @default("in_progress")
+  response       Json?
+  expiresAt      DateTime
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@unique([clientId, operation, idempotencyKey])
+  @@index([ownerId, clientId])
+  @@index([expiresAt])
+}
+
+model ActionProposal {
+  id          String         @id @default(cuid())
+  ownerId     String
+  owner       User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  clientId    String
+  client      AgentClient    @relation(fields: [clientId, ownerId], references: [id, ownerId], onDelete: Cascade)
+  actionType  String
+  riskLevel   String
+  payloadHash String
+  payload     Json
+  preview     Json
+  metadata    Json           @default("{}")
+  status      String         @default("pending")
+  expiresAt   DateTime
+  decidedAt   DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  grant       ApprovalGrant?
+
+  @@unique([id, ownerId, clientId])
+  @@index([ownerId, status])
+  @@index([expiresAt])
+}
+
+model ApprovalGrant {
+  id          String         @id @default(cuid())
+  ownerId     String
+  owner       User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  clientId    String
+  client      AgentClient    @relation(fields: [clientId, ownerId], references: [id, ownerId], onDelete: Cascade)
+  proposalId  String         @unique
+  proposal    ActionProposal @relation(fields: [proposalId, ownerId, clientId], references: [id, ownerId, clientId], onDelete: Cascade)
+  status      String         @default("active")
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  outbox      ActionOutbox?
+
+  @@unique([id, ownerId, clientId])
+  @@unique([proposalId, ownerId, clientId])
+  @@index([ownerId, status])
+  @@index([expiresAt])
+}
+
+model MutationAuditEvent {
+  id             String      @id @default(cuid())
+  ownerId        String
+  owner          User        @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  clientId       String
+  client         AgentClient @relation(fields: [clientId, ownerId], references: [id, ownerId], onDelete: Restrict)
+  operation      String
+  actionType     String?
+  resourceType   String?
+  resourceId     String?
+  outcome        String
+  requestHash    String?
+  idempotencyKey String?
+  metadata       Json        @default("{}")
+  createdAt      DateTime    @default(now())
+
+  @@index([ownerId, createdAt])
+  @@index([clientId, createdAt])
+}
+
+model ActionOutbox {
+  id            String        @id @default(cuid())
+  ownerId       String
+  owner         User          @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  clientId      String
+  client        AgentClient   @relation(fields: [clientId, ownerId], references: [id, ownerId], onDelete: Cascade)
+  grantId       String        @unique
+  grant         ApprovalGrant @relation(fields: [grantId, ownerId, clientId], references: [id, ownerId, clientId], onDelete: Cascade)
+  status        String        @default("pending")
+  attempts      Int           @default(0)
+  availableAt   DateTime      @default(now())
+  lockedAt      DateTime?
+  completedAt   DateTime?
+  lastErrorCode String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@unique([grantId, ownerId, clientId])
+  @@index([ownerId, status])
+  @@index([status, availableAt])
 }
 
 // ==================== CONTACT FIELD ====================
