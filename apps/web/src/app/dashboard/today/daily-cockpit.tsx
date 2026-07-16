@@ -407,46 +407,44 @@ export default function DailyCockpit() {
               streak={streak.data}
             />
           ) : null}
+          {questReceipt ? (
+            <section
+              role="status"
+              aria-live="polite"
+              className="border-t border-secondary/40 bg-secondary/5 px-3 py-4"
+            >
+              <h2
+                ref={questReceiptFocusRef}
+                tabIndex={-1}
+                className="text-base font-black text-secondary"
+              >
+                Quest verified
+              </h2>
+              <p className="mt-1 text-sm font-bold text-on-surface">
+                {questReceipt.title}
+              </p>
+              <p className="mt-1 text-sm text-on-surface-variant">
+                {questReceipt.evidenceType === "interaction"
+                  ? "Interaction"
+                  : "Reminder"}{" "}
+                evidence verified
+              </p>
+              <p className="mt-1 text-sm font-black text-secondary">
+                +{questReceipt.xpAwarded} XP awarded
+              </p>
+              <p className="mt-1 text-xs text-on-surface-variant">
+                Verified {formatBriefDate(questReceipt.verifiedAt, timeZone)}
+              </p>
+            </section>
+          ) : null}
           {brief.status === "ready" ? (
-            <>
-              {questReceipt ? (
-                <section
-                  role="status"
-                  aria-live="polite"
-                  className="border-t border-secondary/40 bg-secondary/5 px-3 py-4"
-                >
-                  <h2
-                    ref={questReceiptFocusRef}
-                    tabIndex={-1}
-                    className="text-base font-black text-secondary"
-                  >
-                    Quest verified
-                  </h2>
-                  <p className="mt-1 text-sm font-bold text-on-surface">
-                    {questReceipt.title}
-                  </p>
-                  <p className="mt-1 text-sm text-on-surface-variant">
-                    {questReceipt.evidenceType === "interaction"
-                      ? "Interaction"
-                      : "Reminder"}{" "}
-                    evidence verified
-                  </p>
-                  <p className="mt-1 text-sm font-black text-secondary">
-                    +{questReceipt.xpAwarded} XP awarded
-                  </p>
-                  <p className="mt-1 text-xs text-on-surface-variant">
-                    Verified {formatBriefDate(questReceipt.verifiedAt, timeZone)}
-                  </p>
-                </section>
-              ) : null}
-              <QuestList
-                quests={brief.data.quests}
-                onOpen={(quest, trigger) => {
-                  questTriggerRef.current = trigger;
-                  setSelectedQuest(quest);
-                }}
-              />
-            </>
+            <QuestList
+              quests={brief.data.quests}
+              onOpen={(quest, trigger) => {
+                questTriggerRef.current = trigger;
+                setSelectedQuest(quest);
+              }}
+            />
           ) : null}
           {reminders.status === "loading" ? (
             <LoadingLines label="Loading reminders" />
