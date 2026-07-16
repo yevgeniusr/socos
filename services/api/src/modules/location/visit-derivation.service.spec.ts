@@ -139,6 +139,33 @@ describe("visit derivation v1", () => {
     expect(metrics.residentCentroidReads).toBeLessThanOrEqual(samples.length);
     expect(metrics.residentAdds).toBeLessThanOrEqual(samples.length);
   });
+
+  it("keeps the exact running centroid when a high-weight nearby point shifts an open visit", () => {
+    const near = longitudeAtDistance(249);
+    const later = longitudeAtDistance(400);
+    const residents = [
+      sample("home-0", 0, 0, 0),
+      sample("home-5", 0, 0, 5),
+      sample("home-10", 0, 0, 10),
+      sample("near-249", 0, near, 11, 1),
+      sample("later-400-a", 0, later, 12),
+      sample("later-400-b", 0, later, 17),
+    ];
+
+    const visits = deriveVisits(residents);
+
+    expect(visits).toHaveLength(1);
+    expect(visits[0]).toMatchObject({
+      arrivedAt: instant(0),
+      departedAt: null,
+      sampleIds: residents.map(({ id }) => id),
+      centroid: weightedCentroid(residents),
+    });
+    expect(visits[0]!.radiusM).toBeCloseTo(
+      haversineDistanceM(visits[0]!.centroid, residents[0]!),
+      8
+    );
+  });
 });
 
 describe("VisitDerivationService adapter", () => {
@@ -286,8 +313,8 @@ describe("VisitDerivationService adapter", () => {
       .mockReset()
       .mockResolvedValueOnce({ recordedAt: instant(16), id: "late-resident" })
       .mockResolvedValueOnce({ recordedAt: instant(12), id: "away-12" })
-      .mockResolvedValueOnce({ recordedAt: instant(0), id: "home-z" })
-      .mockResolvedValueOnce({ recordedAt: instant(0), id: "home-a" });
+      .mockResolvedValueOnce({ recordedAt: instant(0), id: "home-a" })
+      .mockResolvedValueOnce(null);
     tx.derivedVisit.findMany.mockImplementation(({ where }: any) =>
       where.OR?.some((entry: any) => entry.departedAt?.gte)
         ? Promise.resolve([stale])
@@ -316,7 +343,7 @@ describe("VisitDerivationService adapter", () => {
 
     expect(tx.derivedVisit.findMany.mock.calls[0][0].where.OR).toEqual([
       { departedAt: null },
-      { departedAt: { gte: instant(12) } },
+      { departedAt: { gte: instant(-3) } },
     ]);
     expect(tx.locationSample.findFirst.mock.calls[1][0].where.OR).toEqual([
       { recordedAt: { lt: instant(16) } },
@@ -326,14 +353,14 @@ describe("VisitDerivationService adapter", () => {
       where: {
         ownerId: OWNER,
         deviceId: DEVICE,
-        recordedAt: instant(0),
+        recordedAt: { gte: instant(0) },
       },
-      orderBy: { id: "desc" },
+      orderBy: [{ recordedAt: "asc" }, { id: "asc" }],
       select: { id: true, recordedAt: true },
     });
     expect(tx.locationSample.findFirst.mock.calls[3][0].where.OR).toEqual([
       { recordedAt: { lt: instant(0) } },
-      { recordedAt: instant(0), id: { lt: "home-z" } },
+      { recordedAt: instant(0), id: { lt: "home-a" } },
     ]);
     expect(tx.locationSample.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -354,6 +381,169 @@ describe("VisitDerivationService adapter", () => {
     });
     expect(tx.derivedVisit.deleteMany).toHaveBeenCalledWith({
       where: { id: { in: [stale.id] }, ownerId: OWNER, deviceId: DEVICE },
+    });
+  });
+
+  it("reaches a just-closed predecessor visit on the next in-order sample", async () => {
+    const homeMac = "h".repeat(64);
+    const awayMac = "w".repeat(64);
+    const openHome = storedVisit({ sourceMac: homeMac });
+    const closedHome = storedVisit({
+      sourceMac: homeMac,
+      departedAt: instant(12),
+    });
+    const staleFuture = storedVisit({
+      id: "visit-stale-future",
+      arrivedAt: instant(30),
+      departedAt: instant(35),
+      sourceMac: "s".repeat(64),
+    });
+    const rows = [
+      sampleRow("home-0", 0),
+      sampleRow("home-5", 5),
+      sampleRow("home-10", 10),
+      sampleRow("away-12", 12),
+      sampleRow("away-17", 17),
+      sampleRow("away-22", 22),
+    ];
+    const awayLongitude = longitudeAtDistance(251);
+    const txAt17 = replayTransaction({
+      inserted: rows[4]!,
+      predecessor: rows[3]!,
+      visits: () => [openHome],
+      rows,
+      currentVisits: new Map([[homeMac, openHome]]),
+    });
+    const txAt22 = replayTransaction({
+      inserted: rows[5]!,
+      predecessor: rows[4]!,
+      visits: (where) => {
+        const threshold = where.OR[1].departedAt.gte as Date;
+        return threshold <= instant(12)
+          ? [closedHome, staleFuture]
+          : [staleFuture];
+      },
+      rows,
+      currentVisits: new Map([[homeMac, closedHome]]),
+    });
+    const prisma = {
+      $transaction: jest
+        .fn()
+        .mockImplementationOnce((operation: any) => operation(txAt17))
+        .mockImplementationOnce((operation: any) => operation(txAt22)),
+    };
+    const cipher = coordinateCipher({
+      "away-12": awayLongitude,
+      "away-17": awayLongitude,
+      "away-22": awayLongitude,
+    });
+    const index = {
+      mac: jest.fn((_purpose: string, _owner: string, canonical: string) =>
+        canonical.includes("away-22") ? awayMac : homeMac
+      ),
+    };
+    const service = new VisitDerivationService(
+      prisma as any,
+      cipher as any,
+      index as any
+    );
+
+    await service.recomputeForSample(OWNER, DEVICE, "away-17");
+    await service.recomputeForSample(OWNER, DEVICE, "away-22");
+
+    expect(txAt17.derivedVisit.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ departedAt: instant(12) }),
+      })
+    );
+    expect(txAt22.derivedVisit.findMany.mock.calls[0][0].where.OR).toEqual([
+      { departedAt: null },
+      { departedAt: { gte: instant(2) } },
+    ]);
+    expect(txAt22.derivedVisit.create).toHaveBeenCalledTimes(1);
+    expect(txAt22.derivedVisit.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        ownerId: OWNER,
+        deviceId: DEVICE,
+        arrivedAt: instant(12),
+        departedAt: null,
+        sourceMac: awayMac,
+      }),
+    });
+    expect(txAt22.derivedVisit.deleteMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: [staleFuture.id] },
+        ownerId: OWNER,
+        deviceId: DEVICE,
+      },
+    });
+  });
+
+  it("persists the exact centroid, radius, and source from all retained open support", async () => {
+    const near = longitudeAtDistance(249);
+    const later = longitudeAtDistance(400);
+    const sourceSamples = [
+      sample("home-0", 0, 0, 0),
+      sample("home-5", 0, 0, 5),
+      sample("home-10", 0, 0, 10),
+      sample("near-249", 0, near, 11, 1),
+      sample("later-400-a", 0, later, 12),
+      sample("later-400-b", 0, later, 17),
+    ];
+    const rows = sourceSamples.map((value) => ({
+      ...sampleRow(
+        value.id,
+        (value.recordedAt.getTime() - instant(0).getTime()) / 60_000
+      ),
+      accuracyM: value.accuracyM,
+    }));
+    const oldOpen = storedVisit({ sourceMac: "o".repeat(64) });
+    const exactMac = "e".repeat(64);
+    const tx = replayTransaction({
+      inserted: rows[5]!,
+      predecessor: rows[4]!,
+      visits: () => [oldOpen],
+      rows,
+      currentVisits: new Map(),
+    });
+    const cipher = coordinateCipher({
+      "near-249": near,
+      "later-400-a": later,
+      "later-400-b": later,
+    });
+    const index = { mac: jest.fn().mockReturnValue(exactMac) };
+    const expected = deriveVisits(sourceSamples)[0]!;
+    const service = new VisitDerivationService(
+      { $transaction: (operation: any) => operation(tx) } as any,
+      cipher as any,
+      index as any
+    );
+
+    await service.recomputeForSample(OWNER, DEVICE, "later-400-b");
+
+    expect(index.mac).toHaveBeenCalledWith(
+      "derived-visit-source",
+      OWNER,
+      sourceIdentity(DEVICE, expected.sampleIds)
+    );
+    expect(cipher.encrypt).toHaveBeenCalledWith(
+      "derived-visit-centroid",
+      OWNER,
+      expect.any(String),
+      expected.centroid
+    );
+    expect(tx.derivedVisit.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        ownerId: OWNER,
+        deviceId: DEVICE,
+        arrivedAt: instant(0),
+        departedAt: null,
+        radiusM: expected.radiusM,
+        sourceMac: exactMac,
+      }),
+    });
+    expect(tx.derivedVisit.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: [oldOpen.id] }, ownerId: OWNER, deviceId: DEVICE },
     });
   });
 
@@ -378,7 +568,7 @@ describe("VisitDerivationService adapter", () => {
     expect(cipher.encrypt).not.toHaveBeenCalled();
   });
 
-  it("closes the same persisted open visit from retained away evidence and replays the away run", async () => {
+  it("fails safe for a legacy open visit whose opening raw support is missing", async () => {
     const open = storedVisit({ arrivedAt: instant(-120) });
     const tx = persistedOpenHarness(open, [
       sampleRow("away-5", 5),
@@ -398,21 +588,16 @@ describe("VisitDerivationService adapter", () => {
 
     await service.recomputeForSample(OWNER, DEVICE, "away-15");
 
-    expect(tx.derivedVisit.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: open.id,
-        ownerId: OWNER,
-        deviceId: DEVICE,
-        sourceMac: open.sourceMac,
-        departedAt: null,
-      },
-      data: { departedAt: instant(5) },
-    });
-    expect(tx.derivedVisit.deleteMany).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ id: { in: [open.id] } }),
-      })
+    expect(tx.derivedVisit.updateMany).not.toHaveBeenCalled();
+    expect(tx.derivedVisit.create).not.toHaveBeenCalled();
+    expect(tx.derivedVisit.deleteMany).not.toHaveBeenCalled();
+    expect(cipher.decrypt).not.toHaveBeenCalledWith(
+      "derived-visit-centroid",
+      OWNER,
+      open.id,
+      expect.anything()
     );
+    expect(cipher.encrypt).not.toHaveBeenCalled();
   });
 });
 
@@ -488,6 +673,74 @@ function persistedOpenHarness(
     .mockResolvedValueOnce([open]);
   tx.locationSample.findMany.mockResolvedValue(rows);
   return tx;
+}
+
+function replayTransaction(options: {
+  inserted: ReturnType<typeof sampleRow>;
+  predecessor: ReturnType<typeof sampleRow>;
+  visits: (where: any) => ReturnType<typeof storedVisit>[];
+  rows: ReturnType<typeof sampleRow>[];
+  currentVisits: Map<string, ReturnType<typeof storedVisit>>;
+}) {
+  const findFirst = jest
+    .fn()
+    .mockResolvedValueOnce({
+      id: options.inserted.id,
+      recordedAt: options.inserted.recordedAt,
+    })
+    .mockResolvedValueOnce({
+      id: options.predecessor.id,
+      recordedAt: options.predecessor.recordedAt,
+    });
+  findFirst.mockImplementation(({ where, orderBy }: any) => {
+    if (where.recordedAt?.gte) {
+      return Promise.resolve(
+        options.rows.find((row) => row.recordedAt >= where.recordedAt.gte) ??
+          null
+      );
+    }
+    if (where.OR && orderBy?.[0]?.recordedAt === "desc") {
+      const before = options.rows
+        .filter(
+          (row) =>
+            row.recordedAt < where.OR[0].recordedAt.lt ||
+            (row.recordedAt.getTime() === where.OR[1].recordedAt.getTime() &&
+              row.id < where.OR[1].id.lt)
+        )
+        .at(-1);
+      return Promise.resolve(before ?? null);
+    }
+    if (!where.recordedAt && orderBy?.[0]?.recordedAt === "desc") {
+      return Promise.resolve({ recordedAt: options.rows.at(-1)!.recordedAt });
+    }
+    return Promise.resolve(null);
+  });
+  return {
+    $queryRaw: jest.fn().mockResolvedValue([{ acquired: 1 }]),
+    locationSample: {
+      findFirst,
+      findMany: jest.fn(({ where }: any) =>
+        Promise.resolve(
+          options.rows.filter(
+            (row) =>
+              row.recordedAt >= where.recordedAt.gte &&
+              row.recordedAt < where.recordedAt.lt
+          )
+        )
+      ),
+    },
+    derivedVisit: {
+      findMany: jest.fn(({ where }: any) =>
+        Promise.resolve(options.visits(where))
+      ),
+      findFirst: jest.fn(({ where }: any) =>
+        Promise.resolve(options.currentVisits.get(where.sourceMac) ?? null)
+      ),
+      create: jest.fn().mockResolvedValue({}),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
+  };
 }
 
 function coordinateCipher(longitudes: Record<string, number> = {}) {

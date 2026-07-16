@@ -120,11 +120,56 @@ describe("LocationRetentionService", () => {
       },
     });
   });
+
+  it("retains exact raw support from the earliest open arrival until the visit closes", async () => {
+    const arrivedAt = new Date("2026-06-01T00:00:00.000Z");
+    const { service, tx } = harness([device("device", "owner", 30, 90)], {
+      sampleBatches: [
+        [{ id: "pre-arrival-expired" }],
+        [{ id: "opening-support" }, { id: "later-support" }],
+      ],
+      openVisits: [{ arrivedAt }, null],
+    });
+
+    const whileOpen = await service.runRetention(NOW);
+    const afterClose = await service.runRetention(NOW);
+
+    expect(whileOpen.samplesDeleted).toBe(1);
+    expect(afterClose.samplesDeleted).toBe(2);
+    expect(tx.derivedVisit.findFirst.mock.calls[0][0]).toEqual({
+      where: { ownerId: "owner", deviceId: "device", departedAt: null },
+      orderBy: [{ arrivedAt: "asc" }, { id: "asc" }],
+      select: { arrivedAt: true },
+    });
+    expect(
+      tx.locationSample.findMany.mock.calls[0][0].where.recordedAt
+    ).toEqual({
+      lt: arrivedAt,
+    });
+    expect(tx.locationSample.deleteMany.mock.calls[0][0].where).toEqual({
+      ownerId: "owner",
+      deviceId: "device",
+      recordedAt: { lt: arrivedAt },
+      id: { in: ["pre-arrival-expired"] },
+    });
+    expect(
+      tx.locationSample.findMany.mock.calls[1][0].where.recordedAt
+    ).toEqual({
+      lt: new Date("2026-06-16T03:15:00.000Z"),
+    });
+    expect(tx.locationSample.deleteMany.mock.calls[1][0].where.id.in).toEqual([
+      "opening-support",
+      "later-support",
+    ]);
+  });
 });
 
 function harness(
   devices: any[],
-  options: { sampleBatches?: Array<Array<{ id: string }>> } = {}
+  options: {
+    sampleBatches?: Array<Array<{ id: string }>>;
+    openVisits?: Array<{ arrivedAt: Date } | null>;
+  } = {}
 ) {
   const sampleBatches = options.sampleBatches ?? [[]];
   const tx = {
@@ -134,22 +179,25 @@ function harness(
     },
     derivedVisit: {
       findMany: jest.fn().mockResolvedValue([]),
+      findFirst: jest.fn(),
       deleteMany: jest.fn(({ where }: any) => ({ count: where.id.in.length })),
     },
   };
+  for (const openVisit of options.openVisits ?? []) {
+    tx.derivedVisit.findFirst.mockResolvedValueOnce(openVisit);
+  }
+  tx.derivedVisit.findFirst.mockResolvedValue(null);
   for (const batch of sampleBatches) {
     tx.locationSample.findMany.mockResolvedValueOnce(batch);
   }
   tx.locationSample.findMany.mockResolvedValue([]);
   const prisma = {
     user: {
-      findMany: jest
-        .fn()
-        .mockResolvedValueOnce(
-          [...new Set(devices.map((value) => value.ownerId))].map((id) => ({
-            id,
-          }))
-        ),
+      findMany: jest.fn().mockResolvedValue(
+        [...new Set(devices.map((value) => value.ownerId))].map((id) => ({
+          id,
+        }))
+      ),
     },
     locationDevice: {
       findMany: jest.fn(({ where }: any) => {

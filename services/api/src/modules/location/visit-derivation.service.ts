@@ -137,9 +137,9 @@ export class VisitDerivationService {
               where: {
                 ownerId,
                 deviceId,
-                recordedAt: nextStart,
+                recordedAt: { gte: nextStart },
               },
-              orderBy: { id: "desc" },
+              orderBy: [{ recordedAt: "asc" }, { id: "asc" }],
               select: { id: true, recordedAt: true },
             });
             if (boundary) {
@@ -220,25 +220,17 @@ export class VisitDerivationService {
         });
 
         const keepIds = new Set<string>();
-        const persistedOpen = intersecting.find(
+        const unsupportedOpenVisits = intersecting.filter(
           (visit) =>
             visit.departedAt === null &&
-            (samples.length === 0 || visit.arrivedAt < samples[0].recordedAt)
+            !storedSamples.some(
+              (sample) =>
+                sample.recordedAt.getTime() === visit.arrivedAt.getTime()
+            )
         );
-        let candidates: DerivedVisitCandidate[];
-        if (persistedOpen) {
-          const baseline = await this.applyPersistedOpenBaseline(
-            transaction,
-            ownerId,
-            deviceId,
-            persistedOpen,
-            samples
-          );
-          keepIds.add(persistedOpen.id);
-          candidates = baseline;
-        } else {
-          candidates = deriveVisits(samples);
-        }
+        for (const visit of unsupportedOpenVisits) keepIds.add(visit.id);
+        const candidates =
+          unsupportedOpenVisits.length > 0 ? [] : deriveVisits(samples);
 
         for (const candidate of candidates) {
           const canonical = sourceIdentity(deviceId, candidate.sampleIds);
@@ -297,54 +289,6 @@ export class VisitDerivationService {
       },
       { maxWait: 10_000, timeout: 120_000 }
     );
-  }
-
-  private async applyPersistedOpenBaseline(
-    transaction: Prisma.TransactionClient,
-    ownerId: string,
-    deviceId: string,
-    visit: StoredVisit,
-    samples: DerivationSample[]
-  ): Promise<DerivedVisitCandidate[]> {
-    const centroid = this.cipher.decrypt<{ lat: number; lon: number }>(
-      CENTROID_PURPOSE,
-      ownerId,
-      visit.id,
-      envelope(visit, "centroid")
-    );
-    const eligible = samples.filter(
-      (sample) => sample.accuracyM === null || sample.accuracyM <= 200
-    );
-    let away: DerivationSample[] = [];
-    for (const sample of eligible) {
-      if (haversineDistanceM(centroid, sample) <= AWAY_RADIUS_M) {
-        away = [];
-        continue;
-      }
-      away.push(sample);
-      if (
-        sample.recordedAt.getTime() - away[0].recordedAt.getTime() >=
-        AWAY_DURATION_MS
-      ) {
-        const departedAt = away[0].recordedAt;
-        const updated = await transaction.derivedVisit.updateMany({
-          where: {
-            id: visit.id,
-            ownerId,
-            deviceId,
-            sourceMac: visit.sourceMac,
-            departedAt: null,
-          },
-          data: { departedAt },
-        });
-        if (updated.count !== 1) {
-          throw new Error("Visit derivation state conflict");
-        }
-        const replayAt = eligible.indexOf(away[0]);
-        return deriveVisits(eligible.slice(replayAt));
-      }
-    }
-    return [];
   }
 
   private isUnchanged(
@@ -580,11 +524,12 @@ function visitOverlapWhere(
   startsAt: Date,
   endsAt: Date
 ) {
+  const dependencyStart = new Date(startsAt.getTime() - FOLLOWING_WINDOW_MS);
   return {
     ownerId,
     deviceId,
     arrivedAt: { lt: endsAt },
-    OR: [{ departedAt: null }, { departedAt: { gte: startsAt } }],
+    OR: [{ departedAt: null }, { departedAt: { gte: dependencyStart } }],
   };
 }
 

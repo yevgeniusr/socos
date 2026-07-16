@@ -111,11 +111,24 @@ export class LocationRetentionService {
     let total = 0;
     while (true) {
       const deleted = await this.prisma.$transaction(async (transaction) => {
+        const openVisit = await transaction.derivedVisit.findFirst({
+          where: {
+            ownerId: device.ownerId,
+            deviceId: device.id,
+            departedAt: null,
+          },
+          orderBy: [{ arrivedAt: "asc" }, { id: "asc" }],
+          select: { arrivedAt: true },
+        });
+        const deleteBefore =
+          openVisit && openVisit.arrivedAt < cutoff
+            ? openVisit.arrivedAt
+            : cutoff;
         const rows = await transaction.locationSample.findMany({
           where: {
             ownerId: device.ownerId,
             deviceId: device.id,
-            recordedAt: { lt: cutoff },
+            recordedAt: { lt: deleteBefore },
           },
           orderBy: [{ recordedAt: "asc" }, { id: "asc" }],
           take: DELETE_BATCH_SIZE,
@@ -126,7 +139,7 @@ export class LocationRetentionService {
           where: {
             ownerId: device.ownerId,
             deviceId: device.id,
-            recordedAt: { lt: cutoff },
+            recordedAt: { lt: deleteBefore },
             id: { in: rows.map((row) => row.id) },
           },
         });
