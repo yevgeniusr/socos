@@ -721,16 +721,16 @@ const expectedEventDiscoveryColumns = {
     ["interestTagsIv", "bytea", "NO"],
     ["interestTagsTag", "bytea", "NO"],
     ["interestTagsKeyVersion", "integer", "NO"],
-    ["maxDistanceKm", "numeric", "NO", /50(?:\.00)?/, 6, 2],
-    ["travelSpeedKph", "integer", "NO", /30/],
-    ["travelBufferMinutes", "integer", "NO", /15/],
-    ["createdAt", "timestamp without time zone", "NO", /CURRENT_TIMESTAMP/],
+    ["maxDistanceKm", "numeric", "NO", "50", 6, 2],
+    ["travelSpeedKph", "integer", "NO", "30"],
+    ["travelBufferMinutes", "integer", "NO", "15"],
+    ["createdAt", "timestamp without time zone", "NO", "CURRENT_TIMESTAMP"],
     ["updatedAt", "timestamp without time zone", "NO"],
   ],
   EventSource: [
     ["id", "text", "NO"],
     ["ownerId", "text", "NO"],
-    ["provider", "text", "NO", /'ics'::text/],
+    ["provider", "text", "NO", "'ics'::text"],
     ["externalSourceId", "text", "NO"],
     ["name", "text", "NO"],
     ["feedUrlMac", "text", "NO"],
@@ -741,14 +741,14 @@ const expectedEventDiscoveryColumns = {
     ["allowedHost", "text", "NO"],
     ["city", "text", "YES"],
     ["countryCode", "text", "YES"],
-    ["socialWeight", "integer", "NO", /5/],
-    ["status", "text", "NO", /'active'::text/],
-    ["pollIntervalMinutes", "integer", "NO", /60/],
+    ["socialWeight", "integer", "NO", "5"],
+    ["status", "text", "NO", "'active'::text"],
+    ["pollIntervalMinutes", "integer", "NO", "60"],
     ["nextPollAt", "timestamp without time zone", "NO"],
     ["leaseUntil", "timestamp without time zone", "YES"],
     ["lastPolledAt", "timestamp without time zone", "YES"],
     ["errorCode", "text", "YES"],
-    ["createdAt", "timestamp without time zone", "NO", /CURRENT_TIMESTAMP/],
+    ["createdAt", "timestamp without time zone", "NO", "CURRENT_TIMESTAMP"],
     ["updatedAt", "timestamp without time zone", "NO"],
   ],
   DiscoveredEvent: [
@@ -774,12 +774,12 @@ const expectedEventDiscoveryColumns = {
     ["latitude", "numeric", "YES", undefined, 9, 6],
     ["longitude", "numeric", "YES", undefined, 9, 6],
     ["category", "text", "YES"],
-    ["tags", "ARRAY", "NO", /ARRAY\[\]::text\[\]/],
-    ["status", "text", "NO", /'scheduled'::text/],
+    ["tags", "ARRAY", "NO", "ARRAY[]::text[]"],
+    ["status", "text", "NO", "'scheduled'::text"],
     ["sourceUpdatedAt", "timestamp without time zone", "YES"],
-    ["discoveredAt", "timestamp without time zone", "NO", /CURRENT_TIMESTAMP/],
+    ["discoveredAt", "timestamp without time zone", "NO", "CURRENT_TIMESTAMP"],
     ["expiresAt", "timestamp without time zone", "NO"],
-    ["createdAt", "timestamp without time zone", "NO", /CURRENT_TIMESTAMP/],
+    ["createdAt", "timestamp without time zone", "NO", "CURRENT_TIMESTAMP"],
     ["updatedAt", "timestamp without time zone", "NO"],
   ],
 };
@@ -985,6 +985,10 @@ test("event discovery schema declares the exact public and encrypted persistence
   const migration = existsSync(eventDiscoveryMigrationPath)
     ? readFileSync(eventDiscoveryMigrationPath, "utf8")
     : "";
+
+  assert.match(migration, /^BEGIN;\n[\s\S]*\nCOMMIT;\n?$/);
+  assert.equal(migration.match(/^BEGIN;$/gm)?.length, 1);
+  assert.equal(migration.match(/^COMMIT;$/gm)?.length, 1);
 
   for (const table of Object.keys(expectedEventDiscoveryColumns)) {
     assert.match(schema, new RegExp(`model ${table} \\{`));
@@ -1440,7 +1444,7 @@ if (!databaseUrl) {
         name,
         type,
         nullable,
-        defaultPattern,
+        expectedDefault,
         numericPrecision,
         numericScale,
       ] of expected) {
@@ -1481,11 +1485,11 @@ if (!databaseUrl) {
             `${table}.${name} has the wrong numeric scale`,
           );
         }
-        if (defaultPattern) {
-          assert.match(
-            column?.column_default ?? "",
-            defaultPattern,
-            `${table}.${name} has the wrong default`,
+        if (expectedDefault !== undefined) {
+          assert.equal(
+            column?.column_default,
+            expectedDefault,
+            `${table}.${name} has the wrong exact default`,
           );
         } else {
           assert.equal(
@@ -1646,12 +1650,20 @@ if (!databaseUrl) {
     await client.query(
       `INSERT INTO "User" ("id", "email", "updatedAt") VALUES
          ('event-owner', 'event-owner@example.invalid', CURRENT_TIMESTAMP),
-         ('event-other-owner', 'event-other-owner@example.invalid', CURRENT_TIMESTAMP);
+         ('event-other-owner', 'event-other-owner@example.invalid', CURRENT_TIMESTAMP),
+         ('event-default-owner', 'event-default-owner@example.invalid', CURRENT_TIMESTAMP);
        INSERT INTO "EventPreference" (
          "id", "ownerId", "interestTagsCiphertext", "interestTagsIv",
          "interestTagsTag", "interestTagsKeyVersion", "maxDistanceKm", "updatedAt"
        ) VALUES (
          'preference-valid', 'event-owner', ${ciphertext}, ${iv}, ${tag}, 1, 1,
+         CURRENT_TIMESTAMP
+       );
+       INSERT INTO "EventPreference" (
+         "id", "ownerId", "interestTagsCiphertext", "interestTagsIv",
+         "interestTagsTag", "interestTagsKeyVersion", "updatedAt"
+       ) VALUES (
+         'preference-default', 'event-default-owner', ${ciphertext}, ${iv}, ${tag}, 1,
          CURRENT_TIMESTAMP
        );
        INSERT INTO "EventSource" (
@@ -1664,6 +1676,15 @@ if (!databaseUrl) {
          repeat('a', 64), ${ciphertext}, ${iv}, ${tag}, 1, 'events.example.invalid',
          'AE', 0, 15, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
        );
+       INSERT INTO "EventSource" (
+         "id", "ownerId", "externalSourceId", "name", "feedUrlMac",
+         "feedUrlCiphertext", "feedUrlIv", "feedUrlTag", "feedUrlKeyVersion",
+         "allowedHost", "nextPollAt", "updatedAt"
+       ) VALUES (
+         'event-source-default', 'event-default-owner', 'source-default-uuid',
+         'Default synthetic events', repeat('d', 64), ${ciphertext}, ${iv}, ${tag}, 1,
+         'default-events.example.invalid', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+       );
        INSERT INTO "DiscoveredEvent" (
          "id", "ownerId", "sourceId", "providerEventIdMac",
          "providerEventIdCiphertext", "providerEventIdIv", "providerEventIdTag",
@@ -1674,25 +1695,46 @@ if (!databaseUrl) {
          ${ciphertext}, ${iv}, ${tag}, 1, repeat('c', 64), 'Synthetic event',
          CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '1 hour', 'US', 90, -180,
          CURRENT_TIMESTAMP + INTERVAL '14 days', CURRENT_TIMESTAMP
+       );
+       INSERT INTO "DiscoveredEvent" (
+         "id", "ownerId", "sourceId", "providerEventIdMac",
+         "providerEventIdCiphertext", "providerEventIdIv", "providerEventIdTag",
+         "providerEventIdKeyVersion", "canonicalMac", "title", "startAt", "endAt",
+         "expiresAt", "updatedAt"
+       ) VALUES (
+         'discovered-event-default', 'event-default-owner', 'event-source-default',
+         repeat('e', 64), ${ciphertext}, ${iv}, ${tag}, 1, repeat('f', 64),
+         'Default synthetic event', CURRENT_TIMESTAMP,
+         CURRENT_TIMESTAMP + INTERVAL '1 hour', CURRENT_TIMESTAMP + INTERVAL '14 days',
+         CURRENT_TIMESTAMP
        );`,
     );
 
     const defaults = await client.query(
       `SELECT
          (SELECT json_build_object(
-           'speed', "travelSpeedKph", 'buffer', "travelBufferMinutes"
-         ) FROM "EventPreference" WHERE "id" = 'preference-valid') AS preference,
+           'distance', "maxDistanceKm", 'speed', "travelSpeedKph",
+           'buffer', "travelBufferMinutes", 'created', "createdAt" IS NOT NULL
+         ) FROM "EventPreference" WHERE "id" = 'preference-default') AS preference,
          (SELECT json_build_object(
-           'provider', "provider", 'status', "status"
-         ) FROM "EventSource" WHERE "id" = 'event-source-valid') AS source,
+           'provider', "provider", 'social', "socialWeight", 'status', "status",
+           'poll', "pollIntervalMinutes", 'created', "createdAt" IS NOT NULL
+         ) FROM "EventSource" WHERE "id" = 'event-source-default') AS source,
          (SELECT json_build_object(
-           'status', "status", 'tags', "tags"
-         ) FROM "DiscoveredEvent" WHERE "id" = 'discovered-event-valid') AS event`,
+           'status', "status", 'tags', "tags",
+           'discovered', "discoveredAt" IS NOT NULL, 'created', "createdAt" IS NOT NULL
+         ) FROM "DiscoveredEvent" WHERE "id" = 'discovered-event-default') AS event`,
     );
     assert.deepEqual(defaults.rows[0], {
-      preference: { speed: 30, buffer: 15 },
-      source: { provider: "ics", status: "active" },
-      event: { status: "scheduled", tags: [] },
+      preference: { distance: 50, speed: 30, buffer: 15, created: true },
+      source: {
+        provider: "ics",
+        social: 5,
+        status: "active",
+        poll: 60,
+        created: true,
+      },
+      event: { status: "scheduled", tags: [], discovered: true, created: true },
     });
 
     await expectConstraint(
@@ -2469,7 +2511,23 @@ if (!databaseUrl) {
       assert.equal(await tableExists(client, "EventPreference"), false);
       assert.equal(await tableExists(client, "EventSource"), false);
       assert.equal(await tableExists(client, "DiscoveredEvent"), false);
-      await client.query(readFileSync(eventDiscoveryMigrationPath, "utf8"));
+      const eventMigration = readFileSync(eventDiscoveryMigrationPath, "utf8");
+      const injectedFailure = eventMigration.replace(
+        /\nCOMMIT;\s*$/,
+        "\nSELECT 1 / 0;\nCOMMIT;\n",
+      );
+      assert.notEqual(
+        injectedFailure,
+        eventMigration,
+        "event migration failure injection point was not found",
+      );
+      await assert.rejects(client.query(injectedFailure), /division by zero/);
+      await client.query("ROLLBACK");
+      assert.equal(await tableExists(client, "EventPreference"), false);
+      assert.equal(await tableExists(client, "EventSource"), false);
+      assert.equal(await tableExists(client, "DiscoveredEvent"), false);
+
+      await client.query(eventMigration);
       await assertEventDiscoverySchema(client);
       await assertCalendarLocationSchema(client);
 

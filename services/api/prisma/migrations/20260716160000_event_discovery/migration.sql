@@ -1,3 +1,5 @@
+BEGIN;
+
 -- Event discovery stores only certified public event metadata in plaintext.
 -- Interest tags, source URLs, and provider event IDs remain encrypted at rest.
 
@@ -125,3 +127,5 @@ ALTER TABLE "EventSource"
 ALTER TABLE "DiscoveredEvent"
   ADD CONSTRAINT "DiscoveredEvent_ownerId_fkey" FOREIGN KEY ("ownerId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE,
   ADD CONSTRAINT "DiscoveredEvent_sourceId_ownerId_fkey" FOREIGN KEY ("sourceId", "ownerId") REFERENCES "EventSource"("id", "ownerId") ON DELETE CASCADE ON UPDATE CASCADE;
+
+COMMIT;
