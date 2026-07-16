@@ -519,6 +519,55 @@ export class ApprovalController {
   );
 });
 
+test("keeps proposal history behind the human JWT owner boundary", () => {
+  const source = readFileSync(
+    resolve(
+      repoRoot,
+      "services/api/src/modules/agent-security/approval.controller.ts",
+    ),
+    "utf8",
+  );
+
+  assert.match(source, /@Controller\("agent-proposals"\)/);
+  assert.match(source, /@UseGuards\(AuthGuard\)/);
+  assert.match(source, /@Get\("history"\)/);
+  assert.match(
+    source,
+    /history\([\s\S]*?this\.proposals\.listHistory\(request\.user\.userId, query\)/,
+  );
+  assert.doesNotMatch(source, /listHistory\([^)]*(?:body|query)\.ownerId/);
+});
+
+test("keeps proposal history bounded and separate from credentials and execution", () => {
+  const source = readFileSync(
+    resolve(
+      repoRoot,
+      "services/api/src/modules/agent-security/action-proposal.service.ts",
+    ),
+    "utf8",
+  );
+  const start = source.indexOf("async listHistory(");
+  const end = source.indexOf("\n  approve(", start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const history = source.slice(start, end);
+
+  assert.doesNotMatch(history, /\b(?:credential|token|secret)\w*\b/i);
+  assert.doesNotMatch(
+    history,
+    /\b(?:executor|executionService|approvedActionExecution)\b|\.execute\s*\(/i,
+  );
+  assert.match(
+    history,
+    /actionProposal\.findMany\(\{[\s\S]*?take:\s*query\.limit/,
+  );
+  assert.match(
+    history,
+    /contact\.findMany\(\{[\s\S]*?id:\s*\{\s*in:\s*contactIds\s*\}/,
+  );
+  assert.equal(history.match(/\.findMany\s*\(/g)?.length, 2);
+});
+
 test("rejects an MCP controller guarded only as a human route", () => {
   const directory = createTrackedFixture(
     "services/api/src/modules/mcp/mcp.controller.ts",

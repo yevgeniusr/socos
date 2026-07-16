@@ -11,6 +11,11 @@ import {
   type ProposalActionType,
 } from "@socos/agent-core";
 import { PrismaService } from "../prisma/prisma.service.js";
+import type { ApprovalHistoryQueryDto } from "./action-proposal.dto.js";
+import {
+  collectProposalContactIds,
+  presentProposalHistory,
+} from "./action-proposal.presenter.js";
 import { hashCanonicalJson } from "./canonical-json.js";
 
 const PROPOSAL_TTL_MS = 24 * 60 * 60 * 1000;
@@ -47,6 +52,33 @@ const grantPresenter = {
       actionType: true,
       payloadHash: true,
       payload: true,
+    },
+  },
+} as const;
+
+const proposalHistoryPresenter = {
+  id: true,
+  actionType: true,
+  preview: true,
+  status: true,
+  expiresAt: true,
+  decidedAt: true,
+  createdAt: true,
+  client: { select: { id: true, name: true } },
+  grant: {
+    select: {
+      status: true,
+      expiresAt: true,
+      consumedAt: true,
+      revokedAt: true,
+      outbox: {
+        select: {
+          status: true,
+          attempts: true,
+          completedAt: true,
+          lastErrorCode: true,
+        },
+      },
     },
   },
 } as const;
@@ -108,6 +140,42 @@ export class ActionProposalService {
         client: { select: { id: true, name: true } },
       },
     });
+  }
+
+  async listHistory(ownerId: string, query: ApprovalHistoryQueryDto) {
+    const now = new Date();
+    await this.prisma.actionProposal.updateMany({
+      where: { ownerId, status: "pending", expiresAt: { lte: now } },
+      data: { status: "expired", decidedAt: now },
+    });
+
+    const where: Prisma.ActionProposalWhereInput = { ownerId };
+    if (query.status !== "all") where.status = query.status;
+    const [total, proposals] = await Promise.all([
+      this.prisma.actionProposal.count({ where }),
+      this.prisma.actionProposal.findMany({
+        where,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        skip: query.offset,
+        take: query.limit,
+        select: proposalHistoryPresenter,
+      }),
+    ]);
+
+    const contactIds = collectProposalContactIds(proposals);
+    const contacts = contactIds.length
+      ? await this.prisma.contact.findMany({
+          where: { id: { in: contactIds }, ownerId, isDemo: false },
+          select: { id: true, firstName: true, lastName: true },
+        })
+      : [];
+    return presentProposalHistory(
+      proposals,
+      contacts,
+      total,
+      query.offset,
+      query.limit
+    );
   }
 
   approve(ownerId: string, proposalId: string) {
