@@ -4,28 +4,21 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import { apiJson } from "@/lib/api-client";
 import { getFocusLoopTarget } from "../../contacts/_components/dialog-focus";
+import type { ReminderDraft } from "../cockpit-view";
 import { IntentRegistry } from "../intent-registry";
 
-function tomorrowLocal() {
-  const date = new Date();
-  date.setDate(date.getDate() + 1);
-  date.setHours(9, 0, 0, 0);
-  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
-    .toISOString()
-    .slice(0, 16);
-}
-
 export default function ReminderDialog({
-  contact,
+  draft,
   onClose,
   onSuccess,
 }: {
-  contact: { id: string; name: string };
+  draft: ReminderDraft;
   onClose: () => void;
   onSuccess: () => Promise<void>;
 }) {
-  const [title, setTitle] = useState(`Follow up with ${contact.name}`);
-  const [scheduledAt, setScheduledAt] = useState(tomorrowLocal());
+  const [type, setType] = useState<ReminderDraft["type"]>(draft.type);
+  const [title, setTitle] = useState(draft.title);
+  const [scheduledAt, setScheduledAt] = useState(draft.scheduledAt);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const dialogRef = useRef<HTMLFormElement>(null);
@@ -69,18 +62,22 @@ export default function ReminderDialog({
     setError("");
     try {
       const body = {
-        contactId: contact.id,
-        type: "followup",
+        contactId: draft.contact.id,
+        type,
         title: title.trim(),
         scheduledAt: new Date(scheduledAt).toISOString(),
       };
-      const key = registry.current.keyFor(contact.id, "reminder:create", body);
+      const key = registry.current.keyFor(
+        draft.contact.id,
+        "reminder:create",
+        body
+      );
       await apiJson("/api/reminders", {
         method: "POST",
         headers: { "Idempotency-Key": key },
         body: JSON.stringify(body),
       });
-      registry.current.resolve(contact.id, "reminder:create", body);
+      registry.current.resolve(draft.contact.id, "reminder:create", body);
       onClose();
       void onSuccess().catch(() => undefined);
     } catch (reason) {
@@ -125,9 +122,27 @@ export default function ReminderDialog({
           </button>
         </div>
         <p className="mt-1 text-sm text-on-surface-variant">
-          For {contact.name}
+          For {draft.contact.name}
+        </p>
+        <p className="mt-1 text-xs text-on-surface-variant">
+          {draft.sourceLabel}
         </p>
         <label className="mt-4 block text-xs font-bold text-on-surface-variant">
+          Type
+          <select
+            value={type}
+            onChange={(event) =>
+              setType(event.target.value as ReminderDraft["type"])
+            }
+            className="mt-1 min-h-11 w-full rounded-lg border border-outline-variant/40 bg-surface-container-high px-3 text-sm text-on-surface"
+          >
+            <option value="followup">Follow-up</option>
+            <option value="birthday">Birthday</option>
+            <option value="anniversary">Anniversary</option>
+            <option value="custom">Custom</option>
+          </select>
+        </label>
+        <label className="mt-3 block text-xs font-bold text-on-surface-variant">
           Title
           <input
             required

@@ -1,7 +1,14 @@
 import Link from "next/link";
 
 import type { DailyBrief } from "@/lib/cockpit-contracts";
-import { healthBandLabel, itemStateLabel } from "../cockpit-view";
+import {
+  buildDateReminderDraft,
+  buildPersonReminderDraft,
+  itemStateLabel,
+  lastInteractionLabel,
+  personPriorityLabel,
+  type ReminderDraft,
+} from "../cockpit-view";
 import BriefItemActions from "./brief-item-actions";
 
 function StateBadge({
@@ -23,10 +30,7 @@ interface BriefFocusListProps {
   onKeep: (itemId: string) => Promise<boolean>;
   onSnooze: (itemId: string, snoozedUntil: string) => Promise<boolean>;
   onDismiss: (itemId: string, reason: string) => Promise<boolean>;
-  onReminder: (
-    contact: { id: string; name: string },
-    trigger: HTMLButtonElement
-  ) => void;
+  onReminder: (draft: ReminderDraft, trigger: HTMLButtonElement) => void;
 }
 
 export default function BriefFocusList({
@@ -74,8 +78,11 @@ export default function BriefFocusList({
                       {item.contact.name}
                     </Link>
                     <p className="mt-1 text-xs font-bold text-tertiary-fixed-dim">
-                      {healthBandLabel(item.health.band)} · {item.health.score}
-                      /100
+                      {personPriorityLabel(item)}
+                    </p>
+                    <p className="mt-1 text-xs text-on-surface-variant">
+                      Relationship score {item.health.score}/100 ·{" "}
+                      {lastInteractionLabel(item.lastInteractionAt, brief.timeZone)}
                     </p>
                   </div>
                   <StateBadge state={item.state} />
@@ -104,7 +111,9 @@ export default function BriefFocusList({
                   onKeep={onKeep}
                   onSnooze={onSnooze}
                   onDismiss={onDismiss}
-                  onReminder={(trigger) => onReminder(item.contact, trigger)}
+                  onReminder={(trigger) =>
+                    onReminder(buildPersonReminderDraft(item), trigger)
+                  }
                 />
               </li>
             ))}
@@ -146,7 +155,9 @@ export default function BriefFocusList({
                   onKeep={onKeep}
                   onSnooze={onSnooze}
                   onDismiss={onDismiss}
-                  onReminder={(trigger) => onReminder(item.contact, trigger)}
+                  onReminder={(trigger) =>
+                    onReminder(buildDateReminderDraft(item), trigger)
+                  }
                 />
               </li>
             ))}

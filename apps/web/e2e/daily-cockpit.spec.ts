@@ -17,7 +17,7 @@ const brief = {
       health: { score: 44, band: "needs-attention" },
       lastInteractionAt: null,
       reason: "A synthetic follow-up is due.",
-      evidence: [],
+      evidence: [{ code: "days_overdue", value: 61 }],
       state: "pending",
     },
   ],
@@ -574,6 +574,45 @@ test("performs durable cockpit actions with exact contracts", async ({
     .filter({ hasText: "Synthetic invitation" });
   await invitation.getByRole("button", { name: "Reject" }).click();
   await expect.poll(() => api.decisions).toContain("proposal-reject:reject");
+});
+
+test("explains focus priority and prefills reminders from structured date context", async ({
+  page,
+}) => {
+  const api = await installApi(page);
+  await page.goto("/dashboard/today");
+
+  const person = page
+    .locator("li")
+    .filter({ hasText: "Synthetic Person" })
+    .first();
+  await expect(person.getByText("Needs attention · 61 days overdue")).toBeVisible();
+  await expect(
+    person.getByText("Relationship score 44/100 · No interaction logged")
+  ).toBeVisible();
+
+  const importantDate = page
+    .locator("li")
+    .filter({ hasText: "Synthetic celebration" });
+  await importantDate
+    .getByRole("button", { name: "Create reminder" })
+    .click();
+  const dialog = page.getByRole("dialog", { name: "Create reminder" });
+  await expect(dialog.getByLabel("Type")).toHaveValue("custom");
+  await expect(dialog.getByLabel("Title")).toHaveValue("Synthetic celebration");
+  await expect(dialog.getByLabel("Scheduled at")).toHaveValue(
+    "2026-07-18T09:00"
+  );
+  await expect(dialog.getByText("Celebration · Jul 18, 2026")).toBeVisible();
+  await dialog.getByRole("button", { name: "Create reminder" }).click();
+
+  await expect.poll(() => api.reminderBodies).toHaveLength(1);
+  expect(api.reminderBodies[0]).toEqual({
+    contactId: "contact-date",
+    type: "custom",
+    title: "Synthetic celebration",
+    scheduledAt: "2026-07-18T05:00:00.000Z",
+  });
 });
 
 test("retries lost committed cockpit POST responses with stable intent keys", async ({

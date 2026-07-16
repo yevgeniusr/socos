@@ -3,10 +3,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildCockpitView,
+  buildDateReminderDraft,
+  buildPersonReminderDraft,
   formatBriefDate,
   healthBandLabel,
   itemStateLabel,
+  lastInteractionLabel,
   momentumState,
+  personPriorityLabel,
 } from "./cockpit-view";
 
 const baseBrief: DailyBrief = {
@@ -119,5 +123,64 @@ describe("cockpit view", () => {
     expect(momentumState("error", "ready")).toBe("unavailable");
     expect(momentumState("ready", "error")).toBe("unavailable");
     expect(momentumState("ready", "ready")).toBe("ready");
+  });
+
+  it("puts explainable relationship evidence ahead of a naked score", () => {
+    const person = {
+      ...baseBrief.people[0],
+      health: { score: 0, band: "at-risk" as const },
+      lastInteractionAt: "2026-05-03T10:00:00.000Z",
+      evidence: [
+        { code: "importance", value: 5 },
+        { code: "days_overdue", value: 61 },
+      ],
+    };
+
+    expect(personPriorityLabel(person)).toBe("At risk · 61 days overdue");
+    expect(lastInteractionLabel(person.lastInteractionAt, "UTC")).toBe(
+      "Last contact May 3, 2026"
+    );
+    expect(lastInteractionLabel(null, "UTC")).toBe("No interaction logged");
+  });
+
+  it("builds structured reminder drafts without inferring type from prose", () => {
+    const personDraft = buildPersonReminderDraft(
+      baseBrief.people[0],
+      new Date("2026-07-17T05:00:00.000Z")
+    );
+    expect(personDraft).toMatchObject({
+      contact: baseBrief.people[0].contact,
+      type: "followup",
+      title: "Follow up with Synthetic Person",
+      sourceLabel: "Synthetic reason",
+    });
+    expect(personDraft.scheduledAt).toMatch(/^2026-07-18T09:00$/);
+
+    const birthday = {
+      itemId: "date-item",
+      rank: 1,
+      contact: { id: "contact-date", name: "Synthetic Friend" },
+      type: "birthday" as const,
+      title: "Synthetic Friend's birthday",
+      date: "2026-07-19",
+      daysAway: 2,
+      reason: "A birthday is coming up.",
+      state: "pending" as const,
+    };
+    expect(buildDateReminderDraft(birthday)).toEqual({
+      contact: birthday.contact,
+      type: "birthday",
+      title: birthday.title,
+      scheduledAt: "2026-07-19T09:00",
+      sourceLabel: "Birthday · Jul 19, 2026",
+    });
+
+    expect(
+      buildDateReminderDraft({
+        ...birthday,
+        type: "celebration",
+        title: "Synthetic celebration",
+      }).type
+    ).toBe("custom");
   });
 });

@@ -18,7 +18,7 @@ import ReminderList from "./_components/reminder-list";
 import QuestCompletionDialog from "./_components/quest-completion-dialog";
 import ReminderDialog from "./_components/reminder-dialog";
 import { IntentRegistry } from "./intent-registry";
-import { momentumState } from "./cockpit-view";
+import { momentumState, type ReminderDraft } from "./cockpit-view";
 
 type Loadable<T> =
   | { status: "loading" }
@@ -88,10 +88,7 @@ export default function DailyCockpit() {
   const [reminderErrors, setReminderErrors] = useState<Record<string, string>>(
     {}
   );
-  const [reminderContact, setReminderContact] = useState<{
-    id: string;
-    name: string;
-  } | null>(null);
+  const [reminderDraft, setReminderDraft] = useState<ReminderDraft | null>(null);
   const [selectedQuest, setSelectedQuest] = useState<
     DailyBrief["quests"][number] | null
   >(null);
@@ -101,7 +98,7 @@ export default function DailyCockpit() {
   const intents = useRef(new IntentRegistry());
 
   const closeReminderDialog = useCallback(() => {
-    setReminderContact(null);
+    setReminderDraft(null);
     window.requestAnimationFrame(() => reminderTriggerRef.current?.focus());
   }, []);
 
@@ -369,9 +366,9 @@ export default function DailyCockpit() {
                   reason ? { action: "dismiss", reason } : { action: "dismiss" }
                 )
               }
-              onReminder={(contact, trigger) => {
+              onReminder={(draft, trigger) => {
                 reminderTriggerRef.current = trigger;
-                setReminderContact(contact);
+                setReminderDraft(draft);
               }}
             />
           ) : null}
@@ -469,9 +466,9 @@ export default function DailyCockpit() {
           </section>
         </aside>
       </div>
-      {reminderContact ? (
+      {reminderDraft ? (
         <ReminderDialog
-          contact={reminderContact}
+          draft={reminderDraft}
           onClose={closeReminderDialog}
           onSuccess={async () => {
             loadReminders();
