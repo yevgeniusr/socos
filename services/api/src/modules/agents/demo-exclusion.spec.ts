@@ -28,7 +28,6 @@ describe('demo contact exclusion', () => {
 
     await new ContactsService(
       prisma as unknown as PrismaService,
-      {} as GamificationService,
     ).getDueContacts(userId);
     await new AgentRemindersService(
       prisma as unknown as PrismaService,

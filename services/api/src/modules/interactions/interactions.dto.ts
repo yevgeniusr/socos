@@ -1,5 +1,5 @@
 import { IsString, IsOptional, IsNumber, IsDateString, IsEnum, Min } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, OmitType } from '@nestjs/swagger';
 
 export enum InteractionType {
   CALL = 'call',
@@ -45,6 +45,11 @@ export class CreateInteractionDto {
   @IsString()
   location?: string;
 }
+
+export class CreateContactInteractionDto extends OmitType(
+  CreateInteractionDto,
+  ['contactId'] as const,
+) {}
 
 export class InteractionQueryDto {
   @ApiPropertyOptional()

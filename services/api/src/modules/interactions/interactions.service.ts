@@ -29,6 +29,11 @@ export interface AgentInteractionResult {
   level: number;
 }
 
+interface InteractionWriteResult extends AgentInteractionResult {
+  title: string | null;
+  newAchievements: string[];
+}
+
 function levelForXp(totalXp: number): number {
   return Math.floor(Math.sqrt(totalXp / 100)) + 1;
 }
@@ -55,98 +60,40 @@ export class InteractionsService {
     private gamificationService: GamificationService,
   ) {}
 
-  createForAgent(
+  async createForAgent(
     ownerId: string,
     input: AgentInteractionInput,
     transaction?: Prisma.TransactionClient
   ): Promise<AgentInteractionResult> {
-    if (transaction) {
-      return this.createForAgentInTransaction(transaction, ownerId, input);
-    }
-    return this.prisma.$transaction(
-      (tx) => this.createForAgentInTransaction(tx, ownerId, input),
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
-    );
+    const result = transaction
+      ? await this.createForAgentInTransaction(transaction, ownerId, input)
+      : await this.prisma.$transaction(
+          (tx) => this.createForAgentInTransaction(tx, ownerId, input),
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        );
+    return this.toAgentResult(result);
   }
 
   async create(userId: string, dto: CreateInteractionDto) {
-    // Verify contact belongs to user
-    const contact = await this.prisma.contact.findFirst({
-      where: { id: dto.contactId, ownerId: userId },
-    });
-
-    if (!contact) {
-      throw new NotFoundException('Contact not found');
-    }
-
-    const xpEarned = contact.isDemo
-      ? 0
-      : await this.gamificationService.calculateInteractionXp(dto.type);
-
-    const interaction = await this.prisma.interaction.create({
-      data: {
-        contactId: dto.contactId,
-        ownerId: userId,
-        type: dto.type,
-        title: dto.title,
-        content: dto.content,
-        summary: (dto as any).summary,
-        occurredAt: dto.occurredAt ? new Date(dto.occurredAt) : new Date(),
-        duration: dto.duration,
-        location: dto.location,
-        xpEarned,
-      },
-      include: {
-        contact: {
-          select: { id: true, firstName: true, lastName: true, photo: true },
-        },
-      },
-    });
-
-    const user = contact.isDemo
-      ? await this.prisma.user.findUniqueOrThrow({
-          where: { id: userId },
-          select: { xp: true, level: true },
-        })
-      : await this.prisma.user.update({
-          where: { id: userId },
-          data: {
-            xp: { increment: xpEarned },
-            lastActiveAt: new Date(),
-          },
-        });
-
-    const levelInfo = contact.isDemo
-      ? {
-          newLevel: user.level,
-          xpForNextLevel: Math.pow(user.level, 2) * 100,
-        }
-      : await this.gamificationService.checkLevelUp(userId, user.xp);
-
-    // Update contact's lastContactedAt
-    await this.prisma.contact.update({
-      where: { id: dto.contactId },
-      data: { lastContactedAt: new Date() },
-    });
-
-    const newAchievements = contact.isDemo
-      ? []
-      : await this.gamificationService.checkAchievements(userId);
+    const result = await this.prisma.$transaction(
+      (tx) => this.createForAgentInTransaction(tx, userId, dto),
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+    );
 
     return {
       interaction: {
-        id: interaction.id,
-        type: interaction.type,
-        title: interaction.title,
-        occurredAt: interaction.occurredAt,
-        xpEarned: interaction.xpEarned,
+        id: result.interactionId,
+        type: result.type,
+        title: result.title,
+        occurredAt: result.occurredAt,
+        xpEarned: result.xpAwarded,
       },
       user: {
-        xp: user.xp,
-        level: levelInfo.newLevel,
-        xpToNextLevel: levelInfo.xpForNextLevel,
+        xp: result.totalXp,
+        level: result.level,
+        xpToNextLevel: Math.pow(result.level, 2) * 100,
       },
-      newAchievements,
+      newAchievements: result.newAchievements,
     };
   }
 
@@ -244,7 +191,7 @@ export class InteractionsService {
     transaction: Prisma.TransactionClient,
     ownerId: string,
     input: AgentInteractionInput
-  ): Promise<AgentInteractionResult> {
+  ): Promise<InteractionWriteResult> {
     const contact = await transaction.contact.findFirst({
       where: { id: input.contactId, ownerId, isDemo: false },
       select: {
@@ -281,6 +228,7 @@ export class InteractionsService {
         id: true,
         contactId: true,
         type: true,
+        title: true,
         occurredAt: true,
         xpEarned: true,
       },
@@ -315,6 +263,7 @@ export class InteractionsService {
       },
     });
     let achievementXpAwarded = 0;
+    const newAchievements: string[] = [];
     for (const definition of AGENT_INTERACTION_ACHIEVEMENTS) {
       if (interactionCount < definition.target) continue;
 
@@ -349,6 +298,7 @@ export class InteractionsService {
         },
       });
       achievementXpAwarded += achievement.xpReward;
+      newAchievements.push(definition.name);
     }
 
     let user = await transaction.user.update({
@@ -372,10 +322,24 @@ export class InteractionsService {
       interactionId: interaction.id,
       contactId: interaction.contactId,
       type: interaction.type,
+      title: interaction.title,
       occurredAt: interaction.occurredAt,
       xpAwarded: interaction.xpEarned,
       totalXp: user.xp,
       level: user.level,
+      newAchievements,
+    };
+  }
+
+  private toAgentResult(result: InteractionWriteResult): AgentInteractionResult {
+    return {
+      interactionId: result.interactionId,
+      contactId: result.contactId,
+      type: result.type,
+      occurredAt: result.occurredAt,
+      xpAwarded: result.xpAwarded,
+      totalXp: result.totalXp,
+      level: result.level,
     };
   }
 }

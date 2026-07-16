@@ -229,63 +229,99 @@ export class RemindersService {
   }
 
   async complete(userId: string, reminderId: string) {
-    const reminder = await this.prisma.reminder.findFirst({
-      where: { id: reminderId, ownerId: userId },
-    });
-
-    if (!reminder) {
-      throw new NotFoundException('Reminder not found');
-    }
-
-    // If recurring, create next reminder
-    if (reminder.isRecurring && reminder.repeatInterval) {
-      const nextDate = this.calculateNextDate(
-        new Date(reminder.scheduledAt),
-        reminder.repeatInterval,
-      );
-
-      await this.prisma.reminder.create({
-        data: {
-          contactId: reminder.contactId,
-          ownerId: userId,
-          type: reminder.type,
-          title: reminder.title,
-          description: reminder.description,
-          scheduledAt: nextDate,
-          repeatInterval: reminder.repeatInterval,
-          isRecurring: true,
-        },
-      });
-    }
-
-    const updated = await this.prisma.reminder.update({
-      where: { id: reminderId },
-      data: {
-        status: 'completed',
-        completedAt: new Date(),
-      },
-      include: {
-        contact: {
+    const updated = await this.prisma.$transaction(
+      async (transaction) => {
+        const reminder = await transaction.reminder.findFirst({
+          where: {
+            id: reminderId,
+            ownerId: userId,
+            status: 'pending',
+            contact: { ownerId: userId, isDemo: false },
+          },
           select: {
             id: true,
-            firstName: true,
-            lastName: true,
-            photo: true,
-            isDemo: true,
+            contactId: true,
+            ownerId: true,
+            type: true,
+            title: true,
+            description: true,
+            scheduledAt: true,
+            repeatInterval: true,
+            isRecurring: true,
+            status: true,
+            contact: {
+              select: {
+                ownerId: true,
+                isDemo: true,
+              },
+            },
           },
-        },
+        });
+
+        if (
+          !reminder ||
+          reminder.ownerId !== userId ||
+          reminder.contact.ownerId !== userId ||
+          reminder.contact.isDemo ||
+          reminder.status !== 'pending'
+        ) {
+          throw new NotFoundException('Reminder not found');
+        }
+
+        const completedAt = new Date();
+        const claim = await transaction.reminder.updateMany({
+          where: { id: reminderId, ownerId: userId, status: 'pending' },
+          data: { status: 'completed', completedAt },
+        });
+        if (claim.count !== 1) {
+          throw new NotFoundException('Reminder not found');
+        }
+
+        if (reminder.isRecurring && reminder.repeatInterval) {
+          await transaction.reminder.create({
+            data: {
+              contactId: reminder.contactId,
+              ownerId: userId,
+              type: reminder.type,
+              title: reminder.title,
+              description: reminder.description,
+              scheduledAt: this.calculateNextDate(
+                new Date(reminder.scheduledAt),
+                reminder.repeatInterval,
+              ),
+              repeatInterval: reminder.repeatInterval,
+              isRecurring: true,
+            },
+          });
+        }
+
+        return transaction.reminder.findUniqueOrThrow({
+          where: { id: reminderId },
+          include: {
+            contact: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                photo: true,
+                isDemo: true,
+              },
+            },
+          },
+        });
       },
-    });
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
 
     // Send celebration/achievement-style notification on completion
     if (
       !updated.contact.isDemo &&
-      ['birthday', 'anniversary', 'followup'].includes(reminder.type)
+      ['birthday', 'anniversary', 'followup'].includes(updated.type)
     ) {
       const contactName = `${updated.contact.firstName}${updated.contact.lastName ? ` ${updated.contact.lastName}` : ''}`;
       this.notificationsService.sendReminderNotification(userId, {
         contactName,
-        type: reminder.type as 'birthday' | 'anniversary' | 'followup',
+        type: updated.type as 'birthday' | 'anniversary' | 'followup',
         message: 'Great job! You completed this reminder.',
       }).catch(err => console.error('Failed to send completion notification:', err));
     }

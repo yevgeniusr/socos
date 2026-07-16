@@ -1,10 +1,9 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import type { GamificationService } from '../gamification/gamification.service.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import { ContactsService } from './contacts.service.js';
 
 function makeService(prisma: Record<string, any>) {
-  return new ContactsService(prisma as unknown as PrismaService, {} as GamificationService);
+  return new ContactsService(prisma as unknown as PrismaService);
 }
 
 function withTransaction(contact: Record<string, jest.Mock>) {

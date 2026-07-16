@@ -119,6 +119,7 @@ describe("InteractionsService agent commands", () => {
         id: true,
         contactId: true,
         type: true,
+        title: true,
         occurredAt: true,
         xpEarned: true,
       },
@@ -511,5 +512,85 @@ describe("InteractionsService agent commands", () => {
     });
 
     expect(tx.user.update).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("InteractionsService human commands", () => {
+  beforeEach(() => jest.useFakeTimers().setSystemTime(now));
+  afterEach(() => jest.useRealTimers());
+
+  it("uses the serializable interaction transaction and preserves the REST response", async () => {
+    const { gamification, prisma, service, tx } = harness();
+
+    await expect(service.create(ownerId, input)).resolves.toEqual({
+      interaction: {
+        id: "interaction-synthetic",
+        type: InteractionType.CALL,
+        title: "Catch up",
+        occurredAt: now,
+        xpEarned: 10,
+      },
+      user: {
+        xp: 110,
+        level: 2,
+        xpToNextLevel: 400,
+      },
+      newAchievements: [],
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    });
+    expect(tx.interaction.create).toHaveBeenCalledTimes(1);
+    expect(tx.contact.updateMany).toHaveBeenCalledTimes(1);
+    expect(tx.xpTransaction.create).toHaveBeenCalledTimes(1);
+    expect(tx.user.update).toHaveBeenCalledTimes(1);
+    expect(gamification.checkLevelUp).not.toHaveBeenCalled();
+    expect(gamification.checkAchievements).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["cross-owner", { id: contactId, ownerId: "owner-foreign", isDemo: false }],
+    ["demo", { id: contactId, ownerId, isDemo: true }],
+  ])("rejects a %s contact before human writes", async (_label, contact) => {
+    const { service, tx } = harness(contact);
+
+    await expect(service.create(ownerId, input)).rejects.toBeInstanceOf(
+      NotFoundException
+    );
+    expect(tx.interaction.create).not.toHaveBeenCalled();
+    expect(tx.contact.updateMany).not.toHaveBeenCalled();
+    expect(tx.xpTransaction.create).not.toHaveBeenCalled();
+    expect(tx.user.update).not.toHaveBeenCalled();
+  });
+
+  it("uses the actual historical event time for contact chronology", async () => {
+    const occurredAt = new Date("2026-07-15T08:00:00.000Z");
+    const { service, tx } = harness();
+    tx.interaction.create.mockResolvedValue({
+      id: "interaction-synthetic",
+      contactId,
+      type: InteractionType.CALL,
+      title: "Catch up",
+      occurredAt,
+      xpEarned: 10,
+    });
+
+    await service.create(ownerId, {
+      ...input,
+      occurredAt: occurredAt.toISOString(),
+    });
+
+    expect(tx.contact.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: [
+            { lastContactedAt: null },
+            { lastContactedAt: { lt: occurredAt } },
+          ],
+        }),
+        data: { lastContactedAt: occurredAt },
+      })
+    );
   });
 });

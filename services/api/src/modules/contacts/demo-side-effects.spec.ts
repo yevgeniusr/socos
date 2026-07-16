@@ -1,7 +1,7 @@
+import { NotFoundException } from '@nestjs/common';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import type { GamificationService } from '../gamification/gamification.service.js';
 import type { NotificationsService } from '../notifications/notifications.service.js';
-import { ContactsService } from './contacts.service.js';
 import { InteractionsService } from '../interactions/interactions.service.js';
 import { InteractionType } from '../interactions/interactions.dto.js';
 import { AgentRemindersService } from '../reminders/agent-reminders.service.js';
@@ -12,24 +12,22 @@ const userId = 'synthetic-user';
 const contactId = 'synthetic-demo-contact';
 
 function demoInteractionPrisma() {
-  return {
+  const transaction = {
     contact: {
-      findFirst: jest.fn().mockResolvedValue({ id: contactId, isDemo: true }),
-      update: jest.fn().mockResolvedValue({}),
+      findFirst: jest.fn().mockResolvedValue({
+        id: contactId,
+        ownerId: userId,
+        isDemo: true,
+      }),
+      updateMany: jest.fn(),
     },
     interaction: {
-      create: jest.fn().mockResolvedValue({
-        id: 'synthetic-interaction',
-        type: 'note',
-        title: 'Synthetic note',
-        occurredAt: new Date('2026-07-16T00:00:00Z'),
-        xpEarned: 0,
-      }),
+      create: jest.fn(),
     },
-    user: {
-      findUniqueOrThrow: jest.fn().mockResolvedValue({ xp: 240, level: 2 }),
-      update: jest.fn(),
-    },
+  };
+  return {
+    ...transaction,
+    $transaction: jest.fn().mockImplementation((callback) => callback(transaction)),
   };
 }
 
@@ -42,35 +40,7 @@ function gamificationMock() {
 }
 
 describe('demo contact side effects', () => {
-  it('logs a contact interaction with zero XP and no reward side effects', async () => {
-    const prisma = demoInteractionPrisma();
-    const gamification = gamificationMock();
-    const service = new ContactsService(
-      prisma as unknown as PrismaService,
-      gamification as unknown as GamificationService,
-    );
-
-    const result = await service.createInteraction(userId, contactId, {
-      type: 'note',
-      title: 'Synthetic note',
-    });
-
-    expect(prisma.interaction.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ xpEarned: 0 }) }),
-    );
-    expect(prisma.contact.update).toHaveBeenCalled();
-    expect(prisma.user.update).not.toHaveBeenCalled();
-    expect(gamification.calculateInteractionXp).not.toHaveBeenCalled();
-    expect(gamification.checkLevelUp).not.toHaveBeenCalled();
-    expect(gamification.checkAchievements).not.toHaveBeenCalled();
-    expect(result).toMatchObject({
-      interaction: { xpEarned: 0 },
-      user: { xp: 240, level: 2, xpToNextLevel: 400 },
-      newAchievements: [],
-    });
-  });
-
-  it('applies the same zero-XP policy through the interactions service', async () => {
+  it('rejects manual interactions for demo contacts without side effects', async () => {
     const prisma = demoInteractionPrisma();
     const gamification = gamificationMock();
     const service = new InteractionsService(
@@ -78,16 +48,16 @@ describe('demo contact side effects', () => {
       gamification as unknown as GamificationService,
     );
 
-    await service.create(userId, {
-      contactId,
-      type: InteractionType.NOTE,
-      title: 'Synthetic note',
-    });
+    await expect(
+      service.create(userId, {
+        contactId,
+        type: InteractionType.NOTE,
+        title: 'Synthetic note',
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
 
-    expect(prisma.interaction.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ xpEarned: 0 }) }),
-    );
-    expect(prisma.user.update).not.toHaveBeenCalled();
+    expect(prisma.interaction.create).not.toHaveBeenCalled();
+    expect(prisma.contact.updateMany).not.toHaveBeenCalled();
     expect(gamification.calculateInteractionXp).not.toHaveBeenCalled();
     expect(gamification.checkLevelUp).not.toHaveBeenCalled();
     expect(gamification.checkAchievements).not.toHaveBeenCalled();
@@ -142,25 +112,31 @@ describe('demo contact side effects', () => {
     expect(notifications.sendReminderNotification).not.toHaveBeenCalled();
   });
 
-  it('completes a demo reminder without sending a completion notification', async () => {
-    const prisma = {
+  it('rejects completion for a demo reminder without side effects', async () => {
+    const transaction = {
       reminder: {
         findFirst: jest.fn().mockResolvedValue({
           id: 'synthetic-reminder',
           contactId,
+          ownerId: userId,
           type: 'followup',
+          title: 'Synthetic reminder',
+          description: null,
+          scheduledAt: new Date('2026-07-20T09:00:00Z'),
+          repeatInterval: null,
           isRecurring: false,
+          status: 'pending',
+          contact: { ownerId: userId, isDemo: true },
         }),
         create: jest.fn(),
-        update: jest.fn().mockResolvedValue({
-          id: 'synthetic-reminder',
-          contact: {
-            firstName: 'Synthetic',
-            lastName: 'Contact',
-            isDemo: true,
-          },
-        }),
+        updateMany: jest.fn(),
+        findUniqueOrThrow: jest.fn(),
       },
+    };
+    const prisma = {
+      $transaction: jest
+        .fn()
+        .mockImplementation((callback) => callback(transaction)),
     };
     const notifications = { sendReminderNotification: jest.fn() };
     const service = new RemindersService(
@@ -168,10 +144,12 @@ describe('demo contact side effects', () => {
       notifications as unknown as NotificationsService,
     );
 
-    const result = await service.complete(userId, 'synthetic-reminder');
+    await expect(
+      service.complete(userId, 'synthetic-reminder'),
+    ).rejects.toBeInstanceOf(NotFoundException);
 
-    expect(result.id).toBe('synthetic-reminder');
-    expect(prisma.reminder.update).toHaveBeenCalled();
+    expect(transaction.reminder.updateMany).not.toHaveBeenCalled();
+    expect(transaction.reminder.create).not.toHaveBeenCalled();
     expect(notifications.sendReminderNotification).not.toHaveBeenCalled();
   });
 });

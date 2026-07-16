@@ -3,13 +3,21 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ContactsService } from './contacts.service.js';
 import { CreateContactDto, UpdateContactDto, ContactQueryDto } from './contacts.dto.js';
 import { AuthGuard } from '../auth/auth.guard.js';
+import {
+  CreateContactInteractionDto,
+  CreateInteractionDto,
+} from '../interactions/interactions.dto.js';
+import { InteractionsService } from '../interactions/interactions.service.js';
 
 @ApiTags('contacts')
 @Controller('contacts')
 @UseGuards(AuthGuard)
 @ApiBearerAuth()
 export class ContactsController {
-  constructor(private readonly contactsService: ContactsService) {}
+  constructor(
+    private readonly contactsService: ContactsService,
+    private readonly interactionsService: InteractionsService,
+  ) {}
 
   @Post()
   @ApiOperation({ summary: 'Create a new contact' })
@@ -90,9 +98,10 @@ export class ContactsController {
   async createInteraction(
     @Request() req: { user: { userId: string } },
     @Param('id') contactId: string,
-    @Body() dto: any,
+    @Body() dto: CreateContactInteractionDto,
   ) {
-    return this.contactsService.createInteraction(req.user.userId, contactId, dto);
+    const interaction: CreateInteractionDto = { ...dto, contactId };
+    return this.interactionsService.create(req.user.userId, interaction);
   }
 
   @Get(':id/interactions')
@@ -102,6 +111,10 @@ export class ContactsController {
     @Param('id') contactId: string,
     @Query('limit') limit?: number,
   ) {
-    return this.contactsService.getInteractions(req.user.userId, contactId, limit);
+    return this.interactionsService.findByContact(
+      req.user.userId,
+      contactId,
+      limit,
+    );
   }
 }

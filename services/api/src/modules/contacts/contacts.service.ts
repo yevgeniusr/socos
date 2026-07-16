@@ -1,7 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { GamificationService } from '../gamification/gamification.service.js';
 import {
   CONTACT_FIELD_TYPES,
   ContactFieldDto,
@@ -142,10 +141,7 @@ function normalizeContactFields(fields: ContactFieldDto[]) {
 
 @Injectable()
 export class ContactsService {
-  constructor(
-    private prisma: PrismaService,
-    private gamificationService: GamificationService,
-  ) {}
+  constructor(private prisma: PrismaService) {}
 
   async create(userId: string, dto: CreateContactDto) {
     // Get user's default vault
@@ -391,103 +387,4 @@ export class ContactsService {
     }));
   }
 
-  async createInteraction(userId: string, contactId: string, dto: any) {
-    // Verify contact belongs to user
-    const contact = await this.prisma.contact.findFirst({
-      where: { id: contactId, ownerId: userId },
-    });
-
-    if (!contact) {
-      throw new NotFoundException('Contact not found');
-    }
-
-    const xpEarned = contact.isDemo
-      ? 0
-      : await this.gamificationService.calculateInteractionXp(dto.type || 'note');
-
-    const interaction = await this.prisma.interaction.create({
-      data: {
-        contactId,
-        ownerId: userId,
-        type: dto.type || 'note',
-        title: dto.title,
-        content: dto.content,
-        summary: dto.summary,
-        occurredAt: dto.occurredAt ? new Date(dto.occurredAt) : new Date(),
-        duration: dto.duration,
-        location: dto.location,
-        xpEarned,
-      },
-      include: {
-        contact: {
-          select: { id: true, firstName: true, lastName: true, photo: true },
-        },
-      },
-    });
-
-    const user = contact.isDemo
-      ? await this.prisma.user.findUniqueOrThrow({
-          where: { id: userId },
-          select: { xp: true, level: true },
-        })
-      : await this.prisma.user.update({
-          where: { id: userId },
-          data: {
-            xp: { increment: xpEarned },
-            lastActiveAt: new Date(),
-          },
-        });
-
-    const levelInfo = contact.isDemo
-      ? {
-          newLevel: user.level,
-          xpForNextLevel: Math.pow(user.level, 2) * 100,
-        }
-      : await this.gamificationService.checkLevelUp(userId, user.xp);
-
-    // Update contact's lastContactedAt
-    await this.prisma.contact.update({
-      where: { id: contactId },
-      data: { lastContactedAt: new Date() },
-    });
-
-    const newAchievements = contact.isDemo
-      ? []
-      : await this.gamificationService.checkAchievements(userId);
-
-    return {
-      interaction: {
-        id: interaction.id,
-        type: interaction.type,
-        title: interaction.title,
-        occurredAt: interaction.occurredAt,
-        xpEarned: interaction.xpEarned,
-      },
-      user: {
-        xp: user.xp,
-        level: levelInfo.newLevel,
-        xpToNextLevel: levelInfo.xpForNextLevel,
-      },
-      newAchievements,
-    };
-  }
-
-  async getInteractions(userId: string, contactId: string, limit = 20) {
-    // Verify contact belongs to user
-    const contact = await this.prisma.contact.findFirst({
-      where: { id: contactId, ownerId: userId },
-    });
-
-    if (!contact) {
-      throw new NotFoundException('Contact not found');
-    }
-
-    const interactions = await this.prisma.interaction.findMany({
-      where: { contactId, ownerId: userId },
-      take: limit,
-      orderBy: { occurredAt: 'desc' },
-    });
-
-    return interactions;
-  }
 }
