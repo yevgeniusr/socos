@@ -164,6 +164,26 @@ describe('contact DTOs', () => {
       });
     });
 
+    it('allows first-met context to be cleared on update', async () => {
+      await expect(
+        transform(UpdateContactDto, {
+          firstMetContext: null,
+        }),
+      ).resolves.toMatchObject({
+        firstMetContext: null,
+      });
+    });
+
+    it('documents first-met context as nullable in the update schema', () => {
+      expect(
+        Reflect.getMetadata(
+          'swagger/apiModelProperties',
+          UpdateContactDto.prototype,
+          'firstMetContext',
+        ),
+      ).toMatchObject({ nullable: true, required: false });
+    });
+
     it.each([
       [CreateContactDto, { firstName: 'Synthetic', importance: 0 }, 'importance'],
       [CreateContactDto, { firstName: 'Synthetic', importance: 6 }, 'importance'],

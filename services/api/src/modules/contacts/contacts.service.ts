@@ -181,11 +181,7 @@ export class ContactsService {
         preferredCadenceDays: dto.preferredCadenceDays,
         contactFields: contactFields ? { create: contactFields } : undefined,
       },
-      include: {
-        owner: {
-          select: { id: true, name: true, email: true },
-        },
-      },
+      select: CONTACT_DETAIL_SELECT,
     });
 
     return {
@@ -299,6 +295,7 @@ export class ContactsService {
         return tx.contact.update({
           where: { id: contactId },
           data: updateData,
+          select: CONTACT_DETAIL_SELECT,
         });
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },

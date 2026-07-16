@@ -281,10 +281,10 @@ export class UpdateContactDto {
   @IsDateString()
   firstMetDate?: string | null;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @IsString()
-  firstMetContext?: string;
+  firstMetContext?: string | null;
 
   @ApiPropertyOptional({ minimum: 1, maximum: 5 })
   @IsOptional()

@@ -13,6 +13,16 @@ function withTransaction(contact: Record<string, jest.Mock>) {
   return prisma;
 }
 
+function applyPrismaProjection(record: Record<string, any>, args: Record<string, any>) {
+  if (!args.select) return record;
+
+  return Object.fromEntries(
+    Object.keys(args.select)
+      .filter((key) => key in record)
+      .map((key) => [key, record[key]]),
+  );
+}
+
 describe('ContactsService personal profiles', () => {
   describe('list and facets', () => {
     it('uses bounded pagination, non-demo isolation, group filtering, and stable allowlisted sorting', async () => {
@@ -220,6 +230,101 @@ describe('ContactsService personal profiles', () => {
   });
 
   describe('writes', () => {
+    const mutationDetail = {
+      id: 'synthetic-contact',
+      firstName: 'Synthetic',
+      sourceId: 'provider-contact-id',
+      owner: { id: 'synthetic-owner', email: 'owner@example.test' },
+      socialLinks: '{"github":"https://github.com/synthetic"}',
+      contactFields: [{ id: 'synthetic-field', type: 'email', value: 'person@example.test' }],
+      interactions: [{ id: 'synthetic-interaction' }],
+      reminders: [{ id: 'synthetic-reminder' }],
+      _count: { interactions: 1, reminders: 1, tasks: 0, gifts: 0 },
+    };
+
+    it('returns a safely projected detail profile after create', async () => {
+      const prisma = {
+        vault: {
+          findFirst: jest.fn().mockResolvedValue({ id: 'synthetic-vault' }),
+        },
+        contact: {
+          create: jest
+            .fn()
+            .mockImplementation((args) => Promise.resolve(applyPrismaProjection(mutationDetail, args))),
+        },
+      };
+
+      const result = await makeService(prisma).create('synthetic-owner', {
+        firstName: 'Synthetic',
+      });
+
+      const args = prisma.contact.create.mock.calls[0][0];
+      expect(args.include).toBeUndefined();
+      expect(args.select.contactFields).toEqual({
+        orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+      });
+      expect(args.select.interactions).toEqual({
+        orderBy: { occurredAt: 'desc' },
+        take: 10,
+      });
+      expect(args.select.reminders).toEqual({
+        where: { status: 'pending' },
+        orderBy: { scheduledAt: 'asc' },
+        take: 5,
+      });
+      expect(args.select.sourceId).toBeUndefined();
+      expect(args.select.owner).toBeUndefined();
+      expect(result).toMatchObject({
+        contactFields: mutationDetail.contactFields,
+        interactions: mutationDetail.interactions,
+        reminders: mutationDetail.reminders,
+        _count: mutationDetail._count,
+        socialLinks: { github: 'https://github.com/synthetic' },
+      });
+      expect(result).not.toHaveProperty('sourceId');
+      expect(result).not.toHaveProperty('owner');
+    });
+
+    it('returns a safely projected detail profile after update', async () => {
+      const contact = {
+        findFirst: jest.fn().mockResolvedValue({ id: 'synthetic-contact' }),
+        update: jest
+          .fn()
+          .mockImplementation((args) => Promise.resolve(applyPrismaProjection(mutationDetail, args))),
+      };
+      const prisma = withTransaction(contact);
+
+      const result = await makeService(prisma).update('synthetic-owner', 'synthetic-contact', {
+        firstName: 'Updated',
+      });
+
+      const args = contact.update.mock.calls[0][0];
+      expect(args.include).toBeUndefined();
+      expect(args.select.contactFields).toEqual({
+        orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+      });
+      expect(args.select.interactions).toEqual({
+        orderBy: { occurredAt: 'desc' },
+        take: 10,
+      });
+      expect(args.select.reminders).toEqual({
+        where: { status: 'pending' },
+        orderBy: { scheduledAt: 'asc' },
+        take: 5,
+      });
+      expect(args.select.sourceId).toBeUndefined();
+      expect(args.select.owner).toBeUndefined();
+      expect(result).toMatchObject({
+        contactFields: mutationDetail.contactFields,
+        interactions: mutationDetail.interactions,
+        reminders: mutationDetail.reminders,
+        _count: mutationDetail._count,
+        socialLinks: { github: 'https://github.com/synthetic' },
+      });
+      expect(result).not.toHaveProperty('sourceId');
+      expect(result).not.toHaveProperty('owner');
+    });
+
     it('creates normalized contact fields and stores social links as JSON', async () => {
       const prisma = {
         vault: {
@@ -298,10 +403,12 @@ describe('ContactsService personal profiles', () => {
         },
         select: { id: true },
       });
-      expect(contact.update).toHaveBeenCalledWith({
-        where: { id: 'synthetic-contact' },
-        data: { importance: 4, preferredCadenceDays: 45 },
-      });
+      expect(contact.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'synthetic-contact' },
+          data: { importance: 4, preferredCadenceDays: 45 },
+        }),
+      );
       expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
         isolationLevel: 'Serializable',
       });
@@ -318,10 +425,12 @@ describe('ContactsService personal profiles', () => {
         contactFields: [],
       } as any);
 
-      expect(contact.update).toHaveBeenCalledWith({
-        where: { id: 'synthetic-contact' },
-        data: { contactFields: { deleteMany: {}, create: [] } },
-      });
+      expect(contact.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'synthetic-contact' },
+          data: { contactFields: { deleteMany: {}, create: [] } },
+        }),
+      );
     });
 
     it('normalizes and serializably replaces provided fields', async () => {
@@ -409,16 +518,37 @@ describe('ContactsService personal profiles', () => {
         groups: ['Mentors'],
       } as any);
 
-      expect(contact.update).toHaveBeenCalledWith({
-        where: { id: 'synthetic-contact' },
-        data: {
-          birthday: null,
-          anniversary: new Date('2020-06-10T00:00:00.000Z'),
-          firstMetDate: null,
-          firstMetContext: 'Synthetic conference',
-          groups: ['Mentors'],
-        },
+      expect(contact.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'synthetic-contact' },
+          data: {
+            birthday: null,
+            anniversary: new Date('2020-06-10T00:00:00.000Z'),
+            firstMetDate: null,
+            firstMetContext: 'Synthetic conference',
+            groups: ['Mentors'],
+          },
+        }),
+      );
+    });
+
+    it('clears first-met context with null', async () => {
+      const contact = {
+        findFirst: jest.fn().mockResolvedValue({ id: 'synthetic-contact' }),
+        update: jest.fn().mockResolvedValue({ id: 'synthetic-contact', socialLinks: null }),
+      };
+      const prisma = withTransaction(contact);
+
+      await makeService(prisma).update('synthetic-owner', 'synthetic-contact', {
+        firstMetContext: null,
       });
+
+      expect(contact.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'synthetic-contact' },
+          data: { firstMetContext: null },
+        }),
+      );
     });
   });
 });
