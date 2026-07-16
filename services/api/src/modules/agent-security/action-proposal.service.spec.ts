@@ -381,9 +381,12 @@ describe("ActionProposalService", () => {
         payload: { secret: "must-not-leak" },
         metadata: { secret: "must-not-leak" },
       },
-      historyRow("proposal-unsupported", "unsupported", {
-        secret: "must-not-leak",
-      }),
+      {
+        ...historyRow("proposal-unsupported", "unsupported", {
+          secret: "must-not-leak",
+        }),
+        status: "corrupt",
+      },
       historyRow("proposal-null", "delete", null),
     ]);
 
@@ -398,6 +401,10 @@ describe("ActionProposalService", () => {
       { type: "unavailable", label: "Unavailable preview" },
       { type: "unavailable", label: "Unavailable preview" },
     ]);
+    expect(result.proposals[1]).toMatchObject({
+      actionType: "unavailable",
+      status: "unavailable",
+    });
     const serialized = JSON.stringify(result);
     for (const forbidden of [
       "ownerId",

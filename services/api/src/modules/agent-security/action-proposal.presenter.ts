@@ -1,8 +1,10 @@
 import {
   agentActionProposalInputSchema,
   type AgentActionProposalInput,
-  type ProposalActionType,
 } from "@socos/agent-core";
+
+const ACTION_TYPES = new Set(["message", "introduction", "invitation", "merge", "delete"]);
+const HISTORY_STATUSES = new Set(["pending", "approved", "rejected", "expired"]);
 
 const UNAVAILABLE_PREVIEW = {
   type: "unavailable" as const,
@@ -73,9 +75,13 @@ export function presentProposalHistory(
   return {
     proposals: proposals.map((proposal) => ({
       id: proposal.id,
-      actionType: proposal.actionType as ProposalActionType,
+      actionType: ACTION_TYPES.has(proposal.actionType)
+        ? proposal.actionType
+        : "unavailable",
       preview: presentPreview(proposal, contactsById),
-      status: proposal.status,
+      status: HISTORY_STATUSES.has(proposal.status)
+        ? proposal.status
+        : "unavailable",
       expiresAt: proposal.expiresAt,
       decidedAt: proposal.decidedAt,
       createdAt: proposal.createdAt,
