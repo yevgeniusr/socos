@@ -4,7 +4,11 @@ import {
   canonicalOwnTracksPayload,
 } from "./location-ingest.service.js";
 
-const DEVICE = { id: "internal-device-id", ownerId: "resolved-owner-id" };
+const DEVICE = {
+  id: "internal-device-id",
+  ownerId: "resolved-owner-id",
+  username: "u".repeat(32),
+};
 const RECEIVED_AT = new Date("2026-07-16T12:00:00.000Z");
 const ENVELOPE = {
   ciphertext: Buffer.from("ciphertext"),
@@ -127,7 +131,12 @@ describe("LocationIngestService", () => {
     expect(createData).not.toHaveProperty("tid");
     expect(createData).not.toHaveProperty("rawPayload");
     expect(tx.locationDevice.findFirst).toHaveBeenCalledWith({
-      where: { id: DEVICE.id, ownerId: DEVICE.ownerId, status: "active" },
+      where: {
+        id: DEVICE.id,
+        ownerId: DEVICE.ownerId,
+        status: "active",
+        username: DEVICE.username,
+      },
       select: { lastSeenAt: true },
     });
   });
@@ -146,6 +155,32 @@ describe("LocationIngestService", () => {
     );
   });
 
+  it("rejects when credentials rotate after guard verification and before insert", async () => {
+    tx.locationDevice.findFirst.mockImplementation(({ where }: any) =>
+      where.username === DEVICE.username ? null : { lastSeenAt: null }
+    );
+
+    await expect(
+      service.ingest(DEVICE, validLocation(), RECEIVED_AT)
+    ).rejects.toMatchObject({
+      response: {
+        statusCode: 401,
+        code: "invalid_device_credentials",
+        message: "Unauthorized",
+      },
+    });
+    expect(tx.locationDevice.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: DEVICE.id,
+        ownerId: DEVICE.ownerId,
+        status: "active",
+        username: DEVICE.username,
+      },
+      select: { lastSeenAt: true },
+    });
+    expect(tx.locationSample.create).not.toHaveBeenCalled();
+  });
+
   it("accepts HMAC duplicate delivery and keeps the last-seen update owner-scoped", async () => {
     prisma.$transaction.mockRejectedValue({
       code: "P2002",
@@ -161,6 +196,7 @@ describe("LocationIngestService", () => {
         id: DEVICE.id,
         ownerId: DEVICE.ownerId,
         status: "active",
+        username: DEVICE.username,
         OR: [{ lastSeenAt: null }, { lastSeenAt: { lt: new Date(1_000) } }],
       },
       data: { lastSeenAt: new Date(1_000) },
@@ -191,6 +227,7 @@ describe("LocationIngestService", () => {
         id: DEVICE.id,
         ownerId: DEVICE.ownerId,
         status: "active",
+        username: DEVICE.username,
         OR: [{ lastSeenAt: null }, { lastSeenAt: { lt: recordedAt } }],
       },
       data: { lastSeenAt: recordedAt },

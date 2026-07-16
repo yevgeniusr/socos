@@ -47,6 +47,7 @@ describe("OwnTracksAuthGuard", () => {
     expect(request.locationDevice).toEqual({
       id: "internal-device-id",
       ownerId: "resolved-owner-id",
+      username: USERNAME,
     });
   });
 

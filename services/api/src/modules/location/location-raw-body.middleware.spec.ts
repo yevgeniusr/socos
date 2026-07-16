@@ -22,6 +22,9 @@ describe("configureLocationBodyParsers", () => {
         .status(200)
         .json({ accepted: typeof request.body?.value === "string" });
     });
+    app.post("/api/existing-form", (request, response) => {
+      response.status(200).json(request.body);
+    });
     server = http.createServer(app);
     await new Promise<void>((resolve) =>
       server.listen(0, "127.0.0.1", resolve)
@@ -81,6 +84,20 @@ describe("configureLocationBodyParsers", () => {
 
     expect(response).toEqual({ status: 200, body: '{"accepted":true}' });
   });
+
+  it("keeps the extended URL-encoded parser available to existing routes", async () => {
+    const response = await postRaw(
+      port,
+      "/api/existing-form",
+      "profile[name]=Synthetic&count=2",
+      "application/x-www-form-urlencoded"
+    );
+
+    expect(response).toEqual({
+      status: 200,
+      body: '{"profile":{"name":"Synthetic"},"count":"2"}',
+    });
+  });
 });
 
 describe("application parser wiring", () => {
@@ -109,7 +126,8 @@ function sizedJson(bytes: number): string {
 function postRaw(
   port: number,
   path: string,
-  body: string
+  body: string,
+  contentType = "application/json"
 ): Promise<RawResponse> {
   return new Promise((resolve, reject) => {
     const request = http.request(
@@ -119,7 +137,7 @@ function postRaw(
         path,
         method: "POST",
         headers: {
-          "content-type": "application/json",
+          "content-type": contentType,
           "content-length": Buffer.byteLength(body),
         },
       },

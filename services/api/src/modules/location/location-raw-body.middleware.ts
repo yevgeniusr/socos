@@ -13,6 +13,7 @@ export function configureLocationBodyParsers(app: Express): void {
     ownTracksJsonErrorHandler
   );
   app.use(express.json());
+  app.use(express.urlencoded({ extended: true }));
 }
 
 const ownTracksJsonErrorHandler: ErrorRequestHandler = (

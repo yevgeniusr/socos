@@ -52,7 +52,12 @@ export class LocationIngestService {
     try {
       await this.prisma.$transaction(async (transaction) => {
         const current = await transaction.locationDevice.findFirst({
-          where: { id: device.id, ownerId: device.ownerId, status: "active" },
+          where: {
+            id: device.id,
+            ownerId: device.ownerId,
+            status: "active",
+            username: device.username,
+          },
           select: { lastSeenAt: true },
         });
         if (!current) throw unauthorized();
@@ -129,6 +134,7 @@ function monotonicLastSeenWhere(
     id: device.id,
     ownerId: device.ownerId,
     status: "active",
+    username: device.username,
     OR: [{ lastSeenAt: null }, { lastSeenAt: { lt: recordedAt } }],
   };
 }

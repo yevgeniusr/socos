@@ -137,6 +137,7 @@ export type AuthenticatedOwnerRequest = { user: { userId: string } };
 export type AuthenticatedLocationDevice = {
   id: string;
   ownerId: string;
+  username: string;
 };
 
 function PreserveJsonType(): PropertyDecorator {

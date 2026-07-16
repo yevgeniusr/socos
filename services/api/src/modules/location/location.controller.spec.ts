@@ -59,7 +59,11 @@ describe("OwnTracksController", () => {
   it("passes only the guard-resolved device and validated object and returns 200 []", async () => {
     const ingest = { ingest: jest.fn().mockResolvedValue([]) };
     const controller = new OwnTracksController(ingest as any);
-    const device = { id: "internal-device", ownerId: "resolved-owner" };
+    const device = {
+      id: "internal-device",
+      ownerId: "resolved-owner",
+      username: "u".repeat(32),
+    };
     const request = {
       locationDevice: device,
       headers: { "x-limit-u": "other-owner", "x-limit-d": "other-device" },

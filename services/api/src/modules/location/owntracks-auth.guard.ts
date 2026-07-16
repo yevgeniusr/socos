@@ -37,7 +37,11 @@ export class OwnTracksAuthGuard implements CanActivate {
     );
     if (!valid) throw unauthorized();
 
-    request.locationDevice = { id: device.id, ownerId: device.ownerId };
+    request.locationDevice = {
+      id: device.id,
+      ownerId: device.ownerId,
+      username: parsed.username,
+    };
     return true;
   }
 }

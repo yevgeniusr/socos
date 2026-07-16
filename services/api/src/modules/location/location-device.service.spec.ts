@@ -1,4 +1,8 @@
-import { NotFoundException, ServiceUnavailableException } from "@nestjs/common";
+import {
+  ConflictException,
+  NotFoundException,
+  ServiceUnavailableException,
+} from "@nestjs/common";
 import { LocationDeviceService } from "./location-device.service.js";
 
 const OWNER_ID = "owner-synthetic";
@@ -210,6 +214,7 @@ describe("LocationDeviceService", () => {
       locationDevice: {
         findFirst: jest.fn().mockResolvedValue({
           id: DEVICE_ID,
+          username: "o".repeat(32),
           status: "active",
           rawRetentionDays: 90,
           derivedRetentionDays: 730,
@@ -231,12 +236,90 @@ describe("LocationDeviceService", () => {
       })
     );
     expect(tx.locationDevice.updateMany).toHaveBeenCalledWith({
-      where: { id: DEVICE_ID, ownerId: OWNER_ID, status: "active" },
+      where: {
+        id: DEVICE_ID,
+        ownerId: OWNER_ID,
+        status: "active",
+        username: "o".repeat(32),
+      },
       data: { username: "u".repeat(32), credentialHash: "stored-scrypt-hash" },
     });
     expect(result.credentials).toEqual({
       username: "u".repeat(32),
       password: "one-time-password",
+    });
+  });
+
+  it("allows only one concurrent rotation from the same current credential", async () => {
+    const oldUsername = "o".repeat(32);
+    let storedUsername = oldUsername;
+    credentials.generate
+      .mockResolvedValueOnce({
+        username: "a".repeat(32),
+        password: "first-password",
+        passwordHash: "first-hash",
+      })
+      .mockResolvedValueOnce({
+        username: "b".repeat(32),
+        password: "second-password",
+        passwordHash: "second-hash",
+      });
+    const transaction = {
+      locationDevice: {
+        findFirst: jest.fn().mockImplementation(async () => ({
+          id: DEVICE_ID,
+          username: oldUsername,
+          status: "active",
+          rawRetentionDays: 90,
+          derivedRetentionDays: 730,
+          lastSeenAt: null,
+          createdAt: CREATED_AT,
+          updatedAt: CREATED_AT,
+        })),
+        updateMany: jest
+          .fn()
+          .mockImplementation(async ({ where, data }: any) => {
+            if (where.username !== storedUsername) return { count: 0 };
+            storedUsername = data.username;
+            return { count: 1 };
+          }),
+      },
+    };
+    prisma.$transaction.mockImplementation((operation: any) =>
+      operation(transaction)
+    );
+
+    const results = await Promise.allSettled([
+      service.rotate(OWNER_ID, DEVICE_ID),
+      service.rotate(OWNER_ID, DEVICE_ID),
+    ]);
+
+    const fulfilled = results.filter(
+      (result): result is PromiseFulfilledResult<any> =>
+        result.status === "fulfilled"
+    );
+    const rejected = results.filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected"
+    );
+    expect(fulfilled).toHaveLength(1);
+    expect(fulfilled[0].value.device).not.toHaveProperty("username");
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].reason).toBeInstanceOf(ConflictException);
+    expect(rejected[0].reason).toMatchObject({
+      response: {
+        statusCode: 409,
+        code: "credential_rotation_conflict",
+        message: "Credential rotation conflict",
+      },
+    });
+    expect(transaction.locationDevice.updateMany).toHaveBeenNthCalledWith(1, {
+      where: {
+        id: DEVICE_ID,
+        ownerId: OWNER_ID,
+        status: "active",
+        username: oldUsername,
+      },
+      data: { username: "a".repeat(32), credentialHash: "first-hash" },
     });
   });
 

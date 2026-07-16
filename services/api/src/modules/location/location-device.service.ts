@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { Injectable, NotFoundException } from "@nestjs/common";
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { DeviceCredentialService } from "../personal-data/device-credential.service.js";
 import { PersonalDataCipherService } from "../personal-data/personal-data-cipher.service.js";
 import { PersonalDataConfigService } from "../personal-data/personal-data-config.js";
@@ -138,21 +142,31 @@ export class LocationDeviceService {
     const device = await this.prisma.$transaction(async (transaction) => {
       const current = await transaction.locationDevice.findFirst({
         where: { id: deviceId, ownerId, status: "active" },
-        select: DEVICE_PUBLIC_SELECT,
+        select: { ...DEVICE_PUBLIC_SELECT, username: true },
       });
       if (!current) throw new NotFoundException("Location device not found");
 
       const updated = await transaction.locationDevice.updateMany({
-        where: { id: deviceId, ownerId, status: "active" },
+        where: {
+          id: deviceId,
+          ownerId,
+          status: "active",
+          username: current.username,
+        },
         data: {
           username: issued.username,
           credentialHash: issued.passwordHash,
         },
       });
       if (updated.count !== 1) {
-        throw new NotFoundException("Location device not found");
+        throw new ConflictException({
+          statusCode: 409,
+          code: "credential_rotation_conflict",
+          message: "Credential rotation conflict",
+        });
       }
-      return current;
+      const { username: _username, ...publicDevice } = current;
+      return publicDevice;
     });
 
     return {
