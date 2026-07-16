@@ -1,8 +1,16 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import type {
+  ContactDetail,
+  ContactListItem,
+} from "../src/lib/contact-contracts";
 
 const ISO_NOW = "2026-07-16T12:00:00.000Z";
 
-function listContact(id: string, firstName: string, lastName: string) {
+function listContact(
+  id: string,
+  firstName: string,
+  lastName: string
+): ContactListItem {
   return {
     id,
     firstName,
@@ -45,51 +53,31 @@ const contactDetail = {
   contactFields: [
     {
       id: "synthetic-field-email",
-      contactId: "synthetic-mentor",
       type: "email",
       value: "mentor@example.test",
       label: "work",
       isPrimary: true,
-      createdAt: ISO_NOW,
-      updatedAt: ISO_NOW,
     },
   ],
   interactions: [
     {
       id: "synthetic-interaction-existing",
-      contactId: "synthetic-mentor",
-      ownerId: "synthetic-owner",
       type: "meeting",
       title: "Synthetic planning session",
       content: "Discussed a synthetic mentoring plan.",
-      summary: null,
       occurredAt: "2026-07-10T09:00:00.000Z",
-      duration: 45,
-      location: null,
-      xpEarned: 10,
-      createdAt: ISO_NOW,
-      updatedAt: ISO_NOW,
     },
   ],
   reminders: [
     {
       id: "synthetic-reminder-existing",
-      contactId: "synthetic-mentor",
-      ownerId: "synthetic-owner",
-      type: "followup",
       title: "Synthetic follow-up",
       description: "Send the synthetic notes.",
       scheduledAt: "2026-07-20T09:00:00.000Z",
-      completedAt: null,
-      repeatInterval: null,
-      isRecurring: false,
-      status: "pending",
-      createdAt: ISO_NOW,
-      updatedAt: ISO_NOW,
     },
   ],
   _count: { interactions: 1, reminders: 1, tasks: 0, gifts: 0 },
-};
+} satisfies ContactDetail;
 
 interface SyntheticApiState {
   listRequests: URL[];
@@ -182,16 +170,19 @@ async function installSyntheticApi(page: Page): Promise<SyntheticApiState> {
           limit: 25,
         });
       }
-      const contacts = Array.from({ length: 25 }, (_, index) => {
-        const position = offset + index + 1;
-        return position === 26
-          ? listContact("synthetic-page-two", "Synthetic", "Page Two")
-          : listContact(
-              `synthetic-contact-${position}`,
-              "Synthetic",
-              `Contact ${position}`
-            );
-      });
+      const contacts = Array.from(
+        { length: offset === 100 ? 6 : 25 },
+        (_, index) => {
+          const position = offset + index + 1;
+          return position === 26
+            ? listContact("synthetic-page-two", "Synthetic", "Page Two")
+            : listContact(
+                `synthetic-contact-${position}`,
+                "Synthetic",
+                `Contact ${position}`
+              );
+        }
+      );
       return json(route, { contacts, total: 106, offset, limit: 25 });
     }
     if (url.pathname === "/api/contacts/synthetic-mentor" && method === "GET") {
@@ -257,6 +248,26 @@ test.describe("personal Contacts workspace", () => {
         api.listRequests.some((url) => url.searchParams.get("offset") === "25")
       )
       .toBe(true);
+
+    await page.getByRole("button", { name: "Next" }).click();
+    await expect(page.getByText("Showing 51-75 of 106")).toBeVisible();
+    await page.getByRole("button", { name: "Next" }).click();
+    await expect(page.getByText("Showing 76-100 of 106")).toBeVisible();
+    await page.getByRole("button", { name: "Next" }).click();
+    await expect(page.getByText("Showing 101-106 of 106")).toBeVisible();
+    await expect(
+      page.getByRole("button", {
+        name: "Open contact profile for Synthetic Contact 106",
+      })
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Next" })).toBeDisabled();
+    await expect
+      .poll(() =>
+        api.listRequests.map((url) =>
+          Number(url.searchParams.get("offset") ?? 0)
+        )
+      )
+      .toEqual([0, 25, 50, 75, 100]);
 
     await page
       .getByRole("searchbox", { name: "Search contacts" })

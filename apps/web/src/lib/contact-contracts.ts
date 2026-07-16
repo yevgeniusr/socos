@@ -15,13 +15,10 @@ export type ReminderType = "birthday" | "followup" | "anniversary" | "custom";
 
 export interface ContactField {
   id: string;
-  contactId: string;
   type: string;
   value: string;
   label: string | null;
   isPrimary: boolean;
-  createdAt: string;
-  updatedAt: string;
 }
 
 export interface ContactFieldInput {
@@ -59,34 +56,17 @@ export interface ContactListItem {
 
 export interface ContactInteraction {
   id: string;
-  contactId: string;
-  ownerId: string;
   type: string;
   title: string | null;
   content: string | null;
-  summary: string | null;
   occurredAt: string;
-  duration: number | null;
-  location: string | null;
-  xpEarned: number;
-  createdAt: string;
-  updatedAt: string;
 }
 
 export interface ContactReminder {
   id: string;
-  contactId: string;
-  ownerId: string;
-  type: string;
   title: string;
   description: string | null;
   scheduledAt: string;
-  completedAt: string | null;
-  repeatInterval: string | null;
-  isRecurring: boolean;
-  status: string;
-  createdAt: string;
-  updatedAt: string;
 }
 
 export type SocialLinks = Partial<

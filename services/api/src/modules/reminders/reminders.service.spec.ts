@@ -183,6 +183,24 @@ describe("RemindersService agent commands", () => {
     expect(notifications.sendReminderNotification).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects human reminder creation for a demo contact", async () => {
+    const { notifications, service, tx } = harness({
+      id: contactId,
+      ownerId,
+      isDemo: true,
+    });
+
+    await expect(service.create(ownerId, input)).rejects.toBeInstanceOf(
+      NotFoundException
+    );
+
+    expect(tx.contact.findFirst).toHaveBeenCalledWith({
+      where: { id: contactId, ownerId, isDemo: false },
+    });
+    expect(tx.reminder.create).not.toHaveBeenCalled();
+    expect(notifications.sendReminderNotification).not.toHaveBeenCalled();
+  });
+
   it("requires contact-owner parity in every upcoming reminder query", async () => {
     const { service, tx } = harness();
 

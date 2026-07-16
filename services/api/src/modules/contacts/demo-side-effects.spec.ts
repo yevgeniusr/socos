@@ -85,14 +85,16 @@ describe('demo contact side effects', () => {
     expect(notifications.sendReminderNotification).not.toHaveBeenCalled();
   });
 
-  it('creates a manual demo reminder without sending a notification', async () => {
-    const reminder = {
-      id: 'synthetic-reminder',
-      contact: { firstName: 'Synthetic', lastName: 'Contact' },
-    };
+  it('rejects a manual demo reminder without side effects', async () => {
     const prisma = {
-      contact: { findFirst: jest.fn().mockResolvedValue({ isDemo: true }) },
-      reminder: { create: jest.fn().mockResolvedValue(reminder) },
+      contact: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: contactId,
+          ownerId: userId,
+          isDemo: true,
+        }),
+      },
+      reminder: { create: jest.fn() },
     };
     const notifications = { sendReminderNotification: jest.fn() };
     const service = new RemindersService(
@@ -100,15 +102,19 @@ describe('demo contact side effects', () => {
       notifications as unknown as NotificationsService,
     );
 
-    const result = await service.create(userId, {
-      contactId,
-      type: ReminderType.FOLLOWUP,
-      title: 'Synthetic reminder',
-      scheduledAt: '2026-07-20T09:00:00Z',
-    });
+    await expect(
+      service.create(userId, {
+        contactId,
+        type: ReminderType.FOLLOWUP,
+        title: 'Synthetic reminder',
+        scheduledAt: '2026-07-20T09:00:00Z',
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
 
-    expect(result).toBe(reminder);
-    expect(prisma.reminder.create).toHaveBeenCalled();
+    expect(prisma.contact.findFirst).toHaveBeenCalledWith({
+      where: { id: contactId, ownerId: userId, isDemo: false },
+    });
+    expect(prisma.reminder.create).not.toHaveBeenCalled();
     expect(notifications.sendReminderNotification).not.toHaveBeenCalled();
   });
 

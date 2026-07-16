@@ -22,6 +22,60 @@ function applyPrismaProjection(record: Record<string, any>, args: Record<string,
   );
 }
 
+function expectedDetailRelations(ownerId: string) {
+  return {
+    contactFields: {
+      select: {
+        id: true,
+        type: true,
+        value: true,
+        label: true,
+        isPrimary: true,
+      },
+      orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+    },
+    interactions: {
+      where: { ownerId },
+      select: {
+        id: true,
+        type: true,
+        title: true,
+        content: true,
+        occurredAt: true,
+      },
+      orderBy: { occurredAt: 'desc' },
+      take: 10,
+    },
+    reminders: {
+      where: { ownerId, status: 'pending' },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        scheduledAt: true,
+      },
+      orderBy: { scheduledAt: 'asc' },
+      take: 5,
+    },
+    _count: {
+      select: {
+        interactions: { where: { ownerId } },
+        reminders: { where: { ownerId } },
+        tasks: true,
+        gifts: true,
+      },
+    },
+  };
+}
+
+function expectSafeDetailRelations(select: Record<string, any>, ownerId: string) {
+  const expected = expectedDetailRelations(ownerId);
+  expect(select.contactFields).toEqual(expected.contactFields);
+  expect(select.interactions).toEqual(expected.interactions);
+  expect(select.reminders).toEqual(expected.reminders);
+  expect(select._count).toEqual(expected._count);
+}
+
 describe('ContactsService personal profiles', () => {
   describe('list and facets', () => {
     it('uses bounded pagination, non-demo isolation, group filtering, and stable allowlisted sorting', async () => {
@@ -183,18 +237,7 @@ describe('ContactsService personal profiles', () => {
 
       const args = prisma.contact.findFirst.mock.calls[0][0];
       expect(args.include).toBeUndefined();
-      expect(args.select.contactFields).toEqual({
-        orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
-      });
-      expect(args.select.interactions).toEqual({
-        orderBy: { occurredAt: 'desc' },
-        take: 10,
-      });
-      expect(args.select.reminders).toEqual({
-        where: { status: 'pending' },
-        orderBy: { scheduledAt: 'asc' },
-        take: 5,
-      });
+      expectSafeDetailRelations(args.select, 'synthetic-owner');
       expect(args.select.sourceSystem).toBe(true);
       expect(args.select.importedAt).toBe(true);
       expect(args.select.sourceId).toBeUndefined();
@@ -259,18 +302,7 @@ describe('ContactsService personal profiles', () => {
 
       const args = prisma.contact.create.mock.calls[0][0];
       expect(args.include).toBeUndefined();
-      expect(args.select.contactFields).toEqual({
-        orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
-      });
-      expect(args.select.interactions).toEqual({
-        orderBy: { occurredAt: 'desc' },
-        take: 10,
-      });
-      expect(args.select.reminders).toEqual({
-        where: { status: 'pending' },
-        orderBy: { scheduledAt: 'asc' },
-        take: 5,
-      });
+      expectSafeDetailRelations(args.select, 'synthetic-owner');
       expect(args.select.sourceId).toBeUndefined();
       expect(args.select.owner).toBeUndefined();
       expect(result).toMatchObject({
@@ -299,18 +331,7 @@ describe('ContactsService personal profiles', () => {
 
       const args = contact.update.mock.calls[0][0];
       expect(args.include).toBeUndefined();
-      expect(args.select.contactFields).toEqual({
-        orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
-      });
-      expect(args.select.interactions).toEqual({
-        orderBy: { occurredAt: 'desc' },
-        take: 10,
-      });
-      expect(args.select.reminders).toEqual({
-        where: { status: 'pending' },
-        orderBy: { scheduledAt: 'asc' },
-        take: 5,
-      });
+      expectSafeDetailRelations(args.select, 'synthetic-owner');
       expect(args.select.sourceId).toBeUndefined();
       expect(args.select.owner).toBeUndefined();
       expect(result).toMatchObject({

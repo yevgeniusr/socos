@@ -53,10 +53,10 @@ export class RemindersService {
   async create(userId: string, dto: CreateReminderDto) {
     // Verify contact belongs to user
     const contact = await this.prisma.contact.findFirst({
-      where: { id: dto.contactId, ownerId: userId },
+      where: { id: dto.contactId, ownerId: userId, isDemo: false },
     });
 
-    if (!contact) {
+    if (!contact || contact.isDemo) {
       throw new NotFoundException('Contact not found');
     }
 

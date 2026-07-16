@@ -35,44 +35,77 @@ const CONTACT_LIST_SELECT = {
   _count: { select: { interactions: true, reminders: true } },
 } satisfies Prisma.ContactSelect;
 
-const CONTACT_DETAIL_SELECT = {
-  id: true,
-  firstName: true,
-  lastName: true,
-  middleName: true,
-  nickname: true,
-  photo: true,
-  bio: true,
-  company: true,
-  jobTitle: true,
-  birthday: true,
-  anniversary: true,
-  relationshipScore: true,
-  importance: true,
-  preferredCadenceDays: true,
-  labels: true,
-  tags: true,
-  groups: true,
-  socialLinks: true,
-  firstMetDate: true,
-  firstMetContext: true,
-  lastContactedAt: true,
-  nextReminderAt: true,
-  sourceSystem: true,
-  importedAt: true,
-  createdAt: true,
-  updatedAt: true,
-  contactFields: { orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] },
-  interactions: { orderBy: { occurredAt: 'desc' }, take: 10 },
-  reminders: {
-    where: { status: 'pending' },
-    orderBy: { scheduledAt: 'asc' },
-    take: 5,
-  },
-  _count: {
-    select: { interactions: true, reminders: true, tasks: true, gifts: true },
-  },
-} satisfies Prisma.ContactSelect;
+function contactDetailSelect(ownerId: string) {
+  return {
+    id: true,
+    firstName: true,
+    lastName: true,
+    middleName: true,
+    nickname: true,
+    photo: true,
+    bio: true,
+    company: true,
+    jobTitle: true,
+    birthday: true,
+    anniversary: true,
+    relationshipScore: true,
+    importance: true,
+    preferredCadenceDays: true,
+    labels: true,
+    tags: true,
+    groups: true,
+    socialLinks: true,
+    firstMetDate: true,
+    firstMetContext: true,
+    lastContactedAt: true,
+    nextReminderAt: true,
+    sourceSystem: true,
+    importedAt: true,
+    createdAt: true,
+    updatedAt: true,
+    contactFields: {
+      select: {
+        id: true,
+        type: true,
+        value: true,
+        label: true,
+        isPrimary: true,
+      },
+      orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+    },
+    interactions: {
+      where: { ownerId },
+      select: {
+        id: true,
+        type: true,
+        title: true,
+        content: true,
+        occurredAt: true,
+      },
+      orderBy: { occurredAt: 'desc' },
+      take: 10,
+    },
+    reminders: {
+      where: { ownerId, status: 'pending' },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        scheduledAt: true,
+      },
+      orderBy: { scheduledAt: 'asc' },
+      take: 5,
+    },
+    _count: {
+      select: {
+        interactions: { where: { ownerId } },
+        reminders: { where: { ownerId } },
+        tasks: true,
+        gifts: true,
+      },
+    },
+  } satisfies Prisma.ContactSelect;
+}
 
 const SOCIAL_LINK_KEYS = new Set([
   'linkedin',
@@ -177,7 +210,7 @@ export class ContactsService {
         preferredCadenceDays: dto.preferredCadenceDays,
         contactFields: contactFields ? { create: contactFields } : undefined,
       },
-      select: CONTACT_DETAIL_SELECT,
+      select: contactDetailSelect(userId),
     });
 
     return {
@@ -243,7 +276,7 @@ export class ContactsService {
   async findOne(userId: string, contactId: string) {
     const contact = await this.prisma.contact.findFirst({
       where: { id: contactId, ownerId: userId, isDemo: false },
-      select: CONTACT_DETAIL_SELECT,
+      select: contactDetailSelect(userId),
     });
 
     if (!contact) {
@@ -291,7 +324,7 @@ export class ContactsService {
         return tx.contact.update({
           where: { id: contactId },
           data: updateData,
-          select: CONTACT_DETAIL_SELECT,
+          select: contactDetailSelect(userId),
         });
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
