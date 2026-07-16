@@ -25,21 +25,35 @@ type KeyringEntry = {
 
 @Injectable()
 export class PersonalDataCipherService {
-  private readonly keys: ReadonlyMap<number, Buffer>;
-  private readonly activeVersion: number;
+  private configuration:
+    | { keys: ReadonlyMap<number, Buffer>; activeVersion: number }
+    | undefined;
 
-  constructor(configService: ConfigService) {
-    const keys = parseKeyring(configService.get<string>("PERSONAL_DATA_KEYS"));
+  constructor(private readonly configService: ConfigService) {}
+
+  validateConfiguration(): void {
+    this.getConfiguration();
+  }
+
+  private getConfiguration(): {
+    keys: ReadonlyMap<number, Buffer>;
+    activeVersion: number;
+  } {
+    if (this.configuration) return this.configuration;
+
+    const keys = parseKeyring(
+      this.configService.get<string>("PERSONAL_DATA_KEYS")
+    );
     const activeVersion = parseActiveVersion(
-      configService.get<string>("PERSONAL_DATA_ACTIVE_KEY_VERSION")
+      this.configService.get<string>("PERSONAL_DATA_ACTIVE_KEY_VERSION")
     );
 
     if (!keys.has(activeVersion)) {
       throw configurationError();
     }
 
-    this.keys = keys;
-    this.activeVersion = activeVersion;
+    this.configuration = { keys, activeVersion };
+    return this.configuration;
   }
 
   encrypt<T>(
@@ -49,13 +63,11 @@ export class PersonalDataCipherService {
     value: T
   ): EncryptedValue {
     try {
+      const { keys, activeVersion } = this.getConfiguration();
       const iv = randomBytes(IV_LENGTH);
-      const cipher = createCipheriv(
-        ALGORITHM,
-        this.keys.get(this.activeVersion)!,
-        iv,
-        { authTagLength: TAG_LENGTH }
-      );
+      const cipher = createCipheriv(ALGORITHM, keys.get(activeVersion)!, iv, {
+        authTagLength: TAG_LENGTH,
+      });
       cipher.setAAD(aad(purpose, ownerId, recordId));
       const ciphertext = Buffer.concat([
         cipher.update(canonicalJson(value), "utf8"),
@@ -66,7 +78,7 @@ export class PersonalDataCipherService {
         ciphertext,
         iv,
         tag: cipher.getAuthTag(),
-        keyVersion: this.activeVersion,
+        keyVersion: activeVersion,
       };
     } catch {
       throw new Error(ENCRYPTION_ERROR);
@@ -80,7 +92,8 @@ export class PersonalDataCipherService {
     value: EncryptedValue
   ): T {
     try {
-      const key = validateEnvelope(value, this.keys);
+      const { keys } = this.getConfiguration();
+      const key = validateEnvelope(value, keys);
       const decipher = createDecipheriv(ALGORITHM, key, value.iv, {
         authTagLength: TAG_LENGTH,
       });

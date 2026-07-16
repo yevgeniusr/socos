@@ -8,16 +8,24 @@ const CONFIGURATION_ERROR = "Invalid personal data index configuration";
 
 @Injectable()
 export class PersonalDataIndexService {
-  private readonly key: Buffer;
+  private key: Buffer | undefined;
 
-  constructor(configService: ConfigService) {
+  constructor(private readonly configService: ConfigService) {}
+
+  validateConfiguration(): void {
+    this.getKey();
+  }
+
+  private getKey(): Buffer {
+    if (this.key) return this.key;
     this.key = decodeCanonicalKey(
-      configService.get<string>("PERSONAL_DATA_INDEX_KEY")
+      this.configService.get<string>("PERSONAL_DATA_INDEX_KEY")
     );
+    return this.key;
   }
 
   mac(purpose: string, ownerId: string, canonicalValue: string): string {
-    return createHmac("sha256", this.key)
+    return createHmac("sha256", this.getKey())
       .update(`socos:index:v1:${purpose}:${ownerId}\0${canonicalValue}`, "utf8")
       .digest("hex");
   }

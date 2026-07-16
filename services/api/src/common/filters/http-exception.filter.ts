@@ -8,6 +8,7 @@ import {
 } from "@nestjs/common";
 import { Request, Response } from "express";
 import * as Sentry from "@sentry/node";
+import { SafeProviderError } from "../safe-provider-error.js";
 
 const REDACTED_HEADER_VALUE = "[REDACTED]";
 const CREDENTIAL_HEADER_NAME =
@@ -28,7 +29,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
     let errors: string[] | undefined;
     let code: string | undefined;
 
-    if (exception instanceof HttpException) {
+    if (exception instanceof SafeProviderError) {
+      status = HttpStatus.BAD_GATEWAY;
+      message = exception.message;
+      code = exception.code;
+    } else if (exception instanceof HttpException) {
       status = exception.getStatus();
       const exceptionResponse = exception.getResponse();
       if (typeof exceptionResponse === "string") {
@@ -53,8 +58,31 @@ export class AllExceptionsFilter implements ExceptionFilter {
           : exception.message;
     }
 
-    // Report non-HTTP exceptions to Sentry
-    if (!(exception instanceof HttpException) && exception instanceof Error) {
+    if (exception instanceof SafeProviderError) {
+      Sentry.withIsolationScope((isolationScope) => {
+        isolationScope.clear();
+        Sentry.withScope((scope) => {
+          scope.clear();
+          scope.addEventProcessor((event) => ({
+            ...event,
+            request: {
+              method: request.method,
+              url: requestPath,
+              headers: sentryRequestHeaders(request.headers),
+            },
+          }));
+          scope.setContext("request", {
+            method: request.method,
+            url: requestPath,
+            headers: redactCredentialHeaders(request.headers),
+          });
+          Sentry.captureException(exception);
+        });
+      });
+    } else if (
+      !(exception instanceof HttpException) &&
+      exception instanceof Error
+    ) {
       Sentry.captureException(exception, {
         contexts: {
           request: {
@@ -97,5 +125,17 @@ function redactCredentialHeaders(
       name,
       CREDENTIAL_HEADER_NAME.test(name) ? REDACTED_HEADER_VALUE : value,
     ])
+  );
+}
+
+function sentryRequestHeaders(
+  headers: Request["headers"]
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(redactCredentialHeaders(headers)).flatMap(([name, value]) =>
+      value === undefined
+        ? []
+        : [[name, Array.isArray(value) ? value.join(", ") : value]]
+    )
   );
 }

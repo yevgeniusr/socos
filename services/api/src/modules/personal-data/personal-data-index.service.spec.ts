@@ -1,7 +1,8 @@
+import type * as NodeCrypto from "node:crypto";
 import type { ConfigService } from "@nestjs/config";
 import { PersonalDataIndexService } from "./personal-data-index.service.js";
 
-const crypto = jest.requireActual<typeof import("node:crypto")>("node:crypto");
+const crypto = jest.requireActual<typeof NodeCrypto>("node:crypto");
 
 const INDEX_KEY = Buffer.alloc(32, 0x31);
 const PURPOSE = "calendar-external-id";
@@ -45,20 +46,26 @@ describe("PersonalDataIndexService", () => {
       ["31-byte key", Buffer.alloc(31, 0x31).toString("base64")],
       ["33-byte key", Buffer.alloc(33, 0x31).toString("base64")],
     ])("rejects a %s", (_label, indexKey) => {
-      expect(
-        () => new PersonalDataIndexService(createConfig(indexKey))
-      ).toThrow("Invalid personal data index configuration");
+      const service = new PersonalDataIndexService(createConfig(indexKey));
+      expect(() => service.validateConfiguration()).toThrow(
+        "Invalid personal data index configuration"
+      );
     });
 
     it("does not reveal index key material in errors", () => {
       const invalidKey = "synthetic-sensitive-index-key-material";
 
-      const message = errorMessage(
-        () => new PersonalDataIndexService(createConfig(invalidKey))
-      );
+      const service = new PersonalDataIndexService(createConfig(invalidKey));
+      const message = errorMessage(() => service.validateConfiguration());
 
       expect(message).toBe("Invalid personal data index configuration");
       expect(message).not.toContain(invalidKey);
+    });
+
+    it("defers missing configuration so disabled modules can initialize", () => {
+      expect(
+        () => new PersonalDataIndexService(createConfig(undefined))
+      ).not.toThrow();
     });
   });
 

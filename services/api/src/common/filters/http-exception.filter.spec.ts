@@ -1,14 +1,30 @@
 import * as Sentry from "@sentry/node";
-import {
-  ArgumentsHost,
-  type ExecutionContext,
-  NotFoundException,
-} from "@nestjs/common";
+import { NotFoundException } from "@nestjs/common";
+import type { ArgumentsHost, ExecutionContext } from "@nestjs/common";
 import { AgentAuthGuard } from "../../modules/agent-auth/agent-auth.guard.js";
 import type { AgentAuthService } from "../../modules/agent-auth/agent-auth.service.js";
 import { AllExceptionsFilter } from "./http-exception.filter.js";
+import { toSafeProviderError } from "../safe-provider-error.js";
 
-jest.mock("@sentry/node", () => ({ captureException: jest.fn() }));
+const sentryIsolationScope = {
+  clear: jest.fn(),
+};
+const sentryCurrentScope = {
+  clear: jest.fn(),
+  addEventProcessor: jest.fn(),
+  setContext: jest.fn(),
+};
+
+jest.mock("@sentry/node", () => ({
+  captureException: jest.fn(),
+  withIsolationScope: jest.fn(
+    (callback: (scope: typeof sentryIsolationScope) => void) =>
+      callback(sentryIsolationScope)
+  ),
+  withScope: jest.fn((callback: (scope: typeof sentryCurrentScope) => void) =>
+    callback(sentryCurrentScope)
+  ),
+}));
 
 describe("AllExceptionsFilter", () => {
   it("preserves a structured public error code for agent clients", () => {
@@ -142,5 +158,93 @@ describe("AllExceptionsFilter", () => {
       })
     );
     expect(request.headers.authorization).toBe(secrets.authorization);
+  });
+
+  it("reports provider failures with an isolated sanitized request and no original exception", () => {
+    const providerFailure = Object.assign(
+      new Error("synthetic-sensitive-provider-message"),
+      {
+        config: { authorization: "synthetic-sensitive-provider-config" },
+        response: { data: "synthetic-sensitive-provider-response" },
+      }
+    );
+    const safeFailure = toSafeProviderError(
+      "google_rate_limited",
+      providerFailure
+    );
+    const request = {
+      method: "POST",
+      path: "/api/integrations/google-calendar/connect",
+      url: "/api/integrations/google-calendar/connect?code=synthetic-sensitive-query",
+      originalUrl:
+        "/api/integrations/google-calendar/connect?code=synthetic-sensitive-query",
+      headers: { authorization: "Bearer synthetic-sensitive-token" },
+      body: { code: "synthetic-sensitive-body" },
+      query: { code: "synthetic-sensitive-query" },
+    };
+    const json = jest.fn();
+    const host = {
+      switchToHttp: () => ({
+        getResponse: () => ({ status: () => ({ json }) }),
+        getRequest: () => request,
+      }),
+    } as unknown as ArgumentsHost;
+    const capture = jest.mocked(Sentry.captureException);
+    capture.mockClear();
+    sentryIsolationScope.clear.mockClear();
+    sentryCurrentScope.clear.mockClear();
+    sentryCurrentScope.addEventProcessor.mockClear();
+    sentryCurrentScope.setContext.mockClear();
+
+    new AllExceptionsFilter().catch(safeFailure, host);
+
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(capture.mock.calls[0][0]).toBe(safeFailure);
+    expect(capture.mock.calls[0][0]).not.toBe(providerFailure);
+    expect(sentryIsolationScope.clear).toHaveBeenCalledTimes(1);
+    expect(sentryCurrentScope.clear).toHaveBeenCalledTimes(1);
+    expect(sentryCurrentScope.addEventProcessor).toHaveBeenCalledTimes(1);
+    const sanitizeEvent = sentryCurrentScope.addEventProcessor.mock.calls[0][0];
+    expect(
+      sanitizeEvent({
+        request: {
+          data: "synthetic-sensitive-body",
+          query_string: "code=synthetic-sensitive-query",
+        },
+      })
+    ).toEqual({
+      request: {
+        method: "POST",
+        url: "/api/integrations/google-calendar/connect",
+        headers: { authorization: "[REDACTED]" },
+      },
+    });
+    expect(sentryCurrentScope.setContext).toHaveBeenCalledWith("request", {
+      method: "POST",
+      url: "/api/integrations/google-calendar/connect",
+      headers: { authorization: "[REDACTED]" },
+    });
+    const sentryPayload = JSON.stringify({
+      exception: capture.mock.calls[0][0],
+      request: sentryCurrentScope.setContext.mock.calls[0][1],
+    });
+    for (const secret of [
+      "synthetic-sensitive-provider-message",
+      "synthetic-sensitive-provider-config",
+      "synthetic-sensitive-provider-response",
+      "synthetic-sensitive-token",
+      "synthetic-sensitive-body",
+      "synthetic-sensitive-query",
+    ]) {
+      expect(sentryPayload).not.toContain(secret);
+    }
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        statusCode: 502,
+        code: "google_rate_limited",
+        message: "External provider request failed",
+        path: "/api/integrations/google-calendar/connect",
+      })
+    );
   });
 });

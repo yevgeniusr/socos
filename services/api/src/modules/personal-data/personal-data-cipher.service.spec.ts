@@ -106,34 +106,35 @@ describe("PersonalDataCipherService", () => {
         ]),
       ],
     ])("rejects a %s", (_label, keys) => {
-      expect(() => new PersonalDataCipherService(createConfig(keys))).toThrow(
+      const service = new PersonalDataCipherService(createConfig(keys));
+      expect(() => service.validateConfiguration()).toThrow(
         "Invalid personal data encryption configuration"
       );
     });
 
     it("rejects duplicate key versions", () => {
-      expect(
-        () =>
-          new PersonalDataCipherService(
-            createConfig(
-              keyring([
-                { version: 1, key: KEY_ONE },
-                { version: 1, key: KEY_TWO },
-              ])
-            )
-          )
-      ).toThrow("Invalid personal data encryption configuration");
+      const service = new PersonalDataCipherService(
+        createConfig(
+          keyring([
+            { version: 1, key: KEY_ONE },
+            { version: 1, key: KEY_TWO },
+          ])
+        )
+      );
+      expect(() => service.validateConfiguration()).toThrow(
+        "Invalid personal data encryption configuration"
+      );
     });
 
     it.each([undefined, "", "0", "-1", "+1", "01", "1.0", " 1", "2"])(
       "rejects missing, malformed, or absent active version %p",
       (activeVersion) => {
-        expect(
-          () =>
-            new PersonalDataCipherService(
-              createConfig(keyring(), activeVersion)
-            )
-        ).toThrow("Invalid personal data encryption configuration");
+        const service = new PersonalDataCipherService(
+          createConfig(keyring(), activeVersion)
+        );
+        expect(() => service.validateConfiguration()).toThrow(
+          "Invalid personal data encryption configuration"
+        );
       }
     );
 
@@ -142,12 +143,19 @@ describe("PersonalDataCipherService", () => {
         { version: 1, key: "synthetic-sensitive-key-material" },
       ]);
 
-      const message = errorMessage(
-        () => new PersonalDataCipherService(createConfig(invalidKeyring))
+      const service = new PersonalDataCipherService(
+        createConfig(invalidKeyring)
       );
+      const message = errorMessage(() => service.validateConfiguration());
 
       expect(message).toBe("Invalid personal data encryption configuration");
       expect(message).not.toContain("synthetic-sensitive-key-material");
+    });
+
+    it("defers missing configuration so disabled modules can initialize", () => {
+      expect(
+        () => new PersonalDataCipherService(createConfig(undefined, undefined))
+      ).not.toThrow();
     });
   });
 
