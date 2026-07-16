@@ -298,8 +298,14 @@ test.describe("personal Contacts workspace", () => {
     await expect(profile).toBeVisible();
     await expect(profile.getByText(contactDetail.bio)).toBeVisible();
     await expect(profile.getByText("mentor@example.test")).toBeVisible();
+    const importantDates = profile
+      .getByRole("heading", { name: "Important dates" })
+      .locator("..");
+    await expect(importantDates.getByText("Jan 12, 1990")).toBeVisible();
+    await expect(importantDates.getByText("Jun 8, 2020")).toBeVisible();
+    await expect(importantDates.getByText("Mar 2, 2024")).toBeVisible();
     await expect(
-      profile.getByRole("heading", { name: "Important dates" })
+      importantDates.getByText("Met at a synthetic community workshop.")
     ).toBeVisible();
     await expect(profile.getByText("Synthetic planning session")).toBeVisible();
     await expect(profile.getByText("Synthetic follow-up")).toBeVisible();
@@ -310,8 +316,24 @@ test.describe("personal Contacts workspace", () => {
       .fill("updated@example.test");
     await profile.getByRole("button", { name: "Save changes" }).click();
     await expect.poll(() => api.updatePayloads.length).toBe(1);
-    expect(api.updatePayloads[0]).toMatchObject({
+    expect(api.updatePayloads[0]).toEqual({
       firstName: "Synthetic",
+      lastName: "Mentor",
+      nickname: "",
+      photo: "",
+      company: "Synthetic Labs",
+      jobTitle: "Community Builder",
+      bio: "Synthetic relationship memory for browser verification.",
+      birthday: "1990-01-12T00:00:00.000Z",
+      anniversary: "2020-06-08T00:00:00.000Z",
+      firstMetDate: "2024-03-02T00:00:00.000Z",
+      firstMetContext: "Met at a synthetic community workshop.",
+      labels: ["AI Founders"],
+      tags: ["mentor"],
+      groups: ["Mentors"],
+      importance: 4,
+      preferredCadenceDays: 30,
+      socialLinks: { website: "https://example.test/synthetic-mentor" },
       contactFields: [
         {
           type: "email",
@@ -321,9 +343,6 @@ test.describe("personal Contacts workspace", () => {
         },
       ],
     });
-    expect(api.updatePayloads[0]).not.toHaveProperty("relationshipScore");
-    expect(api.updatePayloads[0]).not.toHaveProperty("ownerId");
-    expect(api.updatePayloads[0]).not.toHaveProperty("sourceId");
 
     await profile.getByRole("button", { name: "Call" }).click();
     const interactionForm = profile
@@ -342,13 +361,21 @@ test.describe("personal Contacts workspace", () => {
       .getByRole("button", { name: "Log interaction" })
       .click();
     await expect.poll(() => api.interactionPayloads.length).toBe(1);
-    expect(api.interactionPayloads[0]).toMatchObject({
+    const interactionOccurredAt = api.interactionPayloads[0].occurredAt;
+    expect(interactionOccurredAt).toEqual(expect.any(String));
+    expect(Number.isNaN(Date.parse(interactionOccurredAt as string))).toBe(
+      false
+    );
+    expect(new Date(interactionOccurredAt as string).toISOString()).toBe(
+      interactionOccurredAt
+    );
+    expect(api.interactionPayloads[0]).toEqual({
       contactId: "synthetic-mentor",
       type: "call",
       title: "Synthetic call",
       content: "Synthetic browser notes",
+      occurredAt: interactionOccurredAt,
     });
-    expect(api.interactionPayloads[0].occurredAt).toEqual(expect.any(String));
     await profile
       .getByRole("button", { name: "Close interaction form" })
       .click();
@@ -368,13 +395,19 @@ test.describe("personal Contacts workspace", () => {
       .fill("Synthetic reminder details");
     await reminderForm.getByRole("button", { name: "Create reminder" }).click();
     await expect.poll(() => api.reminderPayloads.length).toBe(1);
-    expect(api.reminderPayloads[0]).toMatchObject({
+    const reminderScheduledAt = api.reminderPayloads[0].scheduledAt;
+    expect(reminderScheduledAt).toEqual(expect.any(String));
+    expect(Number.isNaN(Date.parse(reminderScheduledAt as string))).toBe(false);
+    expect(new Date(reminderScheduledAt as string).toISOString()).toBe(
+      reminderScheduledAt
+    );
+    expect(api.reminderPayloads[0]).toEqual({
       contactId: "synthetic-mentor",
       type: "followup",
       title: "Synthetic reminder",
       description: "Synthetic reminder details",
+      scheduledAt: reminderScheduledAt,
     });
-    expect(api.reminderPayloads[0].scheduledAt).toEqual(expect.any(String));
 
     await profile
       .getByRole("button", { name: "Complete reminder Synthetic follow-up" })
@@ -421,11 +454,36 @@ test.describe("personal Contacts workspace", () => {
     await expect(
       profile.getByRole("button", { name: "Close profile" })
     ).toBeVisible();
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= window.innerWidth
-      )
-    ).toBe(true);
+    const layout = await page.evaluate(() => ({
+      viewportWidth: window.innerWidth,
+      documentWidth: document.documentElement.scrollWidth,
+      bodyWidth: document.body.scrollWidth,
+      offenders: Array.from(document.querySelectorAll<HTMLElement>("body *"))
+        .map((element) => {
+          const rect = element.getBoundingClientRect();
+          return {
+            tag: element.tagName.toLowerCase(),
+            id: element.id,
+            role: element.getAttribute("role"),
+            ariaLabel: element.getAttribute("aria-label"),
+            className: element.className,
+            left: Math.round(rect.left),
+            right: Math.round(rect.right),
+            width: Math.round(rect.width),
+          };
+        })
+        .filter(
+          (item) =>
+            item.width > 0 &&
+            (item.left < -1 || item.right > window.innerWidth + 1)
+        )
+        .slice(0, 20),
+    }));
+    expect(layout, JSON.stringify(layout, null, 2)).toMatchObject({
+      viewportWidth: 412,
+      documentWidth: 412,
+      bodyWidth: 412,
+    });
     await page.screenshot({
       path: testInfo.outputPath("contacts-pixel-412x915.png"),
       fullPage: true,

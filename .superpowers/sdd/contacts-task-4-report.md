@@ -11,7 +11,7 @@ Base: `635835f1c86c70a14a2529bd559121aad8bf7c46`
 - Added deterministic Playwright evidence for the authenticated Contacts workspace.
 - All API interception uses synthetic owners, contacts, interaction text, reminders, and credentials.
 - Added repository ignores for local Playwright reports and test output.
-- No production UI, API, schema, dependency, or personal data changed in this task.
+- The reviewer-driven fix stabilizes Material Symbols geometry when the external font stylesheet is delayed or unavailable; no API, schema, dependency, or personal data changed.
 
 ## Initial Browser Evidence
 
@@ -49,8 +49,8 @@ The desktop journey proves:
 - Debounced `mentor` search and the `AI Founders` label both reset the server offset to zero.
 - Enter on a contact updates `?contact=synthetic-mentor` and opens the accessible profile.
 - The profile renders synthetic memory, contact method, important dates, interaction, and reminder evidence.
-- Profile editing sends the complete edited `contactFields` array while omitting `ownerId`, `sourceId`, and `relationshipScore`.
-- Interaction and reminder creation send the expected validated payloads.
+- Profile editing sends an exact safe payload containing every expected editable field and the complete edited `contactFields` array, with no extra ownership, provenance, score, or unrelated fields.
+- Interaction and reminder creation send exact payloads with parseable canonical ISO timestamps and no extra fields.
 - Reminder completion calls the expected contact-owned reminder endpoint.
 
 The Pixel `412x915` journey proves:
@@ -78,6 +78,7 @@ git diff --check: passed
 
 - `.gitignore`
 - `apps/web/e2e/contacts-workspace.spec.ts`
+- `apps/web/src/app/globals.css`
 - `.superpowers/sdd/contacts-task-4-report.md`
 
 ## Self-Review
@@ -90,4 +91,30 @@ git diff --check: passed
 
 ## Concerns
 
-None. Task 5 still requires an independent review of this test task and a whole-slice review before push/deployment.
+None. Task 5 still requires a whole-slice review before push/deployment.
+
+## Review Fixes
+
+The independent Task 4 review returned three Important evidence gaps:
+
+1. The update payload used a partial object match rather than exact equality.
+2. Interaction/reminder payloads used partial matches and accepted arbitrary strings as timestamps.
+3. The profile test asserted the Important Dates heading but not the date values or first-met context.
+
+The browser test now:
+
+- asserts the entire update object with `toEqual`, including all expected scalar, array, social-link, date, and `contactFields` values and therefore no extra keys;
+- asserts the entire interaction/reminder objects, parses each dynamic timestamp, and proves it is its own canonical `toISOString()` representation; and
+- asserts the synthetic birthday, anniversary, first-met date, and first-met context values.
+
+The tightened test exposed a real mobile overflow that earlier runs had missed. Diagnostic evidence reproduced it 5/5 times with `documentWidth=bodyWidth=547` at a 412px viewport. Every primary offender was a `.material-symbols-outlined` span whose raw ligature text (`chevron_right`, action icon names, and similar) expanded to 121-188px while the external Google font stylesheet was unavailable. This widened the pagination and action rows.
+
+The global Material Symbols class now supplies the complete font/fallback geometry locally: inline-block, one-em fixed width, no shrinking, clipped fallback ligature text, correct family/weight/style/line height/ligature settings, and unchanged variation settings. After rebuilding:
+
+```text
+Pixel 412x915 repeat run: 5/5 passed
+Full Contacts Playwright run: 2/2 passed
+documentWidth=bodyWidth=viewportWidth=412
+```
+
+The post-fix synthetic screenshot was re-inspected and shows rendered icons, readable content, and no overlap.
