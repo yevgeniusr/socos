@@ -10,6 +10,7 @@ coverage/
 *.lcov
 .vitest/
 .jest/
+.betabots/
 
 # Production / Build outputs
 dist/

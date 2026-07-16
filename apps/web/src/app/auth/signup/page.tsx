@@ -63,6 +63,7 @@ export default function SignupPage() {
   }
 
   return (
+    <div className="space-y-4">
     <div className="bg-surface-container-low border border-outline-variant/10 rounded-2xl p-8">
       <h2
         className="text-xl font-bold mb-6 text-on-surface"
@@ -143,6 +144,30 @@ export default function SignupPage() {
           Sign in
         </Link>
       </p>
+    </div>
+    <div className="bg-surface-container-low border border-outline-variant/10 rounded-2xl p-5">
+      <h3 className="text-sm font-bold text-on-surface mb-3">Private alpha access</h3>
+      <div className="space-y-3 text-xs text-on-surface-variant leading-relaxed">
+        <p>
+          Socos is currently invite-only while Yev imports his Monica contacts and connects Hermes, Calendar, and Pixel location in the Coolify cloud database.
+        </p>
+        <div className="grid grid-cols-1 gap-2">
+          {[
+            'Monica import, important dates, reminders, and relationship memory are the first private workflow.',
+            'Hermes and MCP clients can read, summarize, and log safe activity; outbound messages, intros, merges, and deletes require approval.',
+            'Calendar, location, and event discovery ship disabled-first until each integration is explicitly connected.',
+            'Personal data has deletion, encryption, rekey, audit, and backup boundaries before public rollout.',
+          ].map((item) => (
+            <div key={item} className="rounded-xl bg-surface-container-high border border-outline-variant/10 p-3">
+              {item}
+            </div>
+          ))}
+        </div>
+        <Link href="/#demo" className="inline-flex font-semibold text-primary hover:underline">
+          View sample brief before signing up
+        </Link>
+      </div>
+    </div>
     </div>
   );
 }

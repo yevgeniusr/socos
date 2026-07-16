@@ -37,10 +37,10 @@ export default function Home() {
                 Get Started for Free
               </button>
             </Link>
-            <button className="w-full sm:w-auto px-10 py-4 bg-[#171f33] text-[#c0c1ff] rounded-xl font-bold text-base hover:bg-[#222a3d] transition-all flex items-center justify-center gap-2">
+            <a href="#demo" className="w-full sm:w-auto px-10 py-4 bg-[#171f33] text-[#c0c1ff] rounded-xl font-bold text-base hover:bg-[#222a3d] transition-all flex items-center justify-center gap-2">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
               Watch Demo
-            </button>
+            </a>
           </div>
         </div>
 
@@ -92,6 +92,111 @@ export default function Home() {
           {['OPEN SOURCE', 'PRIVACY FIRST', 'SELF HOSTABLE', 'AGENT POWERED'].map(s => (
             <span key={s} className="text-xs font-extrabold tracking-widest text-[#c0c1ff]" style={{ fontFamily: 'Manrope, sans-serif' }}>{s}</span>
           ))}
+        </div>
+      </section>
+
+      {/* Public Demo */}
+      <section id="demo" className="py-20 px-8 bg-[#0b1326] border-y border-[#464554]/10 scroll-mt-24">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-8 mb-10">
+            <div>
+              <span className="inline-block text-xs font-extrabold tracking-widest text-[#c0c1ff] uppercase mb-4 px-4 py-1.5 bg-[#c0c1ff]/10 rounded-full">
+                Private alpha proof
+              </span>
+              <h2 className="text-3xl md:text-5xl font-extrabold tracking-tight mb-4" style={{ fontFamily: 'Manrope, sans-serif' }}>
+                What Socos will show before an agent contacts anyone.
+              </h2>
+              <p className="text-[#c7c4d7] max-w-2xl text-base md:text-lg leading-relaxed">
+                The live product is invite-only while Yev imports his Monica archive and connects Hermes, Calendar, and Pixel. This sample shows the intended daily cockpit without exposing real contacts.
+              </p>
+            </div>
+            <Link href="/auth/signup" className="shrink-0">
+              <button className="w-full lg:w-auto bg-[#c0c1ff] text-[#0b1326] px-8 py-3 rounded-xl font-extrabold hover:brightness-110 transition-all">
+                Request invite access
+              </button>
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_0.8fr] gap-6">
+            <div className="bg-[#131b2e] border border-[#464554]/20 rounded-2xl p-6">
+              <div className="flex items-center justify-between gap-4 mb-6">
+                <div>
+                  <h3 className="font-extrabold text-xl" style={{ fontFamily: 'Manrope' }}>Daily social brief</h3>
+                  <p className="text-sm text-[#908fa0]">Sample data, real workflow shape</p>
+                </div>
+                <span className="text-xs font-extrabold text-[#4edea3] bg-[#4edea3]/10 px-3 py-1 rounded-full">No outbound actions</span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                {[
+                  { label: 'Important date', value: 'Rizala birthday in 6 days', detail: 'Draft a warm note, do not send' },
+                  { label: 'Reconnect', value: 'Alex has gone quiet', detail: 'Ask about the education research thread' },
+                  { label: 'Event fit', value: 'Dubai AI founders salon', detail: 'Good for professional + social mix' },
+                ].map((item) => (
+                  <div key={item.label} className="bg-[#0b1326] border border-[#464554]/15 rounded-xl p-4">
+                    <div className="text-[10px] uppercase tracking-widest text-[#908fa0] font-extrabold mb-2">{item.label}</div>
+                    <div className="text-sm font-bold text-[#dae2fd] mb-2">{item.value}</div>
+                    <div className="text-xs text-[#c7c4d7] leading-relaxed">{item.detail}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="space-y-3">
+                {[
+                  ['Quest', 'Send one voice memo to a warm friend', '+25 XP after you log it yourself'],
+                  ['Memory', 'Met through Self-Degree founder circle', 'Source preserved, editable later'],
+                  ['Approval', 'Hermes wants to suggest an intro', 'Requires human approval before sending'],
+                ].map(([type, title, detail]) => (
+                  <div key={title} className="flex items-center gap-4 bg-[#0b1326] border border-[#464554]/15 rounded-xl p-4">
+                    <div className="w-12 h-12 rounded-xl bg-[#c0c1ff]/10 flex items-center justify-center text-[#c0c1ff] text-xs font-black">
+                      {type.slice(0, 2).toUpperCase()}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-bold text-sm">{title}</div>
+                      <div className="text-xs text-[#908fa0]">{detail}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-6">
+              <div className="bg-[#131b2e] border border-[#464554]/20 rounded-2xl p-6">
+                <h3 className="font-extrabold text-lg mb-4" style={{ fontFamily: 'Manrope' }}>What is live now</h3>
+                <div className="space-y-3">
+                  {[
+                    'Monica import path for 106 contacts into the Coolify database',
+                    'Authenticated MCP/API tools for briefs, contacts, reminders, quests, and approved actions',
+                    'Calendar, Pixel location, and public event modules deployed disabled-first',
+                    'Deletion, encryption, rekey, audit, and backup runbooks for personal data',
+                  ].map((item) => (
+                    <div key={item} className="flex gap-3 text-sm text-[#c7c4d7] leading-relaxed">
+                      <span className="mt-1 h-2 w-2 rounded-full bg-[#4edea3] shrink-0" />
+                      <span>{item}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-[#131b2e] border border-[#464554]/20 rounded-2xl p-6">
+                <h3 className="font-extrabold text-lg mb-4" style={{ fontFamily: 'Manrope' }}>Safety boundaries</h3>
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  {[
+                    'Read and summarize automatically',
+                    'Log safe interactions',
+                    'Suggest events and people',
+                    'Approval required for messages',
+                    'Approval required for intros',
+                    'Approval required for deletes',
+                  ].map((item) => (
+                    <div key={item} className="bg-[#0b1326] border border-[#464554]/15 rounded-lg p-3 text-[#dae2fd]">
+                      {item}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 

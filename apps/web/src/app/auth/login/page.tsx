@@ -43,6 +43,7 @@ export default function LoginPage() {
   }
 
   return (
+    <div className="space-y-4">
     <div className="bg-surface-container-low border border-outline-variant/10 rounded-2xl p-8">
       <h2
         className="text-xl font-bold mb-6 text-on-surface"
@@ -93,6 +94,24 @@ export default function LoginPage() {
           Sign up
         </Link>
       </p>
+    </div>
+    <div className="bg-surface-container-low border border-outline-variant/10 rounded-2xl p-5">
+      <h3 className="text-sm font-bold text-on-surface mb-3">What your account unlocks</h3>
+      <div className="space-y-2 text-xs text-on-surface-variant leading-relaxed">
+        {[
+          'Daily social brief with important dates, reminders, quests, and relationship health.',
+          'Agent approvals for messages, introductions, invitations, merges, and deletes.',
+          'Calendar, Pixel location, and event suggestions only after explicit connection.',
+        ].map((item) => (
+          <div key={item} className="rounded-xl bg-surface-container-high border border-outline-variant/10 p-3">
+            {item}
+          </div>
+        ))}
+        <Link href="/#demo" className="inline-flex pt-1 font-semibold text-primary hover:underline">
+          Preview the sample brief
+        </Link>
+      </div>
+    </div>
     </div>
   );
 }

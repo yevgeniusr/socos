@@ -20,6 +20,18 @@ test.describe('SOCOS CRM', () => {
     await expect(page.locator('text=Get Started for Free')).toBeVisible();
   });
 
+  test('public demo and invite-gated auth explain value before signup', async ({ page }) => {
+    await page.goto('/');
+    await page.getByText('Watch Demo').first().click();
+    await expect(page.getByText('Daily social brief')).toBeVisible();
+    await expect(page.getByText('No outbound actions')).toBeVisible();
+    await expect(page.getByText('Approval required for messages')).toBeVisible();
+
+    await page.goto('/auth/signup');
+    await expect(page.getByText('Private alpha access')).toBeVisible();
+    await expect(page.getByText('View sample brief before signing up')).toBeVisible();
+  });
+
   test.describe('authentication', () => {
     test.beforeEach(async ({ page }) => {
       // Clear localStorage before each auth test
