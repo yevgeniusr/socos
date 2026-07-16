@@ -1,7 +1,33 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
-import { CreateReminderDto, UpdateReminderDto, ReminderQueryDto } from './reminders.dto.js';
+import {
+  CreateReminderDto,
+  ReminderQueryDto,
+  ReminderType,
+  RepeatInterval,
+  UpdateReminderDto,
+} from './reminders.dto.js';
+
+export interface AgentReminderInput {
+  contactId: string;
+  type: ReminderType;
+  title: string;
+  description?: string;
+  scheduledAt: string;
+  repeatInterval?: RepeatInterval;
+  isRecurring?: boolean;
+}
+
+export interface AgentReminderResult {
+  reminderId: string;
+  contactId: string;
+  type: string;
+  title: string;
+  scheduledAt: Date;
+  status: string;
+}
 
 @Injectable()
 export class RemindersService {
@@ -9,6 +35,20 @@ export class RemindersService {
     private prisma: PrismaService,
     private notificationsService: NotificationsService,
   ) {}
+
+  createForAgent(
+    ownerId: string,
+    input: AgentReminderInput,
+    transaction?: Prisma.TransactionClient
+  ): Promise<AgentReminderResult> {
+    if (transaction) {
+      return this.createForAgentInTransaction(transaction, ownerId, input);
+    }
+    return this.prisma.$transaction(
+      (tx) => this.createForAgentInTransaction(tx, ownerId, input),
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+    );
+  }
 
   async create(userId: string, dto: CreateReminderDto) {
     // Verify contact belongs to user
@@ -102,7 +142,7 @@ export class RemindersService {
           ownerId: userId,
           status: 'pending',
           scheduledAt: { gte: now },
-          contact: { isDemo: false },
+          contact: { ownerId: userId, isDemo: false },
         },
         take: 20,
         orderBy: { scheduledAt: 'asc' },
@@ -117,7 +157,7 @@ export class RemindersService {
         where: {
           ownerId: userId,
           scheduledAt: { gte: now, lte: endOfToday },
-          contact: { isDemo: false },
+          contact: { ownerId: userId, isDemo: false },
         },
         _count: true,
       }),
@@ -128,7 +168,7 @@ export class RemindersService {
         ownerId: userId,
         status: 'pending',
         scheduledAt: { lt: now },
-        contact: { isDemo: false },
+        contact: { ownerId: userId, isDemo: false },
       },
     });
 
@@ -137,7 +177,7 @@ export class RemindersService {
         ownerId: userId,
         status: 'pending',
         scheduledAt: { gte: now, lte: endOfToday },
-        contact: { isDemo: false },
+        contact: { ownerId: userId, isDemo: false },
       },
     });
 
@@ -146,7 +186,7 @@ export class RemindersService {
         ownerId: userId,
         status: 'pending',
         scheduledAt: { gte: now, lte: endOfWeek },
-        contact: { isDemo: false },
+        contact: { ownerId: userId, isDemo: false },
       },
     });
 
@@ -288,5 +328,49 @@ export class RemindersService {
     }
 
     return next;
+  }
+
+  private async createForAgentInTransaction(
+    transaction: Prisma.TransactionClient,
+    ownerId: string,
+    input: AgentReminderInput
+  ): Promise<AgentReminderResult> {
+    const contact = await transaction.contact.findFirst({
+      where: { id: input.contactId, ownerId, isDemo: false },
+      select: { id: true, ownerId: true, isDemo: true },
+    });
+    if (!contact || contact.ownerId !== ownerId || contact.isDemo) {
+      throw new NotFoundException("Contact not found");
+    }
+
+    const reminder = await transaction.reminder.create({
+      data: {
+        contactId: input.contactId,
+        ownerId,
+        type: input.type,
+        title: input.title,
+        description: input.description,
+        scheduledAt: new Date(input.scheduledAt),
+        repeatInterval: input.repeatInterval,
+        isRecurring: input.isRecurring ?? false,
+      },
+      select: {
+        id: true,
+        contactId: true,
+        type: true,
+        title: true,
+        scheduledAt: true,
+        status: true,
+      },
+    });
+
+    return {
+      reminderId: reminder.id,
+      contactId: reminder.contactId,
+      type: reminder.type,
+      title: reminder.title,
+      scheduledAt: reminder.scheduledAt,
+      status: reminder.status,
+    };
   }
 }

@@ -76,54 +76,15 @@ export class BriefFeedbackService {
 
     try {
       return await this.prisma.$transaction(
-        async (tx) => {
-          const existing = await tx.briefFeedback.findUnique({
-            where: {
-              ownerId_idempotencyKey: { ownerId, idempotencyKey },
-            },
-          });
-          if (existing) {
-            return this.resolveItemReplay(existing, itemId, requestHash);
-          }
-
-          const item = await tx.briefItem.findFirst({
-            where: { id: itemId, ownerId },
-          });
-          if (!item) {
-            throw new NotFoundException("Brief item not found");
-          }
-          if (
-            request.action === "accept" &&
-            item.status !== "pending" &&
-            item.status !== "snoozed"
-          ) {
-            throw new ConflictException("Brief item cannot be accepted");
-          }
-
-          const status = actionStatus(request.action);
-          const actionedAt = new Date();
-          await tx.briefItem.update({
-            where: { id_ownerId: { id: itemId, ownerId } },
-            data: {
-              status,
-              actionedAt,
-              snoozedUntil: request.snoozedUntil,
-            },
-          });
-          const feedback = await tx.briefFeedback.create({
-            data: {
-              ownerId,
-              briefItemId: itemId,
-              action: request.action,
-              reason: request.reason,
-              snoozedUntil: request.snoozedUntil,
-              idempotencyKey,
-              requestHash,
-            },
-          });
-
-          return itemResult(feedback, status);
-        },
+        (tx) =>
+          this.recordItemFeedbackInTransaction(
+            tx,
+            ownerId,
+            itemId,
+            idempotencyKey,
+            request,
+            requestHash
+          ),
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
       );
     } catch (error) {
@@ -138,6 +99,32 @@ export class BriefFeedbackService {
       }
       return this.resolveItemReplay(existing, itemId, requestHash);
     }
+  }
+
+  async recordItemFeedbackForAgent(
+    ownerId: string,
+    itemId: string,
+    idempotencyKey: string,
+    dto: BriefItemFeedbackDto,
+    tx: Prisma.TransactionClient
+  ): Promise<BriefFeedbackResult> {
+    this.assertIdempotencyKey(idempotencyKey);
+    const request = this.validateItemFeedback(dto);
+    const requestHash = hashCanonical({
+      operation: "item-feedback",
+      itemId,
+      action: request.action,
+      reason: request.reason,
+      snoozedUntil: request.snoozedUntil?.toISOString() ?? null,
+    });
+    return this.recordItemFeedbackInTransaction(
+      tx,
+      ownerId,
+      itemId,
+      idempotencyKey,
+      request,
+      requestHash
+    );
   }
 
   async completeQuest(
@@ -157,76 +144,15 @@ export class BriefFeedbackService {
 
     try {
       return await this.prisma.$transaction(
-        async (tx) => {
-          const existing = await tx.briefFeedback.findUnique({
-            where: {
-              ownerId_idempotencyKey: { ownerId, idempotencyKey },
-            },
-          });
-          if (existing) {
-            return this.resolveQuestReplay(
-              tx,
-              ownerId,
-              questId,
-              requestHash,
-              existing
-            );
-          }
-
-          const quest = await tx.quest.findFirst({
-            where: { id: questId, ownerId },
-          });
-          if (!quest) {
-            throw new NotFoundException("Quest not found");
-          }
-          if (quest.status !== "pending") {
-            throw questAlreadyCompleted();
-          }
-
-          await this.verifyQuestEvidence(tx, ownerId, quest, evidence);
-
-          const completedAt = new Date();
-          const claim = await tx.quest.updateMany({
-            where: { id: questId, ownerId, status: "pending" },
-            data: { status: "completed", completedAt },
-          });
-          if (claim.count !== 1) {
-            throw new QuestClaimLostError();
-          }
-
-          await tx.xpTransaction.create({
-            data: {
-              ownerId,
-              amount: quest.xpReward,
-              sourceType: "quest",
-              sourceId: quest.id,
-            },
-          });
-          await tx.user.update({
-            where: { id: ownerId },
-            data: {
-              xp: { increment: quest.xpReward },
-              lastActiveAt: completedAt,
-            },
-          });
-          const feedback = await tx.briefFeedback.create({
-            data: {
-              ownerId,
-              questId,
-              action: "complete",
-              idempotencyKey,
-              requestHash,
-            },
-          });
-
-          return {
-            feedbackId: feedback.id,
+        (tx) =>
+          this.completeQuestInTransaction(
+            tx,
+            ownerId,
             questId,
-            status: "completed" as const,
-            completedAt,
-            xpAwarded: quest.xpReward,
-          };
-        },
+            idempotencyKey,
+            evidence,
+            requestHash
+          ),
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
       );
     } catch (error) {
@@ -241,6 +167,145 @@ export class BriefFeedbackService {
         error
       );
     }
+  }
+
+  async completeQuestForAgent(
+    ownerId: string,
+    questId: string,
+    idempotencyKey: string,
+    dto: QuestCompletionDto,
+    tx: Prisma.TransactionClient
+  ): Promise<QuestCompletionResult> {
+    this.assertIdempotencyKey(idempotencyKey);
+    const evidence = this.validateQuestCompletion(dto);
+    const requestHash = hashCanonical({
+      operation: "quest-completion",
+      questId,
+      interactionId: evidence.interactionId,
+      reminderId: evidence.reminderId,
+    });
+    return this.completeQuestInTransaction(
+      tx,
+      ownerId,
+      questId,
+      idempotencyKey,
+      evidence,
+      requestHash
+    );
+  }
+
+  private async recordItemFeedbackInTransaction(
+    tx: Prisma.TransactionClient,
+    ownerId: string,
+    itemId: string,
+    idempotencyKey: string,
+    request: ValidatedItemFeedback,
+    requestHash: string
+  ): Promise<BriefFeedbackResult> {
+    const existing = await tx.briefFeedback.findUnique({
+      where: { ownerId_idempotencyKey: { ownerId, idempotencyKey } },
+    });
+    if (existing) {
+      const replay = this.resolveItemReplay(existing, itemId, requestHash);
+      const replayedItem = await tx.briefItem.findFirst({
+        where: { id: itemId, ownerId },
+      });
+      if (!replayedItem) throw new NotFoundException("Brief item not found");
+      await this.assertNonDemoContact(tx, ownerId, replayedItem.contactId);
+      return replay;
+    }
+
+    const item = await tx.briefItem.findFirst({ where: { id: itemId, ownerId } });
+    if (!item) throw new NotFoundException("Brief item not found");
+    await this.assertNonDemoContact(tx, ownerId, item.contactId);
+    if (
+      request.action === "accept" &&
+      item.status !== "pending" &&
+      item.status !== "snoozed"
+    ) {
+      throw new ConflictException("Brief item cannot be accepted");
+    }
+
+    const status = actionStatus(request.action);
+    const actionedAt = new Date();
+    await tx.briefItem.update({
+      where: { id_ownerId: { id: itemId, ownerId } },
+      data: { status, actionedAt, snoozedUntil: request.snoozedUntil },
+    });
+    const feedback = await tx.briefFeedback.create({
+      data: {
+        ownerId,
+        briefItemId: itemId,
+        action: request.action,
+        reason: request.reason,
+        snoozedUntil: request.snoozedUntil,
+        idempotencyKey,
+        requestHash,
+      },
+    });
+    return itemResult(feedback, status);
+  }
+
+  private async completeQuestInTransaction(
+    tx: Prisma.TransactionClient,
+    ownerId: string,
+    questId: string,
+    idempotencyKey: string,
+    evidence: ValidatedQuestCompletion,
+    requestHash: string
+  ): Promise<QuestCompletionResult> {
+    const quest = await tx.quest.findFirst({
+      where: { id: questId, ownerId },
+      include: { briefItem: { select: { contactId: true } } },
+    });
+    if (!quest) throw new NotFoundException("Quest not found");
+    await this.assertNonDemoContact(tx, ownerId, quest.briefItem.contactId);
+
+    const existing = await tx.briefFeedback.findUnique({
+      where: { ownerId_idempotencyKey: { ownerId, idempotencyKey } },
+    });
+    if (existing) {
+      return this.resolveQuestReplay(tx, ownerId, questId, requestHash, existing);
+    }
+
+    if (quest.status !== "pending") throw questAlreadyCompleted();
+    await this.verifyQuestEvidence(tx, ownerId, quest, evidence);
+
+    const completedAt = new Date();
+    const claim = await tx.quest.updateMany({
+      where: { id: questId, ownerId, status: "pending" },
+      data: { status: "completed", completedAt },
+    });
+    if (claim.count !== 1) throw new QuestClaimLostError();
+
+    await tx.xpTransaction.create({
+      data: {
+        ownerId,
+        amount: quest.xpReward,
+        sourceType: "quest",
+        sourceId: quest.id,
+      },
+    });
+    await tx.user.update({
+      where: { id: ownerId },
+      data: { xp: { increment: quest.xpReward }, lastActiveAt: completedAt },
+    });
+    const feedback = await tx.briefFeedback.create({
+      data: {
+        ownerId,
+        questId,
+        action: "complete",
+        idempotencyKey,
+        requestHash,
+      },
+    });
+    return {
+      feedbackId: feedback.id,
+      questId,
+      status: "completed",
+      completedAt,
+      xpAwarded: quest.xpReward,
+    };
   }
 
   private assertIdempotencyKey(idempotencyKey: string): void {
@@ -355,6 +420,7 @@ export class BriefFeedbackService {
           ownerId,
           contactId: quest.targetId,
           occurredAt: { gte: quest.createdAt },
+          contact: { ownerId, isDemo: false },
         },
       });
       if (!interaction) {
@@ -375,6 +441,7 @@ export class BriefFeedbackService {
           ownerId,
           status: "completed",
           completedAt: { gte: quest.createdAt },
+          contact: { ownerId, isDemo: false },
         },
       });
       if (!reminder) {
@@ -384,6 +451,18 @@ export class BriefFeedbackService {
     }
 
     throw new ConflictException("Stored quest completion type is invalid");
+  }
+
+  private async assertNonDemoContact(
+    tx: Prisma.TransactionClient,
+    ownerId: string,
+    contactId: string | null
+  ): Promise<void> {
+    if (!contactId) throw new NotFoundException("Brief resource not found");
+    const count = await tx.contact.count({
+      where: { id: contactId, ownerId, isDemo: false },
+    });
+    if (count !== 1) throw new NotFoundException("Brief resource not found");
   }
 
   private async resolveQuestReplay(

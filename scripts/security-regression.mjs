@@ -46,6 +46,52 @@ const unsafeBriefOwnerPattern =
   /\b(?:dto|body|query|params?|headers?)\s*(?:\?\.|\.)\s*(?:ownerId|userId)\b/;
 const briefIdempotencyHeaderPattern =
   /@Headers\s*\(\s*["']idempotency-key["']\s*\)/i;
+const humanAgentControllerPattern =
+  /(?:^|\/)services\/api\/src\/modules\/(?:agent-auth|agent-security)\/[^/]+\.controller\.ts$/;
+const mcpControllerPattern =
+  /(?:^|\/)services\/api\/src\/modules\/mcp\/[^/]+\.controller\.ts$/;
+const agentSurfaceSourcePattern =
+  /(?:^|\/)services\/api\/src\/modules\/(?:agent-auth|agent-security|agent-tools|mcp)\/.*\.ts$/;
+const agentToolHandlerPattern =
+  /(?:^|\/)services\/api\/src\/modules\/agent-tools\/tool-handlers\.ts$/;
+const sharedAgentSchemaPattern =
+  /(?:^|\/)packages\/agent-core\/src\/agent-interface\/schemas\.ts$/;
+const agentToolInputSchemaPattern =
+  /\b(?:export\s+)?const\s+\w*InputSchema\s*=([\s\S]*?)(?=\n(?:export\s+)?const\s+|\nexport\s+(?:function|type|class|interface)\b|\n@Injectable\b|$)/g;
+const unsafeAgentInputFieldPattern =
+  /\b(?:ownerId|userId|scopes|reward|xpReward|xpAwarded|xpEarned)\s*:/;
+const unsafeAgentInputReadPattern =
+  /\b(?:input|rawInput)\s*(?:\?\.|\.)\s*(?:ownerId|userId|scopes|reward|xpReward|xpAwarded|xpEarned)\b/;
+const agentToolRegistrationPattern = /\btool\s*\(\s*["']([^"']+)["']/g;
+const riskyAgentOperationPattern =
+  /(?:^|[_/])(?:send|deliver|dispatch|messages?|introduce|introductions?|invite|invitations?|merge|delete|execute)(?:[_/:]|$)/i;
+const allowedApprovalToolNames = new Set([
+  "socos_propose_action",
+  "socos_execute_approved_action",
+]);
+const agentRoutePattern =
+  /@(Controller|Get|Post|Put|Patch|Delete|All)\s*\(([^)]*)\)/g;
+const riskyAgentHandlerPattern =
+  /^(?:send|deliver|dispatch|introduce|invite|merge|delete|execute)/i;
+const agentRequestParameterPattern =
+  /@(Body|Query|Param)\s*\([^)]*\)\s*([A-Za-z_$][\w$]*)/g;
+const destructuredAgentAuthorityPattern =
+  /@(Body|Query|Param)\s*\([^)]*\)\s*\{[^}]*(?:ownerId|userId)/s;
+const allowedAgentMutationRoutes = new Set([
+  "agent-clients|Post|",
+  "agent-clients|Post|:clientId/rotate",
+  "agent-clients|Delete|:clientId",
+  "agent-proposals|Post|:proposalId/approve",
+  "agent-proposals|Post|:proposalId/reject",
+  "mcp|Post|",
+]);
+const loggingCallPattern =
+  /\b(?:console|Logger|Sentry|(?:this\.)?logger)\.(?:log|info|warn|error|debug|verbose|fatal|captureMessage|captureException)\s*\(([\s\S]{0,1000}?)\)\s*;/g;
+const sensitiveLogValuePattern =
+  /\b(?:\w*(?:authorization|token|hash|body|coordinate|latitude|longitude)\w*|lat|lon|lng|location)\b/i;
+const productionComposePattern = /(?:^|\/)docker-compose\.prod\.ya?ml$/;
+const failClosedMcpHostPattern =
+  /^\s*-\s*MCP_ALLOWED_HOSTS=(?:\$\{MCP_ALLOWED_HOSTS:\?[^}]+\}|[A-Za-z0-9.-]+(?:,[A-Za-z0-9.-]+)*)\s*$/m;
 
 const trackedFiles = execFileSync("git", ["ls-files", "-z"], {
   encoding: "utf8",
@@ -56,6 +102,10 @@ const trackedFiles = execFileSync("git", ["ls-files", "-z"], {
 const violations = [];
 
 function hasUnguardedBriefController(content) {
+  return hasUnguardedController(content, "AuthGuard");
+}
+
+function hasUnguardedController(content, expectedGuard) {
   const lines = content.split(/\r?\n/);
   for (let index = 0; index < lines.length; index += 1) {
     if (!/^\s*export\s+class\s+\w+/.test(lines[index])) continue;
@@ -93,7 +143,9 @@ function hasUnguardedBriefController(content) {
 
     if (
       decorators.some((line) => /^@Controller\s*\(/.test(line)) &&
-      !decorators.some((line) => /^@UseGuards\s*\(\s*AuthGuard\s*\)/.test(line))
+      !decorators.some((line) =>
+        new RegExp(`^@UseGuards\\s*\\(\\s*${expectedGuard}\\s*\\)`).test(line),
+      )
     ) {
       return true;
     }
@@ -109,6 +161,108 @@ function staticDecoratorPath(argument, allowEmpty) {
     return null;
   }
   return literal[2];
+}
+
+function stripQuotedStrings(content) {
+  return content.replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g, "");
+}
+
+function hasCallerControlledAgentAuthority(content) {
+  for (const match of content.matchAll(agentToolInputSchemaPattern)) {
+    if (unsafeAgentInputFieldPattern.test(stripQuotedStrings(match[1]))) {
+      return true;
+    }
+  }
+  return unsafeAgentInputReadPattern.test(content);
+}
+
+function hasDirectRiskyAgentTool(content) {
+  for (const match of content.matchAll(agentToolRegistrationPattern)) {
+    if (
+      riskyAgentOperationPattern.test(match[1]) &&
+      !allowedApprovalToolNames.has(match[1])
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasDirectRiskyAgentRoute(content) {
+  const routes = [...content.matchAll(agentRoutePattern)];
+  const controller = routes.find((route) => route[1] === "Controller");
+  const controllerPath = controller
+    ? staticDecoratorPath(controller[2], false)
+    : null;
+  if (controllerPath === null) return true;
+
+  for (let index = 0; index < routes.length; index += 1) {
+    const route = routes[index];
+    if (route[1] === "Controller") continue;
+    const path = staticDecoratorPath(route[2], true);
+    if (path === null || riskyAgentOperationPattern.test(path)) return true;
+    if (
+      ["Post", "Put", "Patch", "Delete"].includes(route[1]) &&
+      !allowedAgentMutationRoutes.has(`${controllerPath}|${route[1]}|${path}`)
+    ) {
+      return true;
+    }
+
+    const start = route.index ?? 0;
+    const end = routes[index + 1]?.index ?? content.length;
+    const handler = content.slice(start, end);
+    const declaration = /\n\s*(?:async\s+)?([A-Za-z_$][\w$]*)\s*\(/.exec(
+      handler,
+    );
+    if (declaration && riskyAgentHandlerPattern.test(declaration[1])) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasCallerControlledControllerOwner(content) {
+  if (destructuredAgentAuthorityPattern.test(content)) return true;
+  for (const match of content.matchAll(agentRequestParameterPattern)) {
+    const variable = match[2];
+    if (/^(?:ownerId|userId)$/.test(variable)) return true;
+    if (
+      new RegExp(
+        `\\b${variable}\\s*(?:\\?\\.|\\.)\\s*(?:ownerId|userId)\\b`,
+      ).test(content)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasSensitiveAgentLogging(content) {
+  for (const match of content.matchAll(loggingCallPattern)) {
+    if (sensitiveLogValuePattern.test(stripQuotedStrings(match[1]))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function composeServiceBlock(content, serviceName) {
+  const lines = content.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = /^(\s*)([A-Za-z0-9_-]+):\s*$/.exec(lines[index]);
+    if (!match || match[2] !== serviceName) continue;
+    const indent = match[1].length;
+    let end = index + 1;
+    while (end < lines.length) {
+      const next = /^(\s*)([A-Za-z0-9_-]+):\s*$/.exec(lines[end]);
+      if (next && next[1].length <= indent) break;
+      end += 1;
+    }
+    return lines
+      .slice(index, end)
+      .reduce((block, line) => (block === "" ? line : `${block}\n${line}`), "");
+  }
+  return null;
 }
 
 for (const file of trackedFiles) {
@@ -176,6 +330,57 @@ for (const file of trackedFiles) {
       if (requiresIdempotency && !briefIdempotencyHeaderPattern.test(handler)) {
         rules.add("missing-brief-idempotency-keys");
       }
+    }
+  }
+
+  if (humanAgentControllerPattern.test(file)) {
+    if (hasUnguardedController(content, "AuthGuard")) {
+      rules.add("unguarded-agent-admin-routes");
+    }
+    if (hasCallerControlledControllerOwner(content)) {
+      rules.add("caller-controlled-agent-authority");
+    }
+    if (hasDirectRiskyAgentRoute(content)) {
+      rules.add("direct-risky-agent-operation");
+    }
+  }
+
+  if (mcpControllerPattern.test(file)) {
+    if (hasUnguardedController(content, "AgentAuthGuard")) {
+      rules.add("unguarded-mcp-routes");
+    }
+    if (hasDirectRiskyAgentRoute(content)) {
+      rules.add("direct-risky-agent-operation");
+    }
+  }
+
+  if (
+    (agentToolHandlerPattern.test(file) ||
+      sharedAgentSchemaPattern.test(file)) &&
+    hasCallerControlledAgentAuthority(content)
+  ) {
+    rules.add("caller-controlled-agent-authority");
+  }
+
+  if (agentToolHandlerPattern.test(file) && hasDirectRiskyAgentTool(content)) {
+    rules.add("direct-risky-agent-operation");
+  }
+
+  if (
+    agentSurfaceSourcePattern.test(file) &&
+    hasSensitiveAgentLogging(content)
+  ) {
+    rules.add("sensitive-agent-logging");
+  }
+
+  if (productionComposePattern.test(file)) {
+    const apiService = composeServiceBlock(content, "api");
+    if (
+      apiService &&
+      /NODE_ENV=production/.test(apiService) &&
+      !failClosedMcpHostPattern.test(apiService)
+    ) {
+      rules.add("missing-production-mcp-host-policy");
     }
   }
 

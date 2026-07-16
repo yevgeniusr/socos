@@ -1,4 +1,7 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { NotFoundException, UnauthorizedException } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import type { PrismaService } from "../prisma/prisma.service.js";
 import { AgentAuthService } from "./agent-auth.service.js";
 import { issueAgentToken, parseAgentToken } from "./agent-token.js";
@@ -48,6 +51,7 @@ const invalidCredentialCases: Array<{
 
 function harness() {
   const tx = {
+    $queryRaw: jest.fn().mockResolvedValue([]),
     agentClient: {
       create: jest.fn().mockResolvedValue({
         id: "client-synthetic",
@@ -59,6 +63,7 @@ function harness() {
       }),
       findFirst: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     agentCredential: {
       create: jest.fn().mockImplementation(({ data }) =>
@@ -69,7 +74,7 @@ function harness() {
         })
       ),
       findFirst: jest.fn(),
-      updateMany: jest.fn(),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
   };
   const prisma = {
@@ -98,13 +103,15 @@ describe("AgentAuthService", () => {
 
     expect(result.token).toMatch(/^socos_agent_/);
     expect(result.client).toEqual(
-      expect.objectContaining({ id: "client-synthetic", ownerId, name: "Hermes" })
+      expect.objectContaining({
+        id: "client-synthetic",
+        ownerId,
+        name: "Hermes",
+      })
     );
     const credentialData = tx.agentCredential.create.mock.calls[0][0].data;
     expect(credentialData.tokenHash).toMatch(/^[a-f0-9]{64}$/);
-    expect(credentialData.tokenPrefix).toBe(
-      `socos_agent_${credentialData.id}`
-    );
+    expect(credentialData.tokenPrefix).toBe(`socos_agent_${credentialData.id}`);
     expect(JSON.stringify(credentialData)).not.toContain(result.token);
   });
 
@@ -150,43 +157,76 @@ describe("AgentAuthService", () => {
       scopes: ["briefs:read", "feedback:write"],
     });
     expect(prisma.agentCredential.updateMany).toHaveBeenCalledWith({
-      where: { id: parsed.credentialId, revokedAt: null },
+      where: {
+        id: parsed.credentialId,
+        revokedAt: null,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+        client: { status: "active", revokedAt: null },
+      },
       data: { lastUsedAt: now },
     });
   });
 
-  it.each(invalidCredentialCases)("rejects $label", async ({ label, mutate }) => {
+  it.each(invalidCredentialCases)(
+    "rejects $label",
+    async ({ label, mutate }) => {
+      const { service, prisma } = harness();
+      const issued = issueAgentToken("credentialSynthetic01");
+      const presented =
+        label === "wrong secret"
+          ? issueAgentToken("credentialSynthetic01").token
+          : issued.token;
+      prisma.agentCredential.findUnique.mockResolvedValue(
+        mutate({
+          id: "credentialSynthetic01",
+          tokenHash: issued.secretHash,
+          revokedAt: null,
+          expiresAt: null,
+          client: {
+            id: "client-synthetic",
+            ownerId,
+            name: "Hermes",
+            status: "active",
+            scopes: ["briefs:read"],
+            revokedAt: null,
+          },
+        })
+      );
+
+      await expect(service.authenticate(presented)).rejects.toBeInstanceOf(
+        UnauthorizedException
+      );
+      expect(prisma.agentCredential.updateMany).not.toHaveBeenCalled();
+    }
+  );
+
+  it("rejects a credential revoked after lookup but before its usage claim", async () => {
     const { service, prisma } = harness();
     const issued = issueAgentToken("credentialSynthetic01");
-    const presented =
-      label === "wrong secret"
-        ? issueAgentToken("credentialSynthetic01").token
-        : issued.token;
-    prisma.agentCredential.findUnique.mockResolvedValue(
-      mutate({
-        id: "credentialSynthetic01",
-        tokenHash: issued.secretHash,
+    const parsed = parseAgentToken(issued.token)!;
+    prisma.agentCredential.findUnique.mockResolvedValue({
+      id: parsed.credentialId,
+      tokenHash: issued.secretHash,
+      revokedAt: null,
+      expiresAt: new Date("2026-07-17T12:00:00.000Z"),
+      client: {
+        id: "client-synthetic",
+        ownerId,
+        name: "Hermes",
+        status: "active",
+        scopes: ["briefs:read"],
         revokedAt: null,
-        expiresAt: null,
-        client: {
-          id: "client-synthetic",
-          ownerId,
-          name: "Hermes",
-          status: "active",
-          scopes: ["briefs:read"],
-          revokedAt: null,
-        },
-      })
-    );
+      },
+    });
+    prisma.agentCredential.updateMany.mockResolvedValue({ count: 0 });
 
-    await expect(service.authenticate(presented)).rejects.toBeInstanceOf(
+    await expect(service.authenticate(issued.token)).rejects.toBeInstanceOf(
       UnauthorizedException
     );
-    expect(prisma.agentCredential.updateMany).not.toHaveBeenCalled();
   });
 
   it("rotates only an owner-scoped active client without extending credential expiry", async () => {
-    const { service, tx } = harness();
+    const { prisma, service, tx } = harness();
     const expiresAt = new Date("2026-07-17T12:00:00.000Z");
     tx.agentClient.findFirst.mockResolvedValue({
       id: "client-synthetic",
@@ -198,6 +238,19 @@ describe("AgentAuthService", () => {
     const result = await service.rotateClient(ownerId, "client-synthetic");
 
     expect(result.token).toMatch(/^socos_agent_/);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.$queryRaw.mock.calls[0][1]).toBe(
+      JSON.stringify([ownerId, "client-synthetic"])
+    );
+    expect(tx.$queryRaw.mock.calls[0][0].join("?")).toContain(
+      'SELECT 1::integer AS "acquired"'
+    );
+    expect(tx.$queryRaw.mock.calls[0][0].join("?")).toContain(
+      'AS "agent_credential_lifecycle_lock"'
+    );
+    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      tx.agentClient.findFirst.mock.invocationCallOrder[0]
+    );
     expect(tx.agentCredential.updateMany).toHaveBeenCalledWith({
       where: { clientId: "client-synthetic", ownerId, revokedAt: null },
       data: { revokedAt: now },
@@ -205,6 +258,43 @@ describe("AgentAuthService", () => {
     expect(tx.agentCredential.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ expiresAt }),
     });
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    });
+  });
+
+  it("does not issue a replacement unless it claims exactly one active credential", async () => {
+    const { service, tx } = harness();
+    tx.agentClient.findFirst.mockResolvedValue({
+      id: "client-synthetic",
+      ownerId,
+      status: "active",
+    });
+    tx.agentCredential.findFirst.mockResolvedValue({
+      id: "credential-current",
+      expiresAt: null,
+    });
+    tx.agentCredential.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      service.rotateClient(ownerId, "client-synthetic")
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    expect(tx.agentCredential.create).not.toHaveBeenCalled();
+  });
+
+  it("defines a database invariant allowing one unrevoked credential per client", () => {
+    const migration = readFileSync(
+      resolve(
+        process.cwd(),
+        "prisma/migrations/20260716140000_agent_interface/migration.sql"
+      ),
+      "utf8"
+    );
+
+    expect(migration).toContain(
+      'CREATE UNIQUE INDEX "AgentCredential_one_unrevoked_per_client_key" ON "AgentCredential"("clientId") WHERE "revokedAt" IS NULL'
+    );
   });
 
   it("does not disclose whether another owner's client exists", async () => {
@@ -214,5 +304,36 @@ describe("AgentAuthService", () => {
     await expect(
       service.rotateClient(ownerId, "other-owner-client")
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("serializes revocation on the same owner/client credential lifecycle lock", async () => {
+    const { prisma, service, tx } = harness();
+
+    await service.revokeClient(ownerId, "client-synthetic");
+
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.$queryRaw.mock.calls[0][1]).toBe(
+      JSON.stringify([ownerId, "client-synthetic"])
+    );
+    expect(tx.$queryRaw.mock.calls[0][0].join("?")).toContain(
+      'SELECT 1::integer AS "acquired"'
+    );
+    expect(tx.$queryRaw.mock.calls[0][0].join("?")).toContain(
+      'AS "agent_credential_lifecycle_lock"'
+    );
+    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      tx.agentClient.updateMany.mock.invocationCallOrder[0]
+    );
+    expect(tx.agentClient.updateMany).toHaveBeenCalledWith({
+      where: { id: "client-synthetic", ownerId, revokedAt: null },
+      data: { status: "revoked", revokedAt: now },
+    });
+    expect(tx.agentCredential.updateMany).toHaveBeenCalledWith({
+      where: { clientId: "client-synthetic", ownerId, revokedAt: null },
+      data: { revokedAt: now },
+    });
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    });
   });
 });

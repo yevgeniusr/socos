@@ -12,6 +12,7 @@
     "build": "turbo run build",
     "lint": "turbo run lint",
     "test": "turbo run test && node --experimental-strip-types --test scripts/security-regression.test.mjs scripts/e2e-host-policy.test.mjs scripts/database-ops.test.mjs scripts/migration-safety.integration.test.mjs scripts/docker-packaging.test.mjs scripts/coolify-ops.test.mjs scripts/monica-export.test.mjs && node scripts/security-regression.mjs",
+    "test:agent-interface-integration": "node scripts/run-agent-interface-integration.mjs",
     "test:brief-integration": "node scripts/run-brief-integration.mjs",
     "type:check": "turbo run type:check",
     "security:regression": "node scripts/security-regression.mjs",

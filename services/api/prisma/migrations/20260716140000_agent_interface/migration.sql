@@ -129,6 +129,7 @@ CREATE UNIQUE INDEX "AgentClient_id_ownerId_key" ON "AgentClient"("id", "ownerId
 CREATE INDEX "AgentClient_ownerId_status_idx" ON "AgentClient"("ownerId", "status");
 
 CREATE UNIQUE INDEX "AgentCredential_tokenPrefix_key" ON "AgentCredential"("tokenPrefix");
+CREATE UNIQUE INDEX "AgentCredential_one_unrevoked_per_client_key" ON "AgentCredential"("clientId") WHERE "revokedAt" IS NULL;
 CREATE INDEX "AgentCredential_ownerId_clientId_idx" ON "AgentCredential"("ownerId", "clientId");
 CREATE INDEX "AgentCredential_expiresAt_idx" ON "AgentCredential"("expiresAt");
 

@@ -26,6 +26,7 @@ function createItemHarness(initialStatus = "pending") {
   const item = {
     id: "item-synthetic",
     ownerId,
+    contactId: "contact-synthetic",
     status: initialStatus,
     snoozedUntil:
       initialStatus === "snoozed" ? new Date("2026-07-17T12:00:00.000Z") : null,
@@ -36,6 +37,7 @@ function createItemHarness(initialStatus = "pending") {
   const xpCreate = jest.fn();
 
   const transactionClient = {
+    contact: { count: jest.fn().mockResolvedValue(1) },
     briefItem: {
       findFirst: jest.fn(async ({ where }: any) =>
         where.id === item.id && where.ownerId === item.ownerId ? item : null
@@ -233,6 +235,23 @@ describe("BriefFeedbackService item feedback", () => {
     expect(harness.transactionClient.briefItem.update).not.toHaveBeenCalled();
   });
 
+  it("rejects a demo-linked brief item before mutation", async () => {
+    const harness = createItemHarness();
+    harness.transactionClient.contact.count.mockResolvedValue(0);
+
+    await expect(
+      harness.service.recordItemFeedbackForAgent(
+        ownerId,
+        harness.item.id,
+        "agent:feedback:demo-001",
+        { action: "accept" },
+        harness.transactionClient as never
+      )
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(harness.transactionClient.briefItem.update).not.toHaveBeenCalled();
+    expect(harness.transactionClient.briefFeedback.create).not.toHaveBeenCalled();
+  });
+
   it("returns the original result for the same key and canonical request", async () => {
     const harness = createItemHarness();
     const request = [
@@ -335,6 +354,23 @@ describe("BriefFeedbackService item feedback", () => {
       )
     ).rejects.toBeInstanceOf(BadRequestException);
   });
+
+  it("reuses an outer agent transaction without opening a nested transaction", async () => {
+    const harness = createItemHarness();
+
+    await expect(
+      harness.service.recordItemFeedbackForAgent(
+        ownerId,
+        harness.item.id,
+        "agent:feedback:key-001",
+        { action: "accept" },
+        harness.transactionClient as never
+      )
+    ).resolves.toEqual(expect.objectContaining({ status: "accepted" }));
+
+    expect(harness.prisma.$transaction).not.toHaveBeenCalled();
+    expect(harness.transactionClient.briefFeedback.create).toHaveBeenCalledTimes(1);
+  });
 });
 
 function createQuestHarness(
@@ -352,6 +388,7 @@ function createQuestHarness(
     status: "pending",
     completedAt: null as Date | null,
     createdAt: new Date("2026-07-15T12:00:00.000Z"),
+    briefItem: { contactId: "contact-synthetic" },
   };
   const interaction = {
     id: "interaction-synthetic",
@@ -376,6 +413,7 @@ function createQuestHarness(
   let userXp = 0;
 
   const transactionClient = {
+    contact: { count: jest.fn().mockResolvedValue(1) },
     briefFeedback: {
       findUnique: jest.fn(async ({ where }: any) => {
         const key = where.ownerId_idempotencyKey;
@@ -529,6 +567,7 @@ describe("BriefFeedbackService quest completion", () => {
         ownerId,
         contactId: harness.quest.targetId,
         occurredAt: { gte: harness.quest.createdAt },
+        contact: { ownerId, isDemo: false },
       },
     });
     expect(harness.transactionClient.quest.updateMany).toHaveBeenCalledWith({
@@ -562,6 +601,23 @@ describe("BriefFeedbackService quest completion", () => {
     );
   });
 
+  it("completes a quest inside the caller's agent transaction", async () => {
+    const harness = createQuestHarness("interaction");
+
+    await expect(
+      harness.service.completeQuestForAgent(
+        ownerId,
+        harness.quest.id,
+        "agent:complete:key-001",
+        { interactionId: harness.interaction.id },
+        harness.transactionClient as never
+      )
+    ).resolves.toEqual(expect.objectContaining({ status: "completed" }));
+
+    expect(harness.prisma.$transaction).not.toHaveBeenCalled();
+    expect(harness.transactionClient.xpTransaction.create).toHaveBeenCalledTimes(1);
+  });
+
   it("verifies the target reminder is owner-scoped, completed, and recent enough", async () => {
     const harness = createQuestHarness("reminder");
 
@@ -579,6 +635,7 @@ describe("BriefFeedbackService quest completion", () => {
         ownerId,
         status: "completed",
         completedAt: { gte: harness.quest.createdAt },
+        contact: { ownerId, isDemo: false },
       },
     });
   });
@@ -660,6 +717,24 @@ describe("BriefFeedbackService quest completion", () => {
         { interactionId: harness.interaction.id }
       )
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("rejects a demo-linked quest without awarding XP", async () => {
+    const harness = createQuestHarness();
+    harness.transactionClient.contact.count.mockResolvedValue(0);
+
+    await expect(
+      harness.service.completeQuestForAgent(
+        ownerId,
+        harness.quest.id,
+        "agent:complete:demo-001",
+        { interactionId: harness.interaction.id },
+        harness.transactionClient as never
+      )
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(harness.transactionClient.quest.updateMany).not.toHaveBeenCalled();
+    expect(harness.transactionClient.xpTransaction.create).not.toHaveBeenCalled();
+    expect(harness.transactionClient.user.update).not.toHaveBeenCalled();
   });
 
   it.each([

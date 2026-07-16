@@ -7,6 +7,7 @@ import {
   AGENT_SCOPES,
   PROPOSAL_ACTION_TYPES,
   agentActionProposalInputSchema,
+  agentApprovedActionInputSchema,
   agentBriefFeedbackInputSchema,
   agentPrincipalSchema,
   agentQuestCompletionInputSchema,
@@ -276,6 +277,33 @@ describe('strict caller inputs', () => {
       agentActionProposalInputSchema.parse({
         ...proposal,
         payload: { ...proposal.payload, ownerId: 'caller-owner' },
+      }),
+    ).toThrow();
+  });
+
+  it('binds approved execution to a strict grant, action, and payload', () => {
+    const input = {
+      grantId: 'grant-synthetic',
+      actionType: 'message',
+      idempotencyKey: 'execute:message:001',
+      payload: {
+        contactId: 'contact-synthetic',
+        channel: 'social',
+        body: 'Synthetic approved draft',
+      },
+    };
+
+    expect(agentApprovedActionInputSchema.parse(input)).toEqual(input);
+    expect(() =>
+      agentApprovedActionInputSchema.parse({
+        ...input,
+        ownerId: 'caller-owner',
+      }),
+    ).toThrow();
+    expect(() =>
+      agentApprovedActionInputSchema.parse({
+        ...input,
+        actionType: 'delete',
       }),
     ).toThrow();
   });

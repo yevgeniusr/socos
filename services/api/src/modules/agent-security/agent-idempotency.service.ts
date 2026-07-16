@@ -56,7 +56,10 @@ export class AgentIdempotencyService {
       return await this.prisma.$transaction(
         async (transaction) => {
           await transaction.$queryRaw`
-            SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))
+            SELECT 1::integer AS "acquired"
+            FROM (
+              SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))
+            ) AS "agent_idempotency_lock"
           `;
           const transactionNow = new Date();
 

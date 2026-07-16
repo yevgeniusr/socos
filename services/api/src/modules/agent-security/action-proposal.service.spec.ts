@@ -105,6 +105,27 @@ describe("ActionProposalService", () => {
     expect(tx.actionProposal.create).not.toHaveBeenCalled();
   });
 
+  it("requires delete-reminder proposals to reference a non-demo owner contact", async () => {
+    const { service, tx } = harness();
+    tx.reminder.count.mockResolvedValue(0);
+
+    await expect(
+      service.createProposal(principal, {
+        actionType: "delete",
+        idempotencyKey: "proposal:delete:reminder-001",
+        payload: { entityType: "reminder", entityId: "demo-reminder" },
+      })
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(tx.reminder.count).toHaveBeenCalledWith({
+      where: {
+        id: "demo-reminder",
+        ownerId: principal.ownerId,
+        contact: { ownerId: principal.ownerId, isDemo: false },
+      },
+    });
+    expect(tx.actionProposal.create).not.toHaveBeenCalled();
+  });
+
   it("approves a pending proposal and binds a short-lived grant to its exact hash", async () => {
     const { service, tx } = harness();
     tx.actionProposal.findFirst.mockResolvedValue({

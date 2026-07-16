@@ -1,19 +1,43 @@
-/**
- * AgentToolsModule -- Registers all AI agent tools in one place.
- *
- * Tool sources:
- * - AgentRemindersService (reminders module) → suggestContacts, scheduleReminder
- * - AiAgentService (ai-agent module) → generateNotes, assessRelationshipHealth
- *
- * Consumer modules can import this to get access to all agent tools.
- */
-
-import { Module, forwardRef } from '@nestjs/common';
-import { RemindersModule } from '../reminders/reminders.module.js';
-import { AiAgentModule } from '../ai-agent/ai-agent.module.js';
+import { Module } from "@nestjs/common";
+import { AgentSecurityModule } from "../agent-security/agent-security.module.js";
+import { BriefFeedbackService } from "../briefs/brief-feedback.service.js";
+import { BriefsModule } from "../briefs/briefs.module.js";
+import { ImportantDatesService } from "../briefs/important-dates.service.js";
+import { GamificationService } from "../gamification/gamification.service.js";
+import { InteractionsService } from "../interactions/interactions.service.js";
+import { NotificationsModule } from "../notifications/notifications.module.js";
+import { PrismaService } from "../prisma/prisma.service.js";
+import { RemindersModule } from "../reminders/reminders.module.js";
+import { RemindersService } from "../reminders/reminders.service.js";
+import { AgentReadService } from "./agent-read.service.js";
+import {
+  AGENT_FEEDBACK_COMMANDS,
+  AGENT_INTERACTION_COMMANDS,
+  AGENT_REMINDER_COMMANDS,
+  AgentToolHandlers,
+} from "./tool-handlers.js";
+import { AgentToolRegistryService } from "./tool-registry.service.js";
 
 @Module({
-  imports: [RemindersModule, forwardRef(() => AiAgentModule)],
-  exports: [RemindersModule, AiAgentModule],
+  imports: [
+    AgentSecurityModule,
+    BriefsModule,
+    NotificationsModule,
+    RemindersModule,
+  ],
+  providers: [
+    PrismaService,
+    ImportantDatesService,
+    BriefFeedbackService,
+    GamificationService,
+    InteractionsService,
+    AgentReadService,
+    AgentToolHandlers,
+    AgentToolRegistryService,
+    { provide: AGENT_INTERACTION_COMMANDS, useExisting: InteractionsService },
+    { provide: AGENT_REMINDER_COMMANDS, useExisting: RemindersService },
+    { provide: AGENT_FEEDBACK_COMMANDS, useExisting: BriefFeedbackService },
+  ],
+  exports: [AgentToolRegistryService],
 })
 export class AgentToolsModule {}

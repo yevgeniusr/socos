@@ -150,3 +150,39 @@ export const agentActionProposalInputSchema = z.discriminatedUnion(
     }),
   ],
 );
+
+export const agentApprovedActionInputSchema = z.discriminatedUnion(
+  'actionType',
+  [
+    z.strictObject({
+      grantId: entityIdSchema,
+      actionType: z.literal('message'),
+      idempotencyKey: idempotencyKeySchema,
+      payload: messageProposalPayloadSchema,
+    }),
+    z.strictObject({
+      grantId: entityIdSchema,
+      actionType: z.literal('introduction'),
+      idempotencyKey: idempotencyKeySchema,
+      payload: introductionProposalPayloadSchema,
+    }),
+    z.strictObject({
+      grantId: entityIdSchema,
+      actionType: z.literal('invitation'),
+      idempotencyKey: idempotencyKeySchema,
+      payload: invitationProposalPayloadSchema,
+    }),
+    z.strictObject({
+      grantId: entityIdSchema,
+      actionType: z.literal('merge'),
+      idempotencyKey: idempotencyKeySchema,
+      payload: mergeProposalPayloadSchema,
+    }),
+    z.strictObject({
+      grantId: entityIdSchema,
+      actionType: z.literal('delete'),
+      idempotencyKey: idempotencyKeySchema,
+      payload: deleteProposalPayloadSchema,
+    }),
+  ],
+);

@@ -178,3 +178,35 @@ export type AgentActionProposalInput =
       readonly idempotencyKey: string;
       readonly payload: DeleteProposalPayload;
     };
+
+export type AgentApprovedActionInput =
+  | {
+      readonly grantId: string;
+      readonly actionType: 'message';
+      readonly idempotencyKey: string;
+      readonly payload: MessageProposalPayload;
+    }
+  | {
+      readonly grantId: string;
+      readonly actionType: 'introduction';
+      readonly idempotencyKey: string;
+      readonly payload: IntroductionProposalPayload;
+    }
+  | {
+      readonly grantId: string;
+      readonly actionType: 'invitation';
+      readonly idempotencyKey: string;
+      readonly payload: InvitationProposalPayload;
+    }
+  | {
+      readonly grantId: string;
+      readonly actionType: 'merge';
+      readonly idempotencyKey: string;
+      readonly payload: MergeProposalPayload;
+    }
+  | {
+      readonly grantId: string;
+      readonly actionType: 'delete';
+      readonly idempotencyKey: string;
+      readonly payload: DeleteProposalPayload;
+    };

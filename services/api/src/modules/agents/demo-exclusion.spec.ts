@@ -211,13 +211,15 @@ describe('demo contact exclusion', () => {
     ).getUpcoming(userId);
 
     expect(prisma.reminder.findMany.mock.calls[0][0].where.contact).toEqual({
+      ownerId: userId,
       isDemo: false,
     });
     expect(prisma.reminder.groupBy.mock.calls[0][0].where.contact).toEqual({
+      ownerId: userId,
       isDemo: false,
     });
     for (const call of prisma.reminder.count.mock.calls) {
-      expect(call[0].where.contact).toEqual({ isDemo: false });
+      expect(call[0].where.contact).toEqual({ ownerId: userId, isDemo: false });
     }
   });
 

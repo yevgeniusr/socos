@@ -361,3 +361,244 @@ export class BriefsController {
     /briefs\.controller\.ts: forbidden-brief-operation/,
   );
 });
+
+test("rejects an unguarded agent client administration controller", () => {
+  const directory = createTrackedFixture(
+    "services/api/src/modules/agent-auth/agent-auth.controller.ts",
+    `@Controller("agent-clients")
+export class AgentAuthController {
+  @Get() list() {}
+}
+`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /agent-auth\.controller\.ts: unguarded-agent-admin-routes/,
+  );
+});
+
+test("rejects an unguarded human approval controller", () => {
+  const directory = createTrackedFixture(
+    "services/api/src/modules/agent-security/approval.controller.ts",
+    `@Controller("agent-proposals")
+export class ApprovalController {
+  @Post(":proposalId/approve") approve() {}
+}
+`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /approval\.controller\.ts: unguarded-agent-admin-routes/,
+  );
+});
+
+test("rejects an MCP controller guarded only as a human route", () => {
+  const directory = createTrackedFixture(
+    "services/api/src/modules/mcp/mcp.controller.ts",
+    `@Controller("mcp")
+@UseGuards(AuthGuard)
+export class McpController {
+  @Post() post() {}
+}
+`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /mcp\.controller\.ts: unguarded-mcp-routes/);
+});
+
+for (const field of [
+  "ownerId",
+  "userId",
+  "scopes",
+  "reward",
+  "xpReward",
+  "xpAwarded",
+]) {
+  test(`rejects caller-controlled ${field} in an agent tool input schema`, () => {
+    const directory = createTrackedFixture(
+      "services/api/src/modules/agent-tools/tool-handlers.ts",
+      `const unsafeInputSchema = z.strictObject({
+  ${field}: z.string(),
+});
+`,
+    );
+
+    const result = runScanner(directory);
+
+    assert.notEqual(result.status, 0);
+    assert.match(
+      result.stderr,
+      /tool-handlers\.ts: caller-controlled-agent-authority/,
+    );
+  });
+}
+
+test("rejects reading owner identity directly from parsed agent tool input", () => {
+  const directory = createTrackedFixture(
+    "services/api/src/modules/agent-tools/tool-handlers.ts",
+    `export function unsafeHandler(input) {
+  return service.find(input.ownerId);
+}
+`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /tool-handlers\.ts: caller-controlled-agent-authority/,
+  );
+});
+
+test("rejects owner identity sourced from an agent admin request body", () => {
+  const directory = createTrackedFixture(
+    "services/api/src/modules/agent-auth/agent-auth.controller.ts",
+    `@Controller("agent-clients")
+@UseGuards(AuthGuard)
+export class AgentAuthController {
+  @Post() create(@Body() input) {
+    return this.service.create(input.ownerId, input);
+  }
+}
+`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /agent-auth\.controller\.ts: caller-controlled-agent-authority/,
+  );
+});
+
+for (const toolName of [
+  "socos_send_message",
+  "socos_invite_contact",
+  "socos_merge_contacts",
+  "socos_delete_contact",
+]) {
+  test(`rejects direct risky agent tool ${toolName}`, () => {
+    const directory = createTrackedFixture(
+      "services/api/src/modules/agent-tools/tool-handlers.ts",
+      `export function createExplicitAgentTools(handlers) {
+  return [tool(
+    "${toolName}",
+    "Unsafe direct action.",
+    "interactions:write",
+    "automatic",
+    true,
+    inputSchema,
+    handlers.run.bind(handlers),
+  )];
+}
+`,
+    );
+
+    const result = runScanner(directory);
+
+    assert.notEqual(result.status, 0);
+    assert.match(
+      result.stderr,
+      /tool-handlers\.ts: direct-risky-agent-operation/,
+    );
+  });
+}
+
+test("rejects a direct outbound action added to the approval controller", () => {
+  const directory = createTrackedFixture(
+    "services/api/src/modules/agent-security/approval.controller.ts",
+    `@Controller("agent-proposals")
+@UseGuards(AuthGuard)
+export class ApprovalController {
+  @Post(":proposalId/send") sendMessage() {}
+}
+`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /approval\.controller\.ts: direct-risky-agent-operation/,
+  );
+});
+
+test("rejects an unreviewed agent mutation hidden behind a neutral route name", () => {
+  const directory = createTrackedFixture(
+    "services/api/src/modules/agent-security/approval.controller.ts",
+    `@Controller("agent-proposals")
+@UseGuards(AuthGuard)
+export class ApprovalController {
+  @Post(":proposalId/run") runAction() {}
+}
+`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /approval\.controller\.ts: direct-risky-agent-operation/,
+  );
+});
+
+for (const sensitiveExpression of [
+  "authorization",
+  "tokenHash",
+  "request.body",
+  "coordinates",
+]) {
+  test(`rejects agent-surface logging of ${sensitiveExpression}`, () => {
+    const directory = createTrackedFixture(
+      "services/api/src/modules/mcp/mcp.controller.ts",
+      `@Controller("mcp")
+@UseGuards(AgentAuthGuard)
+export class McpController {
+  @Post() post(request) {
+    console.log(${sensitiveExpression});
+  }
+}
+`,
+    );
+
+    const result = runScanner(directory);
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /mcp\.controller\.ts: sensitive-agent-logging/);
+  });
+}
+
+test("rejects a production API service without a fail-closed MCP host allowlist", () => {
+  const directory = createTrackedFixture(
+    "docker-compose.prod.yml",
+    `services:
+  api:
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=synthetic
+`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /docker-compose\.prod\.yml: missing-production-mcp-host-policy/,
+  );
+});

@@ -1,7 +1,52 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { GamificationService } from '../gamification/gamification.service.js';
-import { CreateInteractionDto, InteractionQueryDto } from './interactions.dto.js';
+import {
+  CreateInteractionDto,
+  InteractionQueryDto,
+  InteractionType,
+} from './interactions.dto.js';
+
+export interface AgentInteractionInput {
+  contactId: string;
+  type: InteractionType;
+  title?: string;
+  content?: string;
+  summary?: string;
+  occurredAt?: string;
+  duration?: number;
+  location?: string;
+}
+
+export interface AgentInteractionResult {
+  interactionId: string;
+  contactId: string;
+  type: string;
+  occurredAt: Date;
+  xpAwarded: number;
+  totalXp: number;
+  level: number;
+}
+
+function levelForXp(totalXp: number): number {
+  return Math.floor(Math.sqrt(totalXp / 100)) + 1;
+}
+
+const AGENT_INTERACTION_ACHIEVEMENTS = [
+  {
+    code: "first_interaction",
+    name: "First Interaction",
+    target: 1,
+    xpReward: 50,
+  },
+  {
+    code: "prolific",
+    name: "Prolific",
+    target: 100,
+    xpReward: 5000,
+  },
+] as const;
 
 @Injectable()
 export class InteractionsService {
@@ -9,6 +54,20 @@ export class InteractionsService {
     private prisma: PrismaService,
     private gamificationService: GamificationService,
   ) {}
+
+  createForAgent(
+    ownerId: string,
+    input: AgentInteractionInput,
+    transaction?: Prisma.TransactionClient
+  ): Promise<AgentInteractionResult> {
+    if (transaction) {
+      return this.createForAgentInTransaction(transaction, ownerId, input);
+    }
+    return this.prisma.$transaction(
+      (tx) => this.createForAgentInTransaction(tx, ownerId, input),
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+    );
+  }
 
   async create(userId: string, dto: CreateInteractionDto) {
     // Verify contact belongs to user
@@ -179,5 +238,144 @@ export class InteractionsService {
     });
 
     return interactions;
+  }
+
+  private async createForAgentInTransaction(
+    transaction: Prisma.TransactionClient,
+    ownerId: string,
+    input: AgentInteractionInput
+  ): Promise<AgentInteractionResult> {
+    const contact = await transaction.contact.findFirst({
+      where: { id: input.contactId, ownerId, isDemo: false },
+      select: {
+        id: true,
+        ownerId: true,
+        isDemo: true,
+      },
+    });
+    if (!contact || contact.ownerId !== ownerId || contact.isDemo) {
+      throw new NotFoundException("Contact not found");
+    }
+
+    const xpAwarded = await this.gamificationService.calculateInteractionXp(
+      input.type
+    );
+    const activityAt = new Date();
+    const occurredAt = input.occurredAt
+      ? new Date(input.occurredAt)
+      : activityAt;
+    const interaction = await transaction.interaction.create({
+      data: {
+        contactId: input.contactId,
+        ownerId,
+        type: input.type,
+        title: input.title,
+        content: input.content,
+        summary: input.summary,
+        occurredAt,
+        duration: input.duration,
+        location: input.location,
+        xpEarned: xpAwarded,
+      },
+      select: {
+        id: true,
+        contactId: true,
+        type: true,
+        occurredAt: true,
+        xpEarned: true,
+      },
+    });
+
+    await transaction.contact.updateMany({
+      where: {
+        id: input.contactId,
+        ownerId,
+        isDemo: false,
+        OR: [
+          { lastContactedAt: null },
+          { lastContactedAt: { lt: occurredAt } },
+        ],
+      },
+      data: { lastContactedAt: occurredAt },
+    });
+
+    await transaction.xpTransaction.create({
+      data: {
+        ownerId,
+        amount: xpAwarded,
+        sourceType: "interaction",
+        sourceId: interaction.id,
+      },
+    });
+
+    const interactionCount = await transaction.interaction.count({
+      where: {
+        ownerId,
+        contact: { ownerId, isDemo: false },
+      },
+    });
+    let achievementXpAwarded = 0;
+    for (const definition of AGENT_INTERACTION_ACHIEVEMENTS) {
+      if (interactionCount < definition.target) continue;
+
+      const achievement = await transaction.achievement.upsert({
+        where: { code: definition.code },
+        update: {},
+        create: {
+          code: definition.code,
+          name: definition.name,
+          description: `You logged ${definition.target} interactions!`,
+          xpReward: definition.xpReward,
+          requirement: JSON.stringify({
+            type: "count",
+            target: definition.target,
+            object: "interactions",
+          }),
+        },
+        select: { id: true, xpReward: true },
+      });
+      const unlock = await transaction.userAchievement.createMany({
+        data: [{ userId: ownerId, achievementId: achievement.id }],
+        skipDuplicates: true,
+      });
+      if (unlock.count === 0) continue;
+
+      await transaction.xpTransaction.create({
+        data: {
+          ownerId,
+          amount: achievement.xpReward,
+          sourceType: "achievement",
+          sourceId: achievement.id,
+        },
+      });
+      achievementXpAwarded += achievement.xpReward;
+    }
+
+    let user = await transaction.user.update({
+      where: { id: ownerId },
+      data: {
+        xp: { increment: xpAwarded + achievementXpAwarded },
+        lastActiveAt: activityAt,
+      },
+      select: { xp: true, level: true },
+    });
+    const level = levelForXp(user.xp);
+    if (user.level !== level) {
+      user = await transaction.user.update({
+        where: { id: ownerId },
+        data: { level },
+        select: { xp: true, level: true },
+      });
+    }
+
+    return {
+      interactionId: interaction.id,
+      contactId: interaction.contactId,
+      type: interaction.type,
+      occurredAt: interaction.occurredAt,
+      xpAwarded: interaction.xpEarned,
+      totalXp: user.xp,
+      level: user.level,
+    };
   }
 }

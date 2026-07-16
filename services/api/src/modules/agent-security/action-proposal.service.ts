@@ -250,7 +250,13 @@ export class ActionProposalService {
         where: { id: entityId, contact: { ownerId, isDemo: false } },
       });
     } else {
-      count = await tx.reminder.count({ where: { id: entityId, ownerId } });
+      count = await tx.reminder.count({
+        where: {
+          id: entityId,
+          ownerId,
+          contact: { ownerId, isDemo: false },
+        },
+      });
     }
     if (count !== 1) throw referencedResourceNotFound();
   }

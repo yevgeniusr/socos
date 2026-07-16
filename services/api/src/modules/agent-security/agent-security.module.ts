@@ -5,6 +5,10 @@ import { PrismaService } from "../prisma/prisma.service.js";
 import { ActionProposalService } from "./action-proposal.service.js";
 import { AgentAuditService } from "./agent-audit.service.js";
 import { AgentIdempotencyService } from "./agent-idempotency.service.js";
+import {
+  APPROVED_ACTION_EXECUTORS,
+  ApprovedActionExecutionService,
+} from "./approved-action-execution.service.js";
 import { ApprovalController } from "./approval.controller.js";
 
 @Module({
@@ -16,11 +20,14 @@ import { ApprovalController } from "./approval.controller.js";
     ActionProposalService,
     AgentAuditService,
     AgentIdempotencyService,
+    ApprovedActionExecutionService,
+    { provide: APPROVED_ACTION_EXECUTORS, useValue: new Map() },
   ],
   exports: [
     ActionProposalService,
     AgentAuditService,
     AgentIdempotencyService,
+    ApprovedActionExecutionService,
   ],
 })
 export class AgentSecurityModule {}

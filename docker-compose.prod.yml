@@ -46,6 +46,8 @@ services:
       - NODE_ENV=production
       - DATABASE_URL=${DATABASE_URL:?DATABASE_URL is required}
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
+      - MCP_ALLOWED_HOSTS=${MCP_ALLOWED_HOSTS:?MCP_ALLOWED_HOSTS is required}
+      - MCP_ALLOWED_ORIGINS=${MCP_ALLOWED_ORIGINS:-https://socos.rachkovan.com}
       - PORT=3001
     labels:
       - "traefik.enable=true"

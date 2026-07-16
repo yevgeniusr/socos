@@ -4,10 +4,8 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from "@nestjs/common";
-import type {
-  AgentPrincipal,
-  AgentScope,
-} from "@socos/agent-core";
+import { Prisma } from "@prisma/client";
+import type { AgentPrincipal, AgentScope } from "@socos/agent-core";
 import { PrismaService } from "../prisma/prisma.service.js";
 import {
   issueAgentToken,
@@ -88,56 +86,68 @@ export class AgentAuthService {
   async rotateClient(ownerId: string, clientId: string) {
     const credentialId = randomUUID();
     const issued = issueAgentToken(credentialId);
-    const client = await this.prisma.$transaction(async (tx) => {
-      const current = await tx.agentClient.findFirst({
-        where: { id: clientId, ownerId, status: "active", revokedAt: null },
-        select: clientPresenter,
-      });
-      if (!current) throw new NotFoundException("Agent client not found");
-      const activeCredential = await tx.agentCredential.findFirst({
-        where: { clientId, ownerId, revokedAt: null },
-        orderBy: [{ createdAt: "desc" }, { id: "asc" }],
-        select: { expiresAt: true },
-      });
-      if (!activeCredential) {
-        throw new NotFoundException("Agent client not found");
-      }
+    const client = await this.prisma.$transaction(
+      async (tx) => {
+        await acquireCredentialLifecycleLock(tx, ownerId, clientId);
 
-      const now = new Date();
-      await tx.agentCredential.updateMany({
-        where: { clientId, ownerId, revokedAt: null },
-        data: { revokedAt: now },
-      });
-      await tx.agentCredential.create({
-        data: {
-          id: credentialId,
-          clientId,
-          ownerId,
-          tokenPrefix: `socos_agent_${credentialId}`,
-          tokenHash: issued.secretHash,
-          expiresAt: activeCredential.expiresAt,
-        },
-      });
-      return current;
-    });
+        const current = await tx.agentClient.findFirst({
+          where: { id: clientId, ownerId, status: "active", revokedAt: null },
+          select: clientPresenter,
+        });
+        if (!current) throw new NotFoundException("Agent client not found");
+        const activeCredential = await tx.agentCredential.findFirst({
+          where: { clientId, ownerId, revokedAt: null },
+          orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+          select: { expiresAt: true },
+        });
+        if (!activeCredential) {
+          throw new NotFoundException("Agent client not found");
+        }
+
+        const now = new Date();
+        const claim = await tx.agentCredential.updateMany({
+          where: { clientId, ownerId, revokedAt: null },
+          data: { revokedAt: now },
+        });
+        if (claim.count !== 1) {
+          throw new NotFoundException("Agent client not found");
+        }
+        await tx.agentCredential.create({
+          data: {
+            id: credentialId,
+            clientId,
+            ownerId,
+            tokenPrefix: `socos_agent_${credentialId}`,
+            tokenHash: issued.secretHash,
+            expiresAt: activeCredential.expiresAt,
+          },
+        });
+        return current;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+    );
 
     return { client, token: issued.token };
   }
 
   async revokeClient(ownerId: string, clientId: string): Promise<void> {
-    const revoked = await this.prisma.$transaction(async (tx) => {
-      const now = new Date();
-      const result = await tx.agentClient.updateMany({
-        where: { id: clientId, ownerId, revokedAt: null },
-        data: { status: "revoked", revokedAt: now },
-      });
-      if (result.count === 0) return false;
-      await tx.agentCredential.updateMany({
-        where: { clientId, ownerId, revokedAt: null },
-        data: { revokedAt: now },
-      });
-      return true;
-    });
+    const revoked = await this.prisma.$transaction(
+      async (tx) => {
+        await acquireCredentialLifecycleLock(tx, ownerId, clientId);
+        const now = new Date();
+        const result = await tx.agentClient.updateMany({
+          where: { id: clientId, ownerId, revokedAt: null },
+          data: { status: "revoked", revokedAt: now },
+        });
+        if (result.count === 0) return false;
+        await tx.agentCredential.updateMany({
+          where: { clientId, ownerId, revokedAt: null },
+          data: { revokedAt: now },
+        });
+        return true;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+    );
     if (!revoked) throw new NotFoundException("Agent client not found");
   }
 
@@ -176,10 +186,16 @@ export class AgentAuthService {
       throw invalidCredential();
     }
 
-    await this.prisma.agentCredential.updateMany({
-      where: { id: credential.id, revokedAt: null },
+    const claimed = await this.prisma.agentCredential.updateMany({
+      where: {
+        id: credential.id,
+        revokedAt: null,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+        client: { status: "active", revokedAt: null },
+      },
       data: { lastUsedAt: now },
     });
+    if (claimed.count !== 1) throw invalidCredential();
     return {
       ownerId: credential.client.ownerId,
       clientId: credential.client.id,
@@ -188,6 +204,20 @@ export class AgentAuthService {
       scopes: credential.client.scopes as AgentScope[],
     };
   }
+}
+
+async function acquireCredentialLifecycleLock(
+  transaction: Prisma.TransactionClient,
+  ownerId: string,
+  clientId: string
+): Promise<void> {
+  const lockKey = JSON.stringify([ownerId, clientId]);
+  await transaction.$queryRaw`
+    SELECT 1::integer AS "acquired"
+    FROM (
+      SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))
+    ) AS "agent_credential_lifecycle_lock"
+  `;
 }
 
 function invalidCredential(): UnauthorizedException {

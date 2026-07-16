@@ -28,6 +28,7 @@ import { NotificationSchedulerModule } from './modules/notifications/notificatio
 import { BriefsModule } from './modules/briefs/briefs.module.js';
 import { AgentAuthModule } from './modules/agent-auth/agent-auth.module.js';
 import { AgentSecurityModule } from './modules/agent-security/agent-security.module.js';
+import { McpModule } from './modules/mcp/mcp.module.js';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { AgentSecurityModule } from './modules/agent-security/agent-security.mod
     BriefsModule,
     AgentAuthModule,
     AgentSecurityModule,
+    McpModule,
   ],
   controllers: [
     HealthController,
