@@ -119,9 +119,20 @@ describe("LocationAliasService", () => {
   });
 
   it("reuses the record ID/AAD on update and returns missing for cross-owner IDs", async () => {
-    tx.locationAlias.findFirst.mockResolvedValueOnce(storedAlias());
+    const current = storedAlias();
+    const persistedUpdatedAt = new Date("2026-01-02T03:04:05.000Z");
+    tx.locationAlias.findFirst
+      .mockResolvedValueOnce(current)
+      .mockResolvedValueOnce(
+        storedAlias({
+          aliasCiphertext: ENVELOPE.ciphertext,
+          updatedAt: persistedUpdatedAt,
+        })
+      );
 
-    await service.update(OWNER, ALIAS_ID, { alias: "  Updated  " });
+    const result = await service.update(OWNER, ALIAS_ID, {
+      alias: "  Updated  ",
+    });
 
     expect(tx.locationAlias.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: ALIAS_ID, ownerId: OWNER } })
@@ -133,8 +144,15 @@ describe("LocationAliasService", () => {
       "Updated"
     );
     expect(tx.locationAlias.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: ALIAS_ID, ownerId: OWNER } })
+      expect.objectContaining({
+        where: {
+          id: ALIAS_ID,
+          ownerId: OWNER,
+          updatedAt: current.updatedAt,
+        },
+      })
     );
+    expect(result.updatedAt).toEqual(persistedUpdatedAt);
 
     tx.locationAlias.findFirst.mockResolvedValueOnce(null);
     await expect(

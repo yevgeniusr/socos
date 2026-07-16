@@ -146,22 +146,21 @@ export class LocationAliasService {
           ...(input.timeZone === undefined ? {} : { timeZone: input.timeZone }),
         };
         const updated = await transaction.locationAlias.updateMany({
-          where: { id: aliasId, ownerId },
+          where: {
+            id: aliasId,
+            ownerId,
+            updatedAt: current.updatedAt,
+          },
           data,
         });
         if (updated.count !== 1) throw aliasNotFound();
+        const persisted = (await transaction.locationAlias.findFirst({
+          where: { id: aliasId, ownerId },
+          select: aliasSelect,
+        })) as AliasRow | null;
+        if (!persisted) throw aliasNotFound();
         await this.rebuildCalendarStaysInTransaction(ownerId, transaction);
-        return presentAlias(
-          {
-            ...current,
-            ...data,
-            city: input.city?.trim() ?? current.city,
-            countryCode: input.countryCode ?? current.countryCode,
-            timeZone: input.timeZone ?? current.timeZone,
-            updatedAt: new Date(),
-          },
-          display
-        );
+        return presentAlias(persisted, display);
       });
     } catch (error) {
       if (isAliasDuplicate(error)) throw duplicateAlias();

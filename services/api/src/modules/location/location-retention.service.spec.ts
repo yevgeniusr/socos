@@ -17,7 +17,7 @@ describe("LocationRetentionService", () => {
     );
   });
 
-  it("pages active and revoked devices by ID and applies exact per-device cutoffs", async () => {
+  it("pages owner IDs, then pages active and revoked devices strictly under each owner", async () => {
     const { service, prisma, tx } = harness([
       device("device-a", "owner-a", 30, 90, "revoked"),
       device("device-b", "owner-b", 60, 180, "active"),
@@ -25,7 +25,13 @@ describe("LocationRetentionService", () => {
 
     await service.runRetention(NOW);
 
+    expect(prisma.user.findMany).toHaveBeenCalledWith({
+      orderBy: { id: "asc" },
+      take: 100,
+      select: { id: true },
+    });
     expect(prisma.locationDevice.findMany).toHaveBeenCalledWith({
+      where: { ownerId: "owner-a" },
       orderBy: { id: "asc" },
       take: 100,
       select: {
@@ -35,9 +41,10 @@ describe("LocationRetentionService", () => {
         derivedRetentionDays: true,
       },
     });
-    expect(prisma.locationDevice.findMany.mock.calls[0][0]).not.toHaveProperty(
-      "where.status"
-    );
+    for (const [query] of prisma.locationDevice.findMany.mock.calls) {
+      expect(query.where.ownerId).toEqual(expect.any(String));
+      expect(query.where).not.toHaveProperty("status");
+    }
     expect(tx.locationSample.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
@@ -92,7 +99,10 @@ describe("LocationRetentionService", () => {
   });
 
   it("never deletes open visits or rows at the exact cutoff", async () => {
-    const { service, tx } = harness([device("device", "owner", 30, 90)]);
+    const oldRaw = [{ id: "expired-raw" }];
+    const { service, tx } = harness([device("device", "owner", 30, 90)], {
+      sampleBatches: [oldRaw],
+    });
 
     await service.runRetention(NOW);
 
@@ -101,6 +111,14 @@ describe("LocationRetentionService", () => {
       lt: new Date("2026-04-17T03:15:00.000Z"),
     });
     expect(tx.derivedVisit.deleteMany).not.toHaveBeenCalled();
+    expect(tx.locationSample.deleteMany).toHaveBeenCalledWith({
+      where: {
+        ownerId: "owner",
+        deviceId: "device",
+        recordedAt: { lt: new Date("2026-06-16T03:15:00.000Z") },
+        id: { in: ["expired-raw"] },
+      },
+    });
   });
 });
 
@@ -124,8 +142,24 @@ function harness(
   }
   tx.locationSample.findMany.mockResolvedValue([]);
   const prisma = {
+    user: {
+      findMany: jest
+        .fn()
+        .mockResolvedValueOnce(
+          [...new Set(devices.map((value) => value.ownerId))].map((id) => ({
+            id,
+          }))
+        ),
+    },
     locationDevice: {
-      findMany: jest.fn().mockResolvedValueOnce(devices).mockResolvedValue([]),
+      findMany: jest.fn(({ where }: any) => {
+        if (!where?.ownerId) {
+          throw new Error("unscoped locationDevice maintenance read");
+        }
+        return Promise.resolve(
+          devices.filter((value) => value.ownerId === where.ownerId)
+        );
+      }),
     },
     $transaction: jest.fn((operation: any) => operation(tx)),
   };

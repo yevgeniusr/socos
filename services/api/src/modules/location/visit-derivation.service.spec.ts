@@ -125,6 +125,20 @@ describe("visit derivation v1", () => {
     expect(deriveVisits([...ordered].reverse())).toEqual(deriveVisits(ordered));
     expect(deriveVisits(ordered)[0]?.departedAt).toEqual(instant(20));
   });
+
+  it("processes a sustained open visit with linear resident accumulator operations", () => {
+    const metrics = { residentCentroidReads: 0, residentAdds: 0 };
+    const samples = Array.from({ length: 10_000 }, (_, index) =>
+      sample(`sample-${index.toString().padStart(5, "0")}`, 0, 0, index)
+    );
+
+    const visits = deriveVisits(samples, metrics);
+
+    expect(visits).toHaveLength(1);
+    expect(visits[0]?.sampleIds).toHaveLength(10_000);
+    expect(metrics.residentCentroidReads).toBeLessThanOrEqual(samples.length);
+    expect(metrics.residentAdds).toBeLessThanOrEqual(samples.length);
+  });
 });
 
 describe("VisitDerivationService adapter", () => {
@@ -148,6 +162,10 @@ describe("VisitDerivationService adapter", () => {
         where: { id: "sample-id", ownerId: OWNER, deviceId: DEVICE },
       })
     );
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      maxWait: 10_000,
+      timeout: 120_000,
+    });
   });
 
   it("domain-separates source MACs by owner", async () => {
@@ -210,7 +228,7 @@ describe("VisitDerivationService adapter", () => {
     );
   });
 
-  it("includes the exact departure sample when a stored visit expands the interval", async () => {
+  it("includes fifteen minutes after departure when a stored visit expands the interval", async () => {
     const tx = transactionHarness();
     tx.locationSample.findFirst
       .mockReset()
@@ -233,7 +251,7 @@ describe("VisitDerivationService adapter", () => {
         where: expect.objectContaining({
           recordedAt: {
             gte: instant(0),
-            lt: new Date(instant(30).getTime() + 1),
+            lt: instant(45),
           },
         }),
       })
@@ -259,6 +277,142 @@ describe("VisitDerivationService adapter", () => {
     expect(tx.derivedVisit.create).not.toHaveBeenCalled();
     expect(tx.derivedVisit.updateMany).not.toHaveBeenCalled();
     expect(tx.derivedVisit.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("reopens a stale t12 departure when a late t16 resident sample breaks the away run", async () => {
+    const stale = storedVisit({ departedAt: instant(12) });
+    const tx = transactionHarness();
+    tx.locationSample.findFirst
+      .mockReset()
+      .mockResolvedValueOnce({ recordedAt: instant(16), id: "late-resident" })
+      .mockResolvedValueOnce({ recordedAt: instant(12), id: "away-12" })
+      .mockResolvedValueOnce({ recordedAt: instant(0), id: "home-z" })
+      .mockResolvedValueOnce({ recordedAt: instant(0), id: "home-a" });
+    tx.derivedVisit.findMany.mockImplementation(({ where }: any) =>
+      where.OR?.some((entry: any) => entry.departedAt?.gte)
+        ? Promise.resolve([stale])
+        : Promise.resolve([])
+    );
+    tx.locationSample.findMany.mockResolvedValue([
+      sampleRow("home-a", 0),
+      sampleRow("home-z", 0),
+      sampleRow("resident-5", 5),
+      sampleRow("resident-10", 10),
+      sampleRow("away-12", 12),
+      sampleRow("late-resident", 16),
+      sampleRow("away-17", 17),
+    ]);
+    const cipher = coordinateCipher({
+      "away-12": longitudeAtDistance(251),
+      "away-17": longitudeAtDistance(251),
+    });
+    const service = new VisitDerivationService(
+      { $transaction: (operation: any) => operation(tx) } as any,
+      cipher as any,
+      { mac: jest.fn().mockReturnValue("b".repeat(64)) } as any
+    );
+
+    await service.recomputeForSample(OWNER, DEVICE, "late-resident");
+
+    expect(tx.derivedVisit.findMany.mock.calls[0][0].where.OR).toEqual([
+      { departedAt: null },
+      { departedAt: { gte: instant(12) } },
+    ]);
+    expect(tx.locationSample.findFirst.mock.calls[1][0].where.OR).toEqual([
+      { recordedAt: { lt: instant(16) } },
+      { recordedAt: instant(16), id: { lt: "late-resident" } },
+    ]);
+    expect(tx.locationSample.findFirst.mock.calls[2][0]).toEqual({
+      where: {
+        ownerId: OWNER,
+        deviceId: DEVICE,
+        recordedAt: instant(0),
+      },
+      orderBy: { id: "desc" },
+      select: { id: true, recordedAt: true },
+    });
+    expect(tx.locationSample.findFirst.mock.calls[3][0].where.OR).toEqual([
+      { recordedAt: { lt: instant(0) } },
+      { recordedAt: instant(0), id: { lt: "home-z" } },
+    ]);
+    expect(tx.locationSample.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          ownerId: OWNER,
+          deviceId: DEVICE,
+          recordedAt: { gte: instant(0), lt: instant(31) },
+        },
+      })
+    );
+    expect(tx.derivedVisit.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        ownerId: OWNER,
+        deviceId: DEVICE,
+        arrivedAt: instant(0),
+        departedAt: null,
+      }),
+    });
+    expect(tx.derivedVisit.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: [stale.id] }, ownerId: OWNER, deviceId: DEVICE },
+    });
+  });
+
+  it("keeps a persisted open visit unchanged when its resident samples expired and retained points remain nearby", async () => {
+    const open = storedVisit({ arrivedAt: instant(-120) });
+    const tx = persistedOpenHarness(open, [
+      sampleRow("near-5", 5),
+      sampleRow("near-10", 10),
+    ]);
+    const cipher = coordinateCipher();
+    const service = new VisitDerivationService(
+      { $transaction: (operation: any) => operation(tx) } as any,
+      cipher as any,
+      { mac: jest.fn() } as any
+    );
+
+    await service.recomputeForSample(OWNER, DEVICE, "near-10");
+
+    expect(tx.derivedVisit.updateMany).not.toHaveBeenCalled();
+    expect(tx.derivedVisit.create).not.toHaveBeenCalled();
+    expect(tx.derivedVisit.deleteMany).not.toHaveBeenCalled();
+    expect(cipher.encrypt).not.toHaveBeenCalled();
+  });
+
+  it("closes the same persisted open visit from retained away evidence and replays the away run", async () => {
+    const open = storedVisit({ arrivedAt: instant(-120) });
+    const tx = persistedOpenHarness(open, [
+      sampleRow("away-5", 5),
+      sampleRow("away-10", 10),
+      sampleRow("away-15", 15),
+    ]);
+    const cipher = coordinateCipher({
+      "away-5": longitudeAtDistance(251),
+      "away-10": longitudeAtDistance(251),
+      "away-15": longitudeAtDistance(251),
+    });
+    const service = new VisitDerivationService(
+      { $transaction: (operation: any) => operation(tx) } as any,
+      cipher as any,
+      { mac: jest.fn().mockReturnValue("c".repeat(64)) } as any
+    );
+
+    await service.recomputeForSample(OWNER, DEVICE, "away-15");
+
+    expect(tx.derivedVisit.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: open.id,
+        ownerId: OWNER,
+        deviceId: DEVICE,
+        sourceMac: open.sourceMac,
+        departedAt: null,
+      },
+      data: { departedAt: instant(5) },
+    });
+    expect(tx.derivedVisit.deleteMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: { in: [open.id] } }),
+      })
+    );
   });
 });
 
@@ -311,6 +465,43 @@ function storedVisit(overrides: Record<string, unknown> = {}) {
     sourceMac: "a".repeat(64),
     derivationVersion: 1,
     ...overrides,
+  };
+}
+
+function persistedOpenHarness(
+  open: ReturnType<typeof storedVisit>,
+  rows: any[]
+) {
+  const tx = transactionHarness();
+  tx.locationSample.findFirst
+    .mockReset()
+    .mockResolvedValueOnce({
+      recordedAt: rows.at(-1).recordedAt,
+      id: rows.at(-1).id,
+    })
+    .mockResolvedValueOnce({ recordedAt: rows[0].recordedAt, id: rows[0].id })
+    .mockResolvedValueOnce(null)
+    .mockResolvedValueOnce(null)
+    .mockResolvedValueOnce({ recordedAt: rows.at(-1).recordedAt });
+  tx.derivedVisit.findMany
+    .mockResolvedValueOnce([open])
+    .mockResolvedValueOnce([open]);
+  tx.locationSample.findMany.mockResolvedValue(rows);
+  return tx;
+}
+
+function coordinateCipher(longitudes: Record<string, number> = {}) {
+  return {
+    decrypt: jest.fn((_purpose: string, _owner: string, id: string) => ({
+      lat: 0,
+      lon: longitudes[id] ?? 0,
+    })),
+    encrypt: jest.fn().mockReturnValue({
+      ciphertext: Buffer.from("new"),
+      iv: Buffer.alloc(12),
+      tag: Buffer.alloc(16),
+      keyVersion: 1,
+    }),
   };
 }
 

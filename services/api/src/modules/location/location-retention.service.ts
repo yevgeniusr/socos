@@ -40,10 +40,36 @@ export class LocationRetentionService {
       visitsDeleted: 0,
       completedAt: now,
     };
-    let cursor: string | undefined;
+    let ownerCursor: string | undefined;
 
     while (true) {
+      const owners = await this.prisma.user.findMany({
+        orderBy: { id: "asc" },
+        take: DEVICE_PAGE_SIZE,
+        select: { id: true },
+        ...(ownerCursor ? { cursor: { id: ownerCursor }, skip: 1 } : {}),
+      });
+
+      for (const owner of owners) {
+        await this.processOwner(owner.id, now, counts);
+      }
+
+      if (owners.length < DEVICE_PAGE_SIZE) break;
+      ownerCursor = owners.at(-1)!.id;
+    }
+    counts.completedAt = new Date();
+    return counts;
+  }
+
+  private async processOwner(
+    ownerId: string,
+    now: Date,
+    counts: RetentionCounts
+  ): Promise<void> {
+    let deviceCursor: string | undefined;
+    while (true) {
       const devices = (await this.prisma.locationDevice.findMany({
+        where: { ownerId },
         orderBy: { id: "asc" },
         take: DEVICE_PAGE_SIZE,
         select: {
@@ -52,7 +78,7 @@ export class LocationRetentionService {
           rawRetentionDays: true,
           derivedRetentionDays: true,
         },
-        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        ...(deviceCursor ? { cursor: { id: deviceCursor }, skip: 1 } : {}),
       })) as RetentionDevice[];
 
       for (const device of devices) {
@@ -73,11 +99,9 @@ export class LocationRetentionService {
         counts.devicesProcessed += 1;
       }
 
-      if (devices.length < DEVICE_PAGE_SIZE) break;
-      cursor = devices.at(-1)!.id;
+      if (devices.length < DEVICE_PAGE_SIZE) return;
+      deviceCursor = devices.at(-1)!.id;
     }
-    counts.completedAt = new Date();
-    return counts;
   }
 
   private async deleteSampleBatches(

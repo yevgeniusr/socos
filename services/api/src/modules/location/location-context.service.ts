@@ -76,7 +76,12 @@ export class LocationContextService {
         fallback()
       );
     }
-    return this.resolveCurrent(ownerId, now);
+    return (
+      (await this.currentSample(ownerId, now)) ??
+      (await this.currentVisit(ownerId, now)) ??
+      (await this.stayAt(ownerId, eventStart)) ??
+      fallback()
+    );
   }
 
   private async currentSample(
@@ -121,7 +126,7 @@ export class LocationContextService {
       countryCode: null,
       timeZone: null,
       distanceCapability: true,
-      lastSeenAt: row.device.lastSeenAt ?? row.recordedAt,
+      lastSeenAt: row.recordedAt,
       origin,
     };
   }

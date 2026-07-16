@@ -282,6 +282,25 @@ describe("LocationIngestService", () => {
     ).resolves.toEqual([]);
     expect(derivation.recomputeForSample).not.toHaveBeenCalled();
   });
+
+  it("lets a later new sample recover after a prior non-fatal derivation failure", async () => {
+    derivation.recomputeForSample
+      .mockRejectedValueOnce(new Error("synthetic first failure"))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(
+      service.ingest(DEVICE, validLocation({ tst: 1 }), RECEIVED_AT)
+    ).resolves.toEqual([]);
+    await expect(
+      service.ingest(DEVICE, validLocation({ tst: 2 }), RECEIVED_AT)
+    ).resolves.toEqual([]);
+
+    expect(derivation.recomputeForSample).toHaveBeenCalledTimes(2);
+    expect(derivation.recomputeForSample.mock.calls[1].slice(0, 2)).toEqual([
+      DEVICE.ownerId,
+      DEVICE.id,
+    ]);
+  });
 });
 
 function validLocation(overrides: Record<string, unknown> = {}) {

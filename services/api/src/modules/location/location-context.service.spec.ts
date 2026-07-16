@@ -25,7 +25,9 @@ describe("LocationContextService", () => {
   });
 
   it("uses a sample at exactly 30 minutes, ignores future samples, and exposes no coordinates publicly", async () => {
-    prisma.locationSample.findFirst.mockResolvedValue(sampleAt(-30));
+    prisma.locationSample.findFirst.mockResolvedValue(
+      sampleAt(-30, new Date("2026-07-16T12:05:00.000Z"))
+    );
 
     const internal = await service.resolveCurrent(OWNER, NOW);
     const output = await service.current(OWNER, NOW);
@@ -148,6 +150,35 @@ describe("LocationContextService", () => {
     ).resolves.toMatchObject({ source: "calendar", city: "Event City" });
   });
 
+  it("uses the event-start stay at exactly six hours when no device context exists", async () => {
+    const eventStart = new Date("2026-07-16T18:00:00.000Z");
+    prisma.cityStay.findFirst.mockImplementation(({ where }: any) =>
+      where.startsAt.lte.getTime() === eventStart.getTime()
+        ? Promise.resolve({
+            startsAt: eventStart,
+            endsAt: new Date("2026-07-16T19:00:00.000Z"),
+            city: "Future City",
+            countryCode: "GB",
+            timeZone: "Europe/London",
+            sourceId: "future-event",
+            confidence: 1,
+          })
+        : Promise.resolve(null)
+    );
+
+    await expect(
+      service.resolveForEvent(OWNER, eventStart, NOW)
+    ).resolves.toMatchObject({
+      source: "calendar",
+      city: "Future City",
+    });
+    expect(prisma.cityStay.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ startsAt: { lte: eventStart } }),
+      })
+    );
+  });
+
   it("does not select a stay at its exact end boundary", async () => {
     await service.resolveForEvent(
       OWNER,
@@ -165,7 +196,7 @@ describe("LocationContextService", () => {
   });
 });
 
-function sampleAt(minutes: number) {
+function sampleAt(minutes: number, deviceLastSeenAt?: Date) {
   const recordedAt = new Date(NOW.getTime() + minutes * 60_000);
   return {
     id: "sample",
@@ -174,7 +205,7 @@ function sampleAt(minutes: number) {
     coordinatesIv: ENVELOPE.iv,
     coordinatesTag: ENVELOPE.tag,
     coordinatesKeyVersion: ENVELOPE.keyVersion,
-    device: { lastSeenAt: recordedAt },
+    device: { lastSeenAt: deviceLastSeenAt ?? recordedAt },
   };
 }
 

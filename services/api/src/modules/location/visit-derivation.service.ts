@@ -33,6 +33,11 @@ export type DerivedVisitCandidate = {
   sampleIds: string[];
 };
 
+export type DerivationMetrics = {
+  residentCentroidReads: number;
+  residentAdds: number;
+};
+
 type StoredSample = {
   id: string;
   recordedAt: Date;
@@ -70,175 +75,276 @@ export class VisitDerivationService {
     deviceId: string,
     sampleId: string
   ): Promise<void> {
-    await this.prisma.$transaction(async (transaction) => {
-      await acquireDeviceLock(transaction, ownerId, deviceId);
-      const inserted = await transaction.locationSample.findFirst({
-        where: { id: sampleId, ownerId, deviceId },
-        select: { id: true, recordedAt: true },
-      });
-      if (!inserted) return;
+    await this.prisma.$transaction(
+      async (transaction) => {
+        await acquireDeviceLock(transaction, ownerId, deviceId);
+        const inserted = await transaction.locationSample.findFirst({
+          where: { id: sampleId, ownerId, deviceId },
+          select: { id: true, recordedAt: true },
+        });
+        if (!inserted) return;
 
-      const predecessor = await transaction.locationSample.findFirst({
-        where: {
-          ownerId,
-          deviceId,
-          OR: [
-            { recordedAt: { lt: inserted.recordedAt } },
-            { recordedAt: inserted.recordedAt, id: { lt: inserted.id } },
-          ],
-        },
-        orderBy: [{ recordedAt: "desc" }, { id: "desc" }],
-        select: { id: true, recordedAt: true },
-      });
+        const predecessor = await transaction.locationSample.findFirst({
+          where: {
+            ownerId,
+            deviceId,
+            OR: [
+              { recordedAt: { lt: inserted.recordedAt } },
+              { recordedAt: inserted.recordedAt, id: { lt: inserted.id } },
+            ],
+          },
+          orderBy: [{ recordedAt: "desc" }, { id: "desc" }],
+          select: { id: true, recordedAt: true },
+        });
 
-      let startsAt = predecessor?.recordedAt ?? inserted.recordedAt;
-      let endsAt = new Date(
-        inserted.recordedAt.getTime() + FOLLOWING_WINDOW_MS
-      );
-      let intersecting: StoredVisit[] = [];
-
-      while (true) {
-        const visits = (await transaction.derivedVisit.findMany({
-          where: visitOverlapWhere(ownerId, deviceId, startsAt, endsAt),
-          orderBy: [{ arrivedAt: "asc" }, { id: "asc" }],
-          select: storedVisitSelect,
-        })) as StoredVisit[];
-        intersecting = mergeVisits(intersecting, visits);
-        const earliestVisit = visits[0];
-        const openVisit = visits.find((visit) => visit.departedAt === null);
-        let nextStart = startsAt;
-        let nextEnd = endsAt;
-        let expandedStartForVisit = false;
-
-        if (earliestVisit && earliestVisit.arrivedAt < nextStart) {
-          nextStart = earliestVisit.arrivedAt;
-          expandedStartForVisit = true;
-        }
-        const closedEnd = Math.max(
-          0,
-          ...visits.map((visit) =>
-            visit.departedAt ? visit.departedAt.getTime() + 1 : 0
-          )
+        let startsAt = predecessor?.recordedAt ?? inserted.recordedAt;
+        let endsAt = new Date(
+          inserted.recordedAt.getTime() + FOLLOWING_WINDOW_MS
         );
-        if (closedEnd > nextEnd.getTime()) {
-          nextEnd = new Date(closedEnd);
+        let intersecting: StoredVisit[] = [];
+
+        while (true) {
+          const visits = (await transaction.derivedVisit.findMany({
+            where: visitOverlapWhere(ownerId, deviceId, startsAt, endsAt),
+            orderBy: [{ arrivedAt: "asc" }, { id: "asc" }],
+            select: storedVisitSelect,
+          })) as StoredVisit[];
+          intersecting = mergeVisits(intersecting, visits);
+          const earliestVisit = visits[0];
+          const openVisit = visits.find((visit) => visit.departedAt === null);
+          let nextStart = startsAt;
+          let nextEnd = endsAt;
+          let expandedStartForVisit = false;
+
+          if (earliestVisit && earliestVisit.arrivedAt < nextStart) {
+            nextStart = earliestVisit.arrivedAt;
+            expandedStartForVisit = true;
+          }
+          const closedEnd = Math.max(
+            0,
+            ...visits.map((visit) =>
+              visit.departedAt
+                ? visit.departedAt.getTime() + FOLLOWING_WINDOW_MS
+                : 0
+            )
+          );
+          if (closedEnd > nextEnd.getTime()) {
+            nextEnd = new Date(closedEnd);
+          }
+
+          if (expandedStartForVisit) {
+            const boundary = await transaction.locationSample.findFirst({
+              where: {
+                ownerId,
+                deviceId,
+                recordedAt: nextStart,
+              },
+              orderBy: { id: "desc" },
+              select: { id: true, recordedAt: true },
+            });
+            if (boundary) {
+              const before = await transaction.locationSample.findFirst({
+                where: {
+                  ownerId,
+                  deviceId,
+                  OR: [
+                    { recordedAt: { lt: boundary.recordedAt } },
+                    {
+                      recordedAt: boundary.recordedAt,
+                      id: { lt: boundary.id },
+                    },
+                  ],
+                },
+                orderBy: [{ recordedAt: "desc" }, { id: "desc" }],
+                select: { id: true, recordedAt: true },
+              });
+              if (before?.recordedAt) nextStart = before.recordedAt;
+            } else {
+              const before = await transaction.locationSample.findFirst({
+                where: {
+                  ownerId,
+                  deviceId,
+                  recordedAt: { lt: nextStart },
+                },
+                orderBy: [{ recordedAt: "desc" }, { id: "desc" }],
+                select: { id: true, recordedAt: true },
+              });
+              if (before?.recordedAt) nextStart = before.recordedAt;
+            }
+          }
+
+          if (openVisit) {
+            const latest = await transaction.locationSample.findFirst({
+              where: { ownerId, deviceId },
+              orderBy: [{ recordedAt: "desc" }, { id: "desc" }],
+              select: { recordedAt: true },
+            });
+            if (latest && latest.recordedAt >= nextEnd) {
+              nextEnd = new Date(latest.recordedAt.getTime() + 1);
+            }
+          }
+
+          if (
+            nextStart.getTime() === startsAt.getTime() &&
+            nextEnd.getTime() === endsAt.getTime()
+          ) {
+            break;
+          }
+          startsAt = nextStart;
+          endsAt = nextEnd;
         }
 
-        if (expandedStartForVisit) {
-          const before = await transaction.locationSample.findFirst({
-            where: {
-              ownerId,
-              deviceId,
-              recordedAt: { lt: nextStart },
-            },
-            orderBy: [{ recordedAt: "desc" }, { id: "desc" }],
-            select: { recordedAt: true },
-          });
-          if (before?.recordedAt) nextStart = before.recordedAt;
+        const storedSamples = (await transaction.locationSample.findMany({
+          where: {
+            ownerId,
+            deviceId,
+            recordedAt: { gte: startsAt, lt: endsAt },
+          },
+          orderBy: [{ recordedAt: "asc" }, { id: "asc" }],
+          select: storedSampleSelect,
+        })) as StoredSample[];
+        const samples = storedSamples.map((sample) => {
+          const coordinates = this.cipher.decrypt<{ lat: number; lon: number }>(
+            "location-sample-coordinates",
+            ownerId,
+            sample.id,
+            envelope(sample, "coordinates")
+          );
+          return {
+            id: sample.id,
+            recordedAt: sample.recordedAt,
+            accuracyM: sample.accuracyM,
+            lat: coordinates.lat,
+            lon: coordinates.lon,
+          };
+        });
+
+        const keepIds = new Set<string>();
+        const persistedOpen = intersecting.find(
+          (visit) =>
+            visit.departedAt === null &&
+            (samples.length === 0 || visit.arrivedAt < samples[0].recordedAt)
+        );
+        let candidates: DerivedVisitCandidate[];
+        if (persistedOpen) {
+          const baseline = await this.applyPersistedOpenBaseline(
+            transaction,
+            ownerId,
+            deviceId,
+            persistedOpen,
+            samples
+          );
+          keepIds.add(persistedOpen.id);
+          candidates = baseline;
+        } else {
+          candidates = deriveVisits(samples);
         }
 
-        if (openVisit) {
-          const latest = await transaction.locationSample.findFirst({
-            where: { ownerId, deviceId },
-            orderBy: [{ recordedAt: "desc" }, { id: "desc" }],
-            select: { recordedAt: true },
-          });
-          if (latest && latest.recordedAt >= nextEnd) {
-            nextEnd = new Date(latest.recordedAt.getTime() + 1);
+        for (const candidate of candidates) {
+          const canonical = sourceIdentity(deviceId, candidate.sampleIds);
+          const sourceMac = this.index.mac(SOURCE_PURPOSE, ownerId, canonical);
+          const current = (await transaction.derivedVisit.findFirst({
+            where: { ownerId, deviceId, sourceMac },
+            select: storedVisitSelect,
+          })) as StoredVisit | null;
+          const id = current?.id ?? randomUUID();
+
+          if (current && this.isUnchanged(ownerId, current, candidate)) {
+            keepIds.add(current.id);
+            continue;
+          }
+
+          const encrypted = this.cipher.encrypt(
+            CENTROID_PURPOSE,
+            ownerId,
+            id,
+            candidate.centroid
+          );
+          const data = {
+            arrivedAt: candidate.arrivedAt,
+            departedAt: candidate.departedAt,
+            centroidCiphertext: encrypted.ciphertext as Uint8Array<ArrayBuffer>,
+            centroidIv: encrypted.iv as Uint8Array<ArrayBuffer>,
+            centroidTag: encrypted.tag as Uint8Array<ArrayBuffer>,
+            centroidKeyVersion: encrypted.keyVersion,
+            radiusM: candidate.radiusM,
+            confidence: candidate.confidence,
+            sourceMac,
+            derivationVersion: candidate.derivationVersion,
+          };
+          if (current) {
+            const updated = await transaction.derivedVisit.updateMany({
+              where: { id, ownerId, deviceId, sourceMac },
+              data,
+            });
+            if (updated.count === 1) keepIds.add(id);
+          } else {
+            await transaction.derivedVisit.create({
+              data: { id, ownerId, deviceId, ...data },
+            });
+            keepIds.add(id);
           }
         }
 
-        if (
-          nextStart.getTime() === startsAt.getTime() &&
-          nextEnd.getTime() === endsAt.getTime()
-        ) {
-          break;
-        }
-        startsAt = nextStart;
-        endsAt = nextEnd;
-      }
-
-      const storedSamples = (await transaction.locationSample.findMany({
-        where: {
-          ownerId,
-          deviceId,
-          recordedAt: { gte: startsAt, lt: endsAt },
-        },
-        orderBy: [{ recordedAt: "asc" }, { id: "asc" }],
-        select: storedSampleSelect,
-      })) as StoredSample[];
-      const samples = storedSamples.map((sample) => {
-        const coordinates = this.cipher.decrypt<{ lat: number; lon: number }>(
-          "location-sample-coordinates",
-          ownerId,
-          sample.id,
-          envelope(sample, "coordinates")
-        );
-        return {
-          id: sample.id,
-          recordedAt: sample.recordedAt,
-          accuracyM: sample.accuracyM,
-          lat: coordinates.lat,
-          lon: coordinates.lon,
-        };
-      });
-
-      const keepIds = new Set<string>();
-      for (const candidate of deriveVisits(samples)) {
-        const canonical = sourceIdentity(deviceId, candidate.sampleIds);
-        const sourceMac = this.index.mac(SOURCE_PURPOSE, ownerId, canonical);
-        const current = (await transaction.derivedVisit.findFirst({
-          where: { ownerId, deviceId, sourceMac },
-          select: storedVisitSelect,
-        })) as StoredVisit | null;
-        const id = current?.id ?? randomUUID();
-
-        if (current && this.isUnchanged(ownerId, current, candidate)) {
-          keepIds.add(current.id);
-          continue;
-        }
-
-        const encrypted = this.cipher.encrypt(
-          CENTROID_PURPOSE,
-          ownerId,
-          id,
-          candidate.centroid
-        );
-        const data = {
-          arrivedAt: candidate.arrivedAt,
-          departedAt: candidate.departedAt,
-          centroidCiphertext: encrypted.ciphertext as Uint8Array<ArrayBuffer>,
-          centroidIv: encrypted.iv as Uint8Array<ArrayBuffer>,
-          centroidTag: encrypted.tag as Uint8Array<ArrayBuffer>,
-          centroidKeyVersion: encrypted.keyVersion,
-          radiusM: candidate.radiusM,
-          confidence: candidate.confidence,
-          sourceMac,
-          derivationVersion: candidate.derivationVersion,
-        };
-        if (current) {
-          const updated = await transaction.derivedVisit.updateMany({
-            where: { id, ownerId, deviceId, sourceMac },
-            data,
+        const obsoleteIds = intersecting
+          .map((visit) => visit.id)
+          .filter((id) => !keepIds.has(id));
+        if (obsoleteIds.length > 0) {
+          await transaction.derivedVisit.deleteMany({
+            where: { id: { in: obsoleteIds }, ownerId, deviceId },
           });
-          if (updated.count === 1) keepIds.add(id);
-        } else {
-          await transaction.derivedVisit.create({
-            data: { id, ownerId, deviceId, ...data },
-          });
-          keepIds.add(id);
         }
-      }
+      },
+      { maxWait: 10_000, timeout: 120_000 }
+    );
+  }
 
-      const obsoleteIds = intersecting
-        .map((visit) => visit.id)
-        .filter((id) => !keepIds.has(id));
-      if (obsoleteIds.length > 0) {
-        await transaction.derivedVisit.deleteMany({
-          where: { id: { in: obsoleteIds }, ownerId, deviceId },
+  private async applyPersistedOpenBaseline(
+    transaction: Prisma.TransactionClient,
+    ownerId: string,
+    deviceId: string,
+    visit: StoredVisit,
+    samples: DerivationSample[]
+  ): Promise<DerivedVisitCandidate[]> {
+    const centroid = this.cipher.decrypt<{ lat: number; lon: number }>(
+      CENTROID_PURPOSE,
+      ownerId,
+      visit.id,
+      envelope(visit, "centroid")
+    );
+    const eligible = samples.filter(
+      (sample) => sample.accuracyM === null || sample.accuracyM <= 200
+    );
+    let away: DerivationSample[] = [];
+    for (const sample of eligible) {
+      if (haversineDistanceM(centroid, sample) <= AWAY_RADIUS_M) {
+        away = [];
+        continue;
+      }
+      away.push(sample);
+      if (
+        sample.recordedAt.getTime() - away[0].recordedAt.getTime() >=
+        AWAY_DURATION_MS
+      ) {
+        const departedAt = away[0].recordedAt;
+        const updated = await transaction.derivedVisit.updateMany({
+          where: {
+            id: visit.id,
+            ownerId,
+            deviceId,
+            sourceMac: visit.sourceMac,
+            departedAt: null,
+          },
+          data: { departedAt },
         });
+        if (updated.count !== 1) {
+          throw new Error("Visit derivation state conflict");
+        }
+        const replayAt = eligible.indexOf(away[0]);
+        return deriveVisits(eligible.slice(replayAt));
       }
-    });
+    }
+    return [];
   }
 
   private isUnchanged(
@@ -266,7 +372,8 @@ export class VisitDerivationService {
 }
 
 export function deriveVisits(
-  input: readonly DerivationSample[]
+  input: readonly DerivationSample[],
+  metrics?: DerivationMetrics
 ): DerivedVisitCandidate[] {
   const samples = [...input]
     .filter((sample) => sample.accuracyM === null || sample.accuracyM <= 200)
@@ -274,6 +381,7 @@ export function deriveVisits(
   const visits: DerivedVisitCandidate[] = [];
   let candidate: DerivationSample[] = [];
   let resident: DerivationSample[] | null = null;
+  let residentAccumulator: WeightedAccumulator | null = null;
   let away: DerivationSample[] = [];
 
   for (const sample of samples) {
@@ -281,15 +389,19 @@ export function deriveVisits(
       candidate = stableSuffix([...candidate, sample]);
       if (canOpen(candidate)) {
         resident = candidate;
+        residentAccumulator = accumulatorFor(resident, metrics);
         candidate = [];
       }
       continue;
     }
 
-    const centroid = weightedCentroid(resident);
+    if (metrics) metrics.residentCentroidReads += 1;
+    const centroid = centroidFromAccumulator(residentAccumulator!);
     if (haversineDistanceM(centroid, sample) <= AWAY_RADIUS_M) {
       away = [];
       resident.push(sample);
+      addToAccumulator(residentAccumulator!, sample);
+      if (metrics) metrics.residentAdds += 1;
       continue;
     }
 
@@ -301,6 +413,7 @@ export function deriveVisits(
       visits.push(toVisit(resident, away[0].recordedAt));
       candidate = stableSuffix(away);
       resident = canOpen(candidate) ? candidate : null;
+      residentAccumulator = resident ? accumulatorFor(resident, metrics) : null;
       if (resident) candidate = [];
       away = [];
     }
@@ -310,28 +423,59 @@ export function deriveVisits(
   return visits;
 }
 
+type WeightedAccumulator = {
+  referenceLon: number;
+  totalWeight: number;
+  weightedLat: number;
+  weightedLon: number;
+};
+
+function accumulatorFor(
+  points: readonly { lat: number; lon: number; accuracyM: number | null }[],
+  metrics?: DerivationMetrics
+): WeightedAccumulator {
+  if (points.length === 0) throw new Error("Cannot derive an empty centroid");
+  const accumulator: WeightedAccumulator = {
+    referenceLon: points[0].lon,
+    totalWeight: 0,
+    weightedLat: 0,
+    weightedLon: 0,
+  };
+  for (const point of points) addToAccumulator(accumulator, point);
+  if (metrics) metrics.residentAdds += points.length;
+  return accumulator;
+}
+
+function addToAccumulator(
+  accumulator: WeightedAccumulator,
+  point: { lat: number; lon: number; accuracyM: number | null }
+): void {
+  const weight =
+    1 /
+    (point.accuracyM === null || point.accuracyM === 0 ? 10 : point.accuracyM);
+  let unwrapped = point.lon;
+  while (unwrapped - accumulator.referenceLon >= 180) unwrapped -= 360;
+  while (unwrapped - accumulator.referenceLon < -180) unwrapped += 360;
+  accumulator.totalWeight += weight;
+  accumulator.weightedLat += point.lat * weight;
+  accumulator.weightedLon += unwrapped * weight;
+}
+
+function centroidFromAccumulator(accumulator: WeightedAccumulator): {
+  lat: number;
+  lon: number;
+} {
+  return {
+    lat: accumulator.weightedLat / accumulator.totalWeight,
+    lon: normalizeLongitude(accumulator.weightedLon / accumulator.totalWeight),
+  };
+}
+
 export function weightedCentroid(
   points: readonly { lat: number; lon: number; accuracyM: number | null }[]
 ): { lat: number; lon: number } {
   if (points.length === 0) throw new Error("Cannot derive an empty centroid");
-  const reference = points[0].lon;
-  let totalWeight = 0;
-  let lat = 0;
-  let lon = 0;
-  for (const point of points) {
-    const weight =
-      1 /
-      (point.accuracyM === null || point.accuracyM === 0
-        ? 10
-        : point.accuracyM);
-    let unwrapped = point.lon;
-    while (unwrapped - reference >= 180) unwrapped -= 360;
-    while (unwrapped - reference < -180) unwrapped += 360;
-    totalWeight += weight;
-    lat += point.lat * weight;
-    lon += unwrapped * weight;
-  }
-  return { lat: lat / totalWeight, lon: normalizeLongitude(lon / totalWeight) };
+  return centroidFromAccumulator(accumulatorFor(points));
 }
 
 export function haversineDistanceM(
@@ -440,7 +584,7 @@ function visitOverlapWhere(
     ownerId,
     deviceId,
     arrivedAt: { lt: endsAt },
-    OR: [{ departedAt: null }, { departedAt: { gt: startsAt } }],
+    OR: [{ departedAt: null }, { departedAt: { gte: startsAt } }],
   };
 }
 
