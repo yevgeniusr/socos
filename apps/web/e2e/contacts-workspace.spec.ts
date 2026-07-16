@@ -224,6 +224,43 @@ async function installSyntheticApi(page: Page): Promise<SyntheticApiState> {
 }
 
 test.describe("personal Contacts workspace", () => {
+  test("logs a message without implying it was sent", async ({ page }) => {
+    await installSyntheticApi(page);
+
+    await page.goto("/dashboard/contacts");
+    await page
+      .getByRole("searchbox", { name: "Search contacts" })
+      .fill("mentor");
+
+    const logCall = page.getByRole("button", {
+      name: "Log call with Synthetic Mentor",
+      exact: true,
+    });
+    const logMessage = page.getByRole("button", {
+      name: "Log message with Synthetic Mentor",
+      exact: true,
+    });
+    await expect(logCall).toBeVisible();
+    await expect(logMessage).toBeVisible();
+    await logMessage.click();
+
+    const profile = page.getByRole("dialog", { name: "Contact profile" });
+    await expect(
+      profile.getByRole("button", { name: "Log call" })
+    ).toBeVisible();
+    await expect(
+      profile.getByRole("button", { name: "Log message" })
+    ).toBeVisible();
+    const interactionForm = profile
+      .getByRole("heading", { name: "Log interaction" })
+      .locator("..")
+      .locator("..");
+    await expect(interactionForm).toBeVisible();
+    await expect(interactionForm.getByText(/\b(sent|delivered)\b/i)).toHaveCount(
+      0
+    );
+  });
+
   test("reaches all contacts and performs profile actions with exact API contracts", async ({
     page,
   }) => {
@@ -355,7 +392,7 @@ test.describe("personal Contacts workspace", () => {
       ],
     });
 
-    await profile.getByRole("button", { name: "Call" }).click();
+    await profile.getByRole("button", { name: "Log call" }).click();
     const interactionForm = profile
       .getByRole("heading", {
         name: "Log interaction",

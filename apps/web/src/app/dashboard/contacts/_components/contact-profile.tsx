@@ -334,7 +334,7 @@ export default function ContactProfile({
                   >
                     call
                   </span>
-                  Call
+                  Log call
                 </button>
                 <button
                   type="button"
@@ -350,7 +350,7 @@ export default function ContactProfile({
                   >
                     chat
                   </span>
-                  Message
+                  Log message
                 </button>
                 <button
                   type="button"
