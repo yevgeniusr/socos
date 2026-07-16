@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import type { Prisma } from "@prisma/client";
 import { PersonalDataCipherService } from "../personal-data/personal-data-cipher.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 
@@ -66,29 +67,32 @@ export class LocationContextService {
   async resolveForEvent(
     ownerId: string,
     eventStart: Date,
-    now = new Date()
+    now = new Date(),
+    transaction?: Prisma.TransactionClient
   ): Promise<InternalLocationContext> {
+    const db = transaction ?? this.prisma;
     if (eventStart.getTime() - now.getTime() > PLANNED_FIRST_MS) {
       return (
-        (await this.stayAt(ownerId, eventStart)) ??
-        (await this.currentSample(ownerId, now)) ??
-        (await this.currentVisit(ownerId, now)) ??
+        (await this.stayAt(ownerId, eventStart, db)) ??
+        (await this.currentSample(ownerId, now, db)) ??
+        (await this.currentVisit(ownerId, now, db)) ??
         fallback()
       );
     }
     return (
-      (await this.currentSample(ownerId, now)) ??
-      (await this.currentVisit(ownerId, now)) ??
-      (await this.stayAt(ownerId, eventStart)) ??
+      (await this.currentSample(ownerId, now, db)) ??
+      (await this.currentVisit(ownerId, now, db)) ??
+      (await this.stayAt(ownerId, eventStart, db)) ??
       fallback()
     );
   }
 
   private async currentSample(
     ownerId: string,
-    now: Date
+    now: Date,
+    db: PrismaService | Prisma.TransactionClient = this.prisma
   ): Promise<InternalLocationContext | null> {
-    const row = await this.prisma.locationSample.findFirst({
+    const row = await db.locationSample.findFirst({
       where: {
         ownerId,
         recordedAt: {
@@ -133,9 +137,10 @@ export class LocationContextService {
 
   private async currentVisit(
     ownerId: string,
-    now: Date
+    now: Date,
+    db: PrismaService | Prisma.TransactionClient = this.prisma
   ): Promise<InternalLocationContext | null> {
-    const row = await this.prisma.derivedVisit.findFirst({
+    const row = await db.derivedVisit.findFirst({
       where: { ownerId, departedAt: null, arrivedAt: { lte: now } },
       orderBy: [{ arrivedAt: "desc" }, { id: "desc" }],
       select: {
@@ -174,9 +179,10 @@ export class LocationContextService {
 
   private async stayAt(
     ownerId: string,
-    at: Date
+    at: Date,
+    db: PrismaService | Prisma.TransactionClient = this.prisma
   ): Promise<InternalLocationContext | null> {
-    const row = await this.prisma.cityStay.findFirst({
+    const row = await db.cityStay.findFirst({
       where: {
         ownerId,
         startsAt: { lte: at },
