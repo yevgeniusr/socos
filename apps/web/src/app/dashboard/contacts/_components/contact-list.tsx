@@ -174,7 +174,7 @@ export default function ContactList({
                 <button
                   key={action}
                   type="button"
-                  title={`${action === "reminder" ? action : `Log ${action}`} ${name}`}
+                  title={`${action === "reminder" ? action : `Log ${action} with`} ${name}`}
                   aria-label={`${action === "reminder" ? "Schedule a reminder for" : `Log ${action} with`} ${name}`}
                   onClick={(event) =>
                     onQuickAction(contact.id, action, event.currentTarget)

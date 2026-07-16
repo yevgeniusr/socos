@@ -225,7 +225,7 @@ async function installSyntheticApi(page: Page): Promise<SyntheticApiState> {
 
 test.describe("personal Contacts workspace", () => {
   test("logs a message without implying it was sent", async ({ page }) => {
-    await installSyntheticApi(page);
+    const api = await installSyntheticApi(page);
 
     await page.goto("/dashboard/contacts");
     await page
@@ -242,6 +242,14 @@ test.describe("personal Contacts workspace", () => {
     });
     await expect(logCall).toBeVisible();
     await expect(logMessage).toBeVisible();
+    await expect(logCall).toHaveAttribute(
+      "title",
+      "Log call with Synthetic Mentor"
+    );
+    await expect(logMessage).toHaveAttribute(
+      "title",
+      "Log message with Synthetic Mentor"
+    );
     await logMessage.click();
 
     const profile = page.getByRole("dialog", { name: "Contact profile" });
@@ -256,8 +264,36 @@ test.describe("personal Contacts workspace", () => {
       .locator("..")
       .locator("..");
     await expect(interactionForm).toBeVisible();
-    await expect(interactionForm.getByText(/\b(sent|delivered)\b/i)).toHaveCount(
-      0
+    await expect(
+      interactionForm.getByRole("combobox", { name: "Type" })
+    ).toHaveValue("message");
+    expect(api.interactionPayloads).toEqual([]);
+
+    const semanticCopy = await page
+      .locator(
+        [
+          'button[aria-label^="Log call"]',
+          'button[aria-label^="Log message"]',
+          'button[title^="Log call"]',
+          'button[title^="Log message"]',
+          'section[role="dialog"][aria-label="Contact profile"] button',
+          'section[role="dialog"][aria-label="Contact profile"] input',
+          'section[role="dialog"][aria-label="Contact profile"] select',
+          'section[role="dialog"][aria-label="Contact profile"] textarea',
+          'section[role="dialog"][aria-label="Contact profile"] option',
+        ].join(", ")
+      )
+      .evaluateAll((elements) =>
+        elements.flatMap((element) => [
+          element.getAttribute("aria-label"),
+          element.getAttribute("title"),
+          element.getAttribute("placeholder"),
+          "value" in element ? String(element.value) : null,
+          element.textContent,
+        ])
+      );
+    expect(semanticCopy.filter(Boolean).join("\n")).not.toMatch(
+      /\b(sent|delivered)\b/i
     );
   });
 
