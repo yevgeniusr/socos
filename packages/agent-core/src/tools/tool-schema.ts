@@ -97,6 +97,60 @@ export interface AssessRelationshipHealthOutput {
   assessment: RelationshipAssessment;
 }
 
+// ========== Hermes Daily Social Brief REST v1 ==========
+
+export type BriefItemState = 'pending' | 'accepted' | 'snoozed' | 'dismissed';
+
+export interface DailyBriefV1 {
+  schemaVersion: '1.0';
+  briefId: string;
+  localDate: string;
+  timeZone: string;
+  generatedAt: string;
+  people: Array<{
+    itemId: string;
+    rank: number;
+    contact: { id: string; name: string };
+    health: {
+      score: number;
+      band: 'excellent' | 'healthy' | 'needs-attention' | 'at-risk';
+    };
+    lastInteractionAt: string | null;
+    reason: string;
+    evidence: Array<{ code: string; value: string | number | null }>;
+    state: BriefItemState;
+  }>;
+  dates: Array<{
+    itemId: string;
+    rank: number;
+    contact: { id: string; name: string };
+    type: 'birthday' | 'anniversary' | 'celebration' | 'reminder';
+    title: string;
+    date: string;
+    daysAway: number;
+    reason: string;
+    state: BriefItemState;
+  }>;
+  quests: Array<{
+    questId: string;
+    itemId: string;
+    title: string;
+    completionType: 'interaction' | 'reminder';
+    xpReward: number;
+    status: 'pending' | 'completed';
+  }>;
+  allowedActions: ['accept', 'snooze', 'dismiss', 'complete'];
+}
+
+export type BriefItemFeedbackInput =
+  | { action: 'accept' }
+  | { action: 'snooze'; snoozedUntil: string }
+  | { action: 'dismiss'; reason?: string };
+
+export type QuestCompletionInput =
+  | { interactionId: string; reminderId?: never }
+  | { reminderId: string; interactionId?: never };
+
 // ========== Union type for all tools ==========
 
 export type AgentToolName =

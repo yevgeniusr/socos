@@ -433,12 +433,20 @@ git commit -m "fix: share relationship health and exclude demo data"
 Using synthetic contacts, assert generation:
 
 - selects exactly the top three eligible people when at least three exist, or all when only one or two exist;
+- ranks across bounded contact cursor pages so a highest-urgency contact after the first 100 rows is still selected;
 - orders by urgency descending, then importance descending, then contact ID for deterministic ties;
 - includes health, last interaction timestamp, reason code, human-readable reason, and structured evidence;
 - adds at most five date items inside the 14-day inclusive horizon;
 - excludes demos, contacts snoozed beyond `now`, and contacts dismissed in the preceding 30 days;
+- paginates active feedback so repeated rows for one contact cannot hide another contact's cooldown;
 - allows a previously dismissed contact after the 30-day cooling period;
-- creates two to four quests, preferring one quest per selected person and then pending-reminder quests;
+- creates two to four quests when at least two distinct verifiable person/reminder targets exist,
+  preferring one quest per selected person and then pending-reminder quests; when only zero or one
+  distinct target exists, emits every available target without duplication rather than fabricating a
+  second rewardable action;
+- treats a target with an existing pending quest for the owner as unavailable, loading pending targets
+  across bounded cursor pages and rechecking them in the serializable write transaction so the same
+  action cannot stack pending quests across daily batches;
 - assigns only server-owned rewards: `15` XP for `interaction` quests and `20` XP for `reminder` quests.
 
 - [ ] **Step 2: Write failing atomicity and retry tests**
@@ -448,7 +456,9 @@ Mock an interactive Prisma transaction and prove:
 - batch, items, and quests are created inside one transaction;
 - a mid-generation insert failure rolls back the batch, items, and quests together;
 - a PostgreSQL `P2002` unique conflict waits for the winning transaction, then fetches and returns its existing `ready` batch;
+- a PostgreSQL `P2034` serialization loser retries the complete load/rank/plan flow within a bounded budget so it observes the winner's pending quest targets;
 - no caller can observe a `generating` batch because creation and the final `ready` update share one transaction;
+- if the transaction-time pending-target recheck makes the first quest candidates unavailable, later distinct candidates backfill the two-to-four quest budget;
 - a second call for the same owner/local date returns byte-equivalent presenter data and creates nothing.
 
 - [ ] **Step 3: Implement candidate loading and deterministic reasons**
@@ -730,7 +740,7 @@ git commit -m "feat: schedule local-time daily briefs"
 
 Seed only synthetic users, vaults, contacts, interactions, reminders, and celebrations. Run real Prisma operations to prove:
 
-1. Twenty concurrent `generateForOwner` calls create one batch, at most eight items, and two to four quests.
+1. Twenty concurrent `generateForOwner` calls create one batch and at most eight items. The batch has two to four quests when at least two distinct verifiable targets exist; otherwise it has every available distinct target (zero or one).
 2. A forced transaction failure creates zero batch rows.
 3. Ten concurrent quest completions increment XP once and create one ledger row.
 4. Reusing an idempotency key with different content returns 409 and leaves state unchanged.

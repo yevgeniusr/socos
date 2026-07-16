@@ -1,9 +1,9 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import * as Sentry from '@sentry/node';
 import { AppModule } from './app.module.js';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter.js';
+import { createApplicationValidationPipe } from './common/application-validation.pipe.js';
 
 // Initialize Sentry before anything else
 Sentry.init({
@@ -22,15 +22,7 @@ async function bootstrap() {
   app.setGlobalPrefix('api');
 
   // Enable validation
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      transform: true,
-      transformOptions: {
-        enableImplicitConversion: true,
-      },
-    }),
-  );
+  app.useGlobalPipes(createApplicationValidationPipe());
 
   // Global exception filter — ensures HTTP exceptions return correct status codes (401, etc.)
   // Also reports errors to Sentry

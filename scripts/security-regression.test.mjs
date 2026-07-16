@@ -41,6 +41,7 @@ function createTrackedFixture(
     copiedScanner,
     mutateScanner(readFileSync(copiedScanner, "utf8")),
   );
+  mkdirSync(dirname(resolve(directory, file)), { recursive: true });
   writeFileSync(resolve(directory, file), content);
   execFileSync("git", ["init", "--quiet"], { cwd: directory });
   execFileSync("git", ["add", "."], { cwd: directory });
@@ -101,7 +102,10 @@ test("detects a tracked bcrypt credential by its fingerprint", () => {
 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /seed\.sql: legacy-password-hash/);
-  assert.doesNotMatch(result.stderr, new RegExp(syntheticHash.replaceAll("$", "\\$")));
+  assert.doesNotMatch(
+    result.stderr,
+    new RegExp(syntheticHash.replaceAll("$", "\\$")),
+  );
 });
 
 test("detects the production E2E URL in an assignment fallback", () => {
@@ -115,4 +119,245 @@ test("detects the production E2E URL in an assignment fallback", () => {
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /playwright\.config\.ts: production-e2e-url/);
   assert.doesNotMatch(result.stderr, /https:\/\//);
+});
+
+test("rejects an unguarded daily brief controller", () => {
+  const directory = createTrackedFixture(
+    "services/api/src/modules/briefs/briefs.controller.ts",
+    `@Controller("briefs")\nexport class BriefsController {\n  @Get("today") today() {}\n}\n`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /briefs\.controller\.ts: unguarded-brief-routes/);
+});
+
+test("does not accept a method guard as protection for sibling brief routes", () => {
+  const directory = createTrackedFixture(
+    "services/api/src/modules/briefs/briefs.controller.ts",
+    `@Controller("briefs")
+export class BriefsController {
+  @UseGuards(AuthGuard)
+  @Get("today") today() {}
+  @Post("generate") generate() {}
+}
+`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /briefs\.controller\.ts: unguarded-brief-routes/);
+});
+
+test("rejects an unguarded controller with multiline decorators", () => {
+  const directory = createTrackedFixture(
+    "services/api/src/modules/briefs/briefs.controller.ts",
+    `@Controller(
+  "briefs",
+)
+export class BriefsController {
+  @Get("today") today() {}
+}
+`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /briefs\.controller\.ts: unguarded-brief-routes/);
+});
+
+test("scans every controller under the daily brief module", () => {
+  const directory = createTrackedFixture(
+    "services/api/src/modules/briefs/admin.controller.ts",
+    `@Controller("briefs/admin")
+export class BriefAdminController {
+  @Get("status") status() {}
+}
+`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /admin\.controller\.ts: unguarded-brief-routes/);
+});
+
+test("rejects direct-send or destructive daily brief routes", () => {
+  const directory = createTrackedFixture(
+    "services/api/src/modules/briefs/briefs.controller.ts",
+    `@Controller("briefs")\n@UseGuards(AuthGuard)\nexport class BriefsController {\n  @Post("messages/send") sendMessage() {}\n  @Delete("contacts/:id") deleteContact() {}\n}\n`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /briefs\.controller\.ts: forbidden-brief-operation/,
+  );
+});
+
+test("rejects brief mutations without authenticated ownership and idempotency keys", () => {
+  const directory = createTrackedFixture(
+    "services/api/src/modules/briefs/briefs.controller.ts",
+    `@Controller("briefs")
+@UseGuards(AuthGuard)
+export class BriefsController {
+  @Get("today") today(dto) { return this.service.get(dto.ownerId); }
+  @Post("items/:itemId/feedback") item(dto) { return this.service.item(dto.ownerId, dto); }
+  @Post("quests/:questId/complete") quest(dto) { return this.service.quest(dto.ownerId, dto); }
+}
+`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /briefs\.controller\.ts: unsafe-brief-owner-source/,
+  );
+  assert.match(
+    result.stderr,
+    /briefs\.controller\.ts: missing-brief-idempotency-keys/,
+  );
+});
+
+test("requires authenticated ownership inside every brief handler", () => {
+  const directory = createTrackedFixture(
+    "services/api/src/modules/briefs/briefs.controller.ts",
+    `@Controller("briefs")
+@UseGuards(AuthGuard)
+export class BriefsController {
+  @Get("today") today(request) { return this.service.get(request.user.userId); }
+  @Post("generate") generate() { return this.service.generate("owner-from-constant"); }
+  @Post("items/:itemId/feedback") item(request, @Headers("idempotency-key") idempotencyKey) {
+    return this.service.item(request.user.userId, idempotencyKey);
+  }
+  @Post("quests/:questId/complete") quest(request, @Headers("idempotency-key") idempotencyKey) {
+    return this.service.quest(request.user.userId, idempotencyKey);
+  }
+}
+`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /briefs\.controller\.ts: unsafe-brief-owner-source/,
+  );
+});
+
+test("requires idempotency headers on each brief action handler", () => {
+  const directory = createTrackedFixture(
+    "services/api/src/modules/briefs/briefs.controller.ts",
+    `@Controller("briefs")
+@UseGuards(AuthGuard)
+export class BriefsController {
+  @Get("today") today(request, @Headers("idempotency-key") firstKey) {
+    return this.service.get(request.user.userId, firstKey);
+  }
+  @Post("generate") generate(request, @Headers("idempotency-key") secondKey) {
+    return this.service.generate(request.user.userId, secondKey);
+  }
+  @Post("items/:itemId/feedback") item(request) {
+    return this.service.item(request.user.userId);
+  }
+  @Post("quests/:questId/complete") quest(request) {
+    return this.service.quest(request.user.userId);
+  }
+}
+`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /briefs\.controller\.ts: missing-brief-idempotency-keys/,
+  );
+});
+
+test("accepts the authenticated and idempotent daily brief controller", () => {
+  const controller = readFileSync(
+    resolve(repoRoot, "services/api/src/modules/briefs/briefs.controller.ts"),
+    "utf8",
+  );
+  const directory = createTrackedFixture(
+    "services/api/src/modules/briefs/briefs.controller.ts",
+    controller,
+  );
+
+  const result = runScanner(directory);
+
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test("rejects dynamic daily brief paths that cannot be audited", () => {
+  const directory = createTrackedFixture(
+    "services/api/src/modules/briefs/briefs.controller.ts",
+    `const SEND_PATH = "messages/send";
+@Controller("briefs")
+@UseGuards(AuthGuard)
+export class BriefsController {
+  @Post(SEND_PATH) sendMessage() {}
+}
+`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /briefs\.controller\.ts: forbidden-brief-operation/,
+  );
+});
+
+test("rejects interpolated template paths that cannot be audited", () => {
+  const directory = createTrackedFixture(
+    "services/api/src/modules/briefs/briefs.controller.ts",
+    `const SEND_PATH = "messages/send";
+@Controller("briefs")
+@UseGuards(AuthGuard)
+export class BriefsController {
+  @Post(\`\${SEND_PATH}\`) sendMessage() {}
+}
+`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /briefs\.controller\.ts: forbidden-brief-operation/,
+  );
+});
+
+test("rejects dynamic or forbidden daily brief controller prefixes", () => {
+  const directory = createTrackedFixture(
+    "services/api/src/modules/briefs/briefs.controller.ts",
+    `const CONTROLLER_PATH = "messages/send";
+@Controller(CONTROLLER_PATH)
+@UseGuards(AuthGuard)
+export class BriefsController {
+  @Post() sendMessage() {}
+}
+`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /briefs\.controller\.ts: forbidden-brief-operation/,
+  );
 });

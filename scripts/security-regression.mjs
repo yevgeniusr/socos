@@ -34,6 +34,18 @@ const candidatePattern = /[A-Za-z0-9_@$./+-]{6,}/g;
 const playwrightConfigPattern = /(?:^|\/)playwright\.config\.[cm]?[jt]s$/;
 const productionE2EUrlPattern =
   /https:\/\/socos\.rachkovan\.com\.?(?=[/:`'"\s;]|$)/i;
+const briefsControllerPattern =
+  /(?:^|\/)services\/api\/src\/modules\/briefs\/[^/]+\.controller\.ts$/;
+const primaryBriefsControllerPattern = /(?:^|\/)briefs\.controller\.ts$/;
+const briefRoutePattern =
+  /@(Controller|Get|Post|Put|Patch|Delete)\s*\(([^)]*)\)/g;
+const forbiddenBriefOperationPattern =
+  /(?:^|\/)(?:send|messages?|recipients?|invites?|introduce|introductions?|merge|delete)(?:\/|$)/i;
+const authenticatedBriefOwnerPattern = /\brequest\.user\.userId\b/;
+const unsafeBriefOwnerPattern =
+  /\b(?:dto|body|query|params?|headers?)\s*(?:\?\.|\.)\s*(?:ownerId|userId)\b/;
+const briefIdempotencyHeaderPattern =
+  /@Headers\s*\(\s*["']idempotency-key["']\s*\)/i;
 
 const trackedFiles = execFileSync("git", ["ls-files", "-z"], {
   encoding: "utf8",
@@ -42,6 +54,62 @@ const trackedFiles = execFileSync("git", ["ls-files", "-z"], {
   .filter(Boolean);
 
 const violations = [];
+
+function hasUnguardedBriefController(content) {
+  const lines = content.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!/^\s*export\s+class\s+\w+/.test(lines[index])) continue;
+
+    const decorators = [];
+    let cursor = index - 1;
+    while (cursor >= 0) {
+      if (lines[cursor].trim() === "") {
+        cursor -= 1;
+        continue;
+      }
+
+      const decoratorLines = [];
+      let closingDepth = 0;
+      let foundStart = false;
+      while (cursor >= 0) {
+        const line = lines[cursor].trim();
+        decoratorLines.unshift(line);
+        closingDepth += (line.match(/\)/g) ?? []).length;
+        closingDepth -= (line.match(/\(/g) ?? []).length;
+        cursor -= 1;
+        if (line.startsWith("@") && closingDepth <= 0) {
+          foundStart = true;
+          break;
+        }
+      }
+      if (!foundStart) break;
+      decorators.unshift(
+        decoratorLines.reduce(
+          (text, line) => (text === "" ? line : `${text}\n${line}`),
+          "",
+        ),
+      );
+    }
+
+    if (
+      decorators.some((line) => /^@Controller\s*\(/.test(line)) &&
+      !decorators.some((line) => /^@UseGuards\s*\(\s*AuthGuard\s*\)/.test(line))
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function staticDecoratorPath(argument, allowEmpty) {
+  const trimmed = argument.trim();
+  if (allowEmpty && trimmed === "") return "";
+  const literal = /^(["'`])([^"'`]*)\1$/.exec(trimmed);
+  if (!literal || (literal[1] === "`" && literal[2].includes("${"))) {
+    return null;
+  }
+  return literal[2];
+}
 
 for (const file of trackedFiles) {
   let content;
@@ -65,6 +133,50 @@ for (const file of trackedFiles) {
     productionE2EUrlPattern.test(content)
   ) {
     rules.add("production-e2e-url");
+  }
+
+  if (briefsControllerPattern.test(file)) {
+    if (hasUnguardedBriefController(content)) {
+      rules.add("unguarded-brief-routes");
+    }
+    const routes = [...content.matchAll(briefRoutePattern)];
+    for (const route of routes) {
+      const isController = route[1] === "Controller";
+      const path = staticDecoratorPath(route[2], !isController);
+      if (
+        route[1] === "Delete" ||
+        path === null ||
+        forbiddenBriefOperationPattern.test(path)
+      ) {
+        rules.add("forbidden-brief-operation");
+      }
+    }
+
+    for (let index = 0; index < routes.length; index += 1) {
+      const route = routes[index];
+      if (route[1] === "Controller") continue;
+      const start = route.index ?? 0;
+      const end = routes[index + 1]?.index ?? content.length;
+      const handler = content.slice(start, end);
+      if (
+        !authenticatedBriefOwnerPattern.test(handler) ||
+        unsafeBriefOwnerPattern.test(handler)
+      ) {
+        rules.add("unsafe-brief-owner-source");
+      }
+
+      const path = staticDecoratorPath(route[2], true);
+      const requiresIdempotency =
+        ["Post", "Put", "Patch"].includes(route[1]) &&
+        !(
+          primaryBriefsControllerPattern.test(file) &&
+          route[1] === "Post" &&
+          path === "generate"
+        );
+      if (requiresIdempotency && !briefIdempotencyHeaderPattern.test(handler)) {
+        rules.add("missing-brief-idempotency-keys");
+      }
+    }
   }
 
   for (const rule of rules) {

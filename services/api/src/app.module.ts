@@ -25,6 +25,7 @@ import { AiAgentModule } from './modules/ai-agent/ai-agent.module.js';
 import { AgentToolsModule } from './modules/agent-tools/agent-tools.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
 import { NotificationSchedulerModule } from './modules/notifications/notification-scheduler.module.js';
+import { BriefsModule } from './modules/briefs/briefs.module.js';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { NotificationSchedulerModule } from './modules/notifications/notificatio
     AiAgentModule,
     RemindersModule,
     AgentToolsModule,
+    BriefsModule,
   ],
   controllers: [
     HealthController,

@@ -21,6 +21,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message: string | object = 'Internal server error';
     let errors: string[] | undefined;
+    let code: string | undefined;
 
     if (exception instanceof HttpException) {
       status = exception.getStatus();
@@ -30,6 +31,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       } else if (typeof exceptionResponse === 'object') {
         const resp = exceptionResponse as Record<string, unknown>;
         message = (resp.message as string) || exception.message;
+        if (typeof resp.code === 'string') code = resp.code;
         if (Array.isArray(resp.message)) {
           errors = resp.message;
           message = 'Validation failed';
@@ -60,6 +62,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     response.status(status).json({
       statusCode: status,
+      ...(code ? { code } : {}),
       message,
       errors,
       timestamp: new Date().toISOString(),

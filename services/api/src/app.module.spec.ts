@@ -3,6 +3,8 @@ import { Test } from '@nestjs/testing';
 import { AppModule } from './app.module.js';
 import { AiAgentController } from './modules/ai-agent/ai-agent.controller.js';
 import { AiAgentModule } from './modules/ai-agent/ai-agent.module.js';
+import { BriefsController } from './modules/briefs/briefs.controller.js';
+import { BriefsModule } from './modules/briefs/briefs.module.js';
 
 describe('AppModule composition', () => {
   it('compiles the complete dependency graph', async () => {
@@ -24,5 +26,13 @@ describe('AppModule composition', () => {
 
     expect(imports).toContain(AiAgentModule);
     expect(controllers).not.toContain(AiAgentController);
+  });
+
+  it('delegates brief controller ownership to BriefsModule', () => {
+    const imports = Reflect.getMetadata(MODULE_METADATA.IMPORTS, AppModule) as unknown[];
+    const controllers = Reflect.getMetadata(MODULE_METADATA.CONTROLLERS, AppModule) as unknown[];
+
+    expect(imports).toContain(BriefsModule);
+    expect(controllers).not.toContain(BriefsController);
   });
 });
