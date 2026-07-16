@@ -11,6 +11,8 @@ coverage/
 .vitest/
 .jest/
 .betabots/
+playwright-report/
+test-results/
 
 # Production / Build outputs
 dist/
