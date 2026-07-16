@@ -25,24 +25,319 @@ model User {
   updatedAt      DateTime  @updatedAt
 
   // Relations
-  contacts                Contact[]
-  interactions            Interaction[]
-  reminders               Reminder[]
-  achievements            UserAchievement[]
-  vaults                  Vault[]
-  sessions                Session[]
-  briefBatches            BriefBatch[]
-  briefItems              BriefItem[]
-  quests                  Quest[]
-  briefFeedback           BriefFeedback[]
-  xpTransactions          XpTransaction[]
-  agentClients            AgentClient[]
-  agentCredentials        AgentCredential[]
-  agentIdempotencyRecords AgentIdempotencyRecord[]
-  actionProposals         ActionProposal[]
-  approvalGrants          ApprovalGrant[]
-  mutationAuditEvents     MutationAuditEvent[]
-  actionOutboxRecords     ActionOutbox[]
+  contacts                  Contact[]
+  interactions              Interaction[]
+  reminders                 Reminder[]
+  achievements              UserAchievement[]
+  vaults                    Vault[]
+  sessions                  Session[]
+  briefBatches              BriefBatch[]
+  briefItems                BriefItem[]
+  quests                    Quest[]
+  briefFeedback             BriefFeedback[]
+  xpTransactions            XpTransaction[]
+  agentClients              AgentClient[]
+  agentCredentials          AgentCredential[]
+  agentIdempotencyRecords   AgentIdempotencyRecord[]
+  actionProposals           ActionProposal[]
+  approvalGrants            ApprovalGrant[]
+  mutationAuditEvents       MutationAuditEvent[]
+  actionOutboxRecords       ActionOutbox[]
+  googleOAuthAttempts       GoogleOAuthAttempt[]
+  googleCalendarConnections GoogleCalendarConnection[]
+  calendarSources           CalendarSource[]
+  calendarWatches           CalendarWatch[]
+  calendarEvents            CalendarEvent[]
+  locationDevices           LocationDevice[]
+  locationSamples           LocationSample[]
+  derivedVisits             DerivedVisit[]
+  locationAliases           LocationAlias[]
+  cityStays                 CityStay[]
+}
+
+// ==================== CALENDAR AND LOCATION ====================
+
+model GoogleOAuthAttempt {
+  id             String    @id @default(cuid())
+  ownerId        String
+  owner          User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  stateMac       String    @unique
+  pkceCiphertext Bytes
+  pkceIv         Bytes
+  pkceTag        Bytes
+  pkceKeyVersion Int
+  expiresAt      DateTime
+  consumedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@unique([id, ownerId])
+  @@index([ownerId, expiresAt, consumedAt])
+}
+
+model GoogleCalendarConnection {
+  id                              String           @id @default(cuid())
+  ownerId                         String           @unique
+  owner                           User             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  refreshTokenCiphertext          Bytes
+  refreshTokenIv                  Bytes
+  refreshTokenTag                 Bytes
+  refreshTokenKeyVersion          Int
+  grantedScopes                   String[]         @default([])
+  status                          String           @default("active")
+  calendarListSyncTokenCiphertext Bytes?
+  calendarListSyncTokenIv         Bytes?
+  calendarListSyncTokenTag        Bytes?
+  calendarListSyncTokenKeyVersion Int?
+  calendarListPendingAt           DateTime?
+  calendarListLeaseUntil          DateTime?
+  lastFullReconciledAt            DateTime?
+  lastSyncedAt                    DateTime?
+  errorCode                       String?
+  createdAt                       DateTime         @default(now())
+  updatedAt                       DateTime         @updatedAt
+  sources                         CalendarSource[]
+  watches                         CalendarWatch[]
+
+  @@unique([id, ownerId])
+  @@index([status, calendarListPendingAt, calendarListLeaseUntil])
+}
+
+model CalendarSource {
+  id                   String                   @id @default(cuid())
+  connectionId         String
+  connection           GoogleCalendarConnection @relation(fields: [connectionId, ownerId], references: [id, ownerId], onDelete: Cascade)
+  ownerId              String
+  owner                User                     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  externalIdMac        String
+  externalIdCiphertext Bytes
+  externalIdIv         Bytes
+  externalIdTag        Bytes
+  externalIdKeyVersion Int
+  nameCiphertext       Bytes
+  nameIv               Bytes
+  nameTag              Bytes
+  nameKeyVersion       Int
+  timeZone             String?
+  selected             Boolean                  @default(false)
+  isPrimary            Boolean                  @default(false)
+  syncTokenCiphertext  Bytes?
+  syncTokenIv          Bytes?
+  syncTokenTag         Bytes?
+  syncTokenKeyVersion  Int?
+  fullSyncRequired     Boolean                  @default(true)
+  pendingSyncAt        DateTime?
+  syncLeaseUntil       DateTime?
+  lastFullReconciledAt DateTime?
+  lastSyncedAt         DateTime?
+  errorCode            String?
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+  events               CalendarEvent[]
+
+  @@unique([connectionId, externalIdMac])
+  @@unique([id, ownerId])
+  @@index([ownerId, selected])
+  @@index([pendingSyncAt, syncLeaseUntil])
+}
+
+model CalendarWatch {
+  id                   String                   @id @default(cuid())
+  connectionId         String
+  connection           GoogleCalendarConnection @relation(fields: [connectionId, ownerId], references: [id, ownerId], onDelete: Cascade)
+  ownerId              String
+  owner                User                     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  targetType           String
+  targetKey            String
+  channelId            String                   @unique
+  resourceIdMac        String
+  resourceIdCiphertext Bytes
+  resourceIdIv         Bytes
+  resourceIdTag        Bytes
+  resourceIdKeyVersion Int
+  tokenMac             String
+  status               String                   @default("active")
+  expiresAt            DateTime
+  lastMessageNumber    BigInt?
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+
+  @@unique([id, ownerId])
+  @@index([connectionId, targetType, targetKey, status])
+  @@index([status, expiresAt])
+}
+
+model CalendarEvent {
+  id                         String         @id @default(cuid())
+  ownerId                    String
+  owner                      User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  sourceId                   String
+  source                     CalendarSource @relation(fields: [sourceId, ownerId], references: [id, ownerId], onDelete: Cascade)
+  externalEventIdMac         String
+  externalEventIdCiphertext  Bytes
+  externalEventIdIv          Bytes
+  externalEventIdTag         Bytes
+  externalEventIdKeyVersion  Int
+  status                     String         @default("confirmed")
+  startAt                    DateTime?
+  endAt                      DateTime?
+  startDate                  DateTime?      @db.Date
+  endDate                    DateTime?      @db.Date
+  allDay                     Boolean        @default(false)
+  timeZone                   String?
+  transparency               String         @default("opaque")
+  recurringEventIdMac        String?
+  recurringEventIdCiphertext Bytes?
+  recurringEventIdIv         Bytes?
+  recurringEventIdTag        Bytes?
+  recurringEventIdKeyVersion Int?
+  originalStartAt            DateTime?
+  detailsCiphertext          Bytes?
+  detailsIv                  Bytes?
+  detailsTag                 Bytes?
+  detailsKeyVersion          Int?
+  sourceUpdatedAt            DateTime?
+  createdAt                  DateTime       @default(now())
+  updatedAt                  DateTime       @updatedAt
+
+  @@unique([sourceId, externalEventIdMac])
+  @@unique([id, ownerId])
+  @@index([ownerId, startAt, endAt, status])
+  @@index([sourceId, status])
+}
+
+model LocationDevice {
+  id                         String           @id @default(cuid())
+  ownerId                    String
+  owner                      User             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  nameMac                    String
+  nameCiphertext             Bytes
+  nameIv                     Bytes
+  nameTag                    Bytes
+  nameKeyVersion             Int
+  username                   String           @unique
+  credentialHash             String
+  externalDeviceIdMac        String
+  externalDeviceIdCiphertext Bytes
+  externalDeviceIdIv         Bytes
+  externalDeviceIdTag        Bytes
+  externalDeviceIdKeyVersion Int
+  status                     String           @default("active")
+  rawRetentionDays           Int              @default(90)
+  derivedRetentionDays       Int              @default(730)
+  lastSeenAt                 DateTime?
+  createdAt                  DateTime         @default(now())
+  updatedAt                  DateTime         @updatedAt
+  samples                    LocationSample[]
+  visits                     DerivedVisit[]
+
+  @@unique([ownerId, nameMac])
+  @@unique([ownerId, externalDeviceIdMac])
+  @@unique([id, ownerId])
+  @@index([ownerId, status])
+}
+
+model LocationSample {
+  id                    String         @id @default(cuid())
+  ownerId               String
+  owner                 User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  deviceId              String
+  device                LocationDevice @relation(fields: [deviceId, ownerId], references: [id, ownerId], onDelete: Cascade)
+  recordedAt            DateTime
+  receivedAt            DateTime
+  coordinatesCiphertext Bytes
+  coordinatesIv         Bytes
+  coordinatesTag        Bytes
+  coordinatesKeyVersion Int
+  accuracyM             Float?
+  batteryPercent        Int?
+  trigger               String?
+  payloadMac            String
+  createdAt             DateTime       @default(now())
+
+  @@unique([deviceId, payloadMac])
+  @@unique([id, ownerId])
+  @@index([ownerId, recordedAt])
+  @@index([deviceId, recordedAt])
+}
+
+model DerivedVisit {
+  id                 String         @id @default(cuid())
+  ownerId            String
+  owner              User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  deviceId           String
+  device             LocationDevice @relation(fields: [deviceId, ownerId], references: [id, ownerId], onDelete: Cascade)
+  arrivedAt          DateTime
+  departedAt         DateTime?
+  centroidCiphertext Bytes
+  centroidIv         Bytes
+  centroidTag        Bytes
+  centroidKeyVersion Int
+  radiusM            Float
+  confidence         Float
+  sourceMac          String
+  derivationVersion  Int            @default(1)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  @@unique([deviceId, sourceMac])
+  @@unique([id, ownerId])
+  @@index([ownerId, arrivedAt, departedAt])
+  @@index([deviceId, arrivedAt])
+}
+
+model LocationAlias {
+  id              String   @id @default(cuid())
+  ownerId         String
+  owner           User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  aliasMac        String
+  aliasCiphertext Bytes
+  aliasIv         Bytes
+  aliasTag        Bytes
+  aliasKeyVersion Int
+  city            String
+  countryCode     String
+  timeZone        String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([ownerId, aliasMac])
+  @@unique([id, ownerId])
+  @@index([ownerId, city])
+}
+
+model CityStay {
+  id          String    @id @default(cuid())
+  ownerId     String
+  owner       User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  startsAt    DateTime
+  endsAt      DateTime?
+  city        String
+  countryCode String
+  timeZone    String
+  source      String
+  sourceId    String
+  confidence  Float
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([ownerId, source, sourceId])
+  @@unique([id, ownerId])
+  @@index([ownerId, startsAt, endsAt])
+}
+
+model PersonalDataDeletionAudit {
+  id                String   @id @default(cuid())
+  ownerMac          String
+  idempotencyKeyMac String   @unique
+  requestMac        String
+  categories        String[] @default([])
+  calendarRowCount  Int      @default(0)
+  locationRowCount  Int      @default(0)
+  eventRowCount     Int      @default(0)
+  deletedAt         DateTime
+  createdAt         DateTime @default(now())
+
+  @@index([ownerMac, deletedAt])
 }
 
 // ==================== VAULT ====================
@@ -338,20 +633,20 @@ model ActionProposal {
 }
 
 model ApprovalGrant {
-  id          String         @id @default(cuid())
-  ownerId     String
-  owner       User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  clientId    String
-  client      AgentClient    @relation(fields: [clientId, ownerId], references: [id, ownerId], onDelete: Cascade)
-  proposalId  String         @unique
-  proposal    ActionProposal @relation(fields: [proposalId, ownerId, clientId], references: [id, ownerId, clientId], onDelete: Cascade)
-  status      String         @default("active")
-  expiresAt   DateTime
-  consumedAt  DateTime?
-  revokedAt   DateTime?
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
-  outbox      ActionOutbox?
+  id         String         @id @default(cuid())
+  ownerId    String
+  owner      User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  clientId   String
+  client     AgentClient    @relation(fields: [clientId, ownerId], references: [id, ownerId], onDelete: Cascade)
+  proposalId String         @unique
+  proposal   ActionProposal @relation(fields: [proposalId, ownerId, clientId], references: [id, ownerId, clientId], onDelete: Cascade)
+  status     String         @default("active")
+  expiresAt  DateTime
+  consumedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+  outbox     ActionOutbox?
 
   @@unique([id, ownerId, clientId])
   @@unique([proposalId, ownerId, clientId])
