@@ -33,8 +33,10 @@ COPY packages/ packages/
 WORKDIR /app/services/api
 
 RUN pnpm prisma generate
+RUN pnpm --filter @socos/agent-core build
 RUN pnpm build
 RUN test -f /app/services/api/dist/cli/monica-import.js
+RUN test -f /app/packages/agent-core/dist/index.cjs
 
 RUN pnpm --filter @socos/api deploy --prod --legacy /prod/api
 
@@ -42,6 +44,7 @@ RUN pnpm --filter @socos/api deploy --prod --legacy /prod/api
 RUN cp -r /app/node_modules/.pnpm/@prisma+client*/node_modules/@prisma/client /prod/api/node_modules/@prisma/client
 RUN cp -r /app/node_modules/.pnpm/@prisma+client*/node_modules/.prisma /prod/api/node_modules/.prisma
 RUN /prod/api/node_modules/.bin/prisma --version >/dev/null
+RUN test -f /prod/api/node_modules/@socos/agent-core/dist/index.cjs
 
 # ---- Stage 3: Production runner ----
 FROM node:22-alpine AS runner
