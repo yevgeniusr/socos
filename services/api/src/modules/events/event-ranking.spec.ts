@@ -145,6 +145,170 @@ describe("event ranking", () => {
     expect(distanceBand(50.001)).toBe(">50");
   });
 
+  it("uses the exact Task 12 component names, weights, and total", () => {
+    const ranked = rankOne({
+      matchedContactCount: 3,
+      sourceSocialWeight: 6,
+    });
+
+    expect(ranked.evidence.components).toEqual({
+      time: 25,
+      distance: 25,
+      interests: 10,
+      social: 11,
+      contact: 6,
+      novelty: 5,
+      feedback: 3,
+    });
+    expect(ranked.score).toBe(85);
+  });
+
+  it("caps social as source weight plus category boost, contacts at ten, and total at one hundred", () => {
+    const ranked = rankEventCandidates({
+      now: NOW,
+      preferences: {
+        interestTags: ["ai", "community", "founders"],
+        maxDistanceKm: 50,
+        travelSpeedKph: 30,
+        travelBufferMinutes: 15,
+      },
+      candidates: [
+        candidate({
+          tags: ["ai", "community", "founders"],
+          sourceSocialWeight: 50,
+          matchedContactCount: 20,
+        }),
+      ],
+      feedback: [
+        {
+          eventId: "accepted-1",
+          category: "community",
+          action: "accept",
+          createdAt: new Date("2026-05-01T10:00:00.000Z"),
+          snoozedUntil: null,
+        },
+        {
+          eventId: "accepted-2",
+          category: "community",
+          action: "accept",
+          createdAt: new Date("2026-05-02T10:00:00.000Z"),
+          snoozedUntil: null,
+        },
+      ],
+    })[0];
+
+    expect(ranked.evidence.components.social).toBe(15);
+    expect(ranked.evidence.components.contact).toBe(10);
+    expect(ranked.evidence.components.feedback).toBe(5);
+    expect(ranked.score).toBe(100);
+  });
+
+  it("scores novelty at five without recent same-category feedback and two with recent same-category feedback", () => {
+    expect(
+      rankOne(
+        {},
+        [
+          {
+            eventId: "old-event",
+            category: "community",
+            action: "accept",
+            createdAt: new Date("2026-06-16T09:59:59.999Z"),
+            snoozedUntil: null,
+          },
+        ]
+      ).evidence.components.novelty
+    ).toBe(5);
+
+    expect(
+      rankOne(
+        { id: "fresh-event" },
+        [
+          {
+            eventId: "other-event",
+            category: "community",
+            action: "snooze",
+            createdAt: new Date("2026-06-16T10:00:00.000Z"),
+            snoozedUntil: null,
+          },
+        ]
+      ).evidence.components.novelty
+    ).toBe(2);
+  });
+
+  it("clamps feedback from category accepts and dismissals over ninety days", () => {
+    expect(
+      rankOne(
+        {},
+        [
+          {
+            eventId: "accepted-1",
+            category: "community",
+            action: "accept",
+            createdAt: new Date("2026-04-17T10:00:00.000Z"),
+            snoozedUntil: null,
+          },
+          {
+            eventId: "accepted-2",
+            category: "community",
+            action: "accept",
+            createdAt: new Date("2026-07-01T10:00:00.000Z"),
+            snoozedUntil: null,
+          },
+          {
+            eventId: "accepted-3",
+            category: "community",
+            action: "accept",
+            createdAt: new Date("2026-07-02T10:00:00.000Z"),
+            snoozedUntil: null,
+          },
+        ]
+      ).evidence.components.feedback
+    ).toBe(5);
+
+    expect(
+      rankOne(
+        {},
+        [
+          {
+            eventId: "old-dismissed",
+            category: "community",
+            action: "dismiss",
+            createdAt: new Date("2026-04-17T09:59:59.999Z"),
+            snoozedUntil: null,
+          },
+          {
+            eventId: "dismissed-1",
+            category: "community",
+            action: "dismiss",
+            createdAt: new Date("2026-05-01T10:00:00.000Z"),
+            snoozedUntil: null,
+          },
+          {
+            eventId: "dismissed-2",
+            category: "community",
+            action: "dismiss",
+            createdAt: new Date("2026-05-02T10:00:00.000Z"),
+            snoozedUntil: null,
+          },
+          {
+            eventId: "dismissed-3",
+            category: "community",
+            action: "dismiss",
+            createdAt: new Date("2026-05-03T10:00:00.000Z"),
+            snoozedUntil: null,
+          },
+          {
+            eventId: "dismissed-4",
+            category: "community",
+            action: "dismiss",
+            createdAt: new Date("2026-05-04T10:00:00.000Z"),
+            snoozedUntil: null,
+          },
+        ]
+      ).evidence.components.feedback
+    ).toBe(0);
+  });
+
   it("applies inclusive feedback cutoffs, active snooze, and category dismiss rules", () => {
     expect(
       rankEventCandidates({

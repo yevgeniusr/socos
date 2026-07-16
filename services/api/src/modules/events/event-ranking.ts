@@ -42,10 +42,9 @@ export type EventRankingEvidence = {
   components: {
     time: number;
     distance: number;
-    interest: number;
-    contacts: number;
-    category: number;
-    source: number;
+    interests: number;
+    social: number;
+    contact: number;
     novelty: number;
     feedback: number;
   };
@@ -88,10 +87,9 @@ export function rankEventCandidates(input: {
     const components = {
       time: timeScore(candidate, input.now),
       distance: distance.score,
-      interest: Math.min(15, matchedTags.length * 5),
-      contacts: Math.min(15, Math.max(0, candidate.matchedContactCount) * 5),
-      category: categoryBoost(candidate.category),
-      source: Math.min(10, Math.max(0, Math.round(candidate.sourceSocialWeight))),
+      interests: Math.min(15, matchedTags.length * 5),
+      social: socialScore(candidate),
+      contact: Math.min(10, Math.max(0, candidate.matchedContactCount) * 2),
       novelty: noveltyScore(candidate, feedback, input.now),
       feedback: feedbackScore(candidate, feedback),
     };
@@ -199,11 +197,18 @@ function publicMatchedTags(publicTags: string[], preferenceTags: string[]): stri
     .sort();
 }
 
-function categoryBoost(category: string | null): number {
+function socialScore(candidate: EventRankingCandidate): number {
+  return Math.min(
+    15,
+    Math.max(0, candidate.sourceSocialWeight) + socialCategoryBoost(candidate.category)
+  );
+}
+
+function socialCategoryBoost(category: string | null): number {
   return ["social", "networking", "community"].includes(
     normalizedCategory(category) ?? ""
   )
-    ? 10
+    ? 5
     : 0;
 }
 
@@ -213,14 +218,14 @@ function noveltyScore(
   now: Date
 ): number {
   const cutoff = now.getTime() - 30 * DAY_MS;
+  const category = normalizedCategory(candidate.category);
   const hasRecent = feedback.some(
     (item) =>
       item.createdAt.getTime() >= cutoff &&
-      (item.eventId === candidate.id ||
-        (normalizedCategory(candidate.category) !== null &&
-          item.category === normalizedCategory(candidate.category)))
+      category !== null &&
+      item.category === category
   );
-  return hasRecent ? 0 : 10;
+  return hasRecent ? 2 : 5;
 }
 
 function feedbackScore(
@@ -228,15 +233,14 @@ function feedbackScore(
   feedback: EventRankingFeedback[]
 ): number {
   const category = normalizedCategory(candidate.category);
-  let score = 5;
+  let accepted = 0;
+  let dismissed = 0;
   for (const item of feedback) {
-    if (item.eventId !== candidate.id && (!category || item.category !== category)) {
-      continue;
-    }
-    if (item.action === "accept") score += 5;
-    if (item.action === "dismiss") score -= 5;
+    if (!category || item.category !== category) continue;
+    if (item.action === "accept") accepted += 1;
+    if (item.action === "dismiss") dismissed += 1;
   }
-  return Math.max(0, Math.min(10, score));
+  return Math.max(0, Math.min(5, 3 + accepted - dismissed));
 }
 
 function isExcludedByFeedback(
