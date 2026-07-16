@@ -10,6 +10,8 @@ const KEY_LENGTH = 32;
 const CONFIGURATION_ERROR = "Invalid personal data encryption configuration";
 const ENCRYPTION_ERROR = "Personal data encryption failed";
 const DECRYPTION_ERROR = "Personal data decryption failed";
+const REENCRYPTION_ERROR = "Personal data re-encryption failed";
+const INVALID_KEY_VERSIONS_ERROR = "invalid_key_versions";
 
 export type EncryptedValue = {
   ciphertext: Buffer;
@@ -64,24 +66,60 @@ export class PersonalDataCipherService {
   ): EncryptedValue {
     try {
       const { keys, activeVersion } = this.getConfiguration();
-      const iv = randomBytes(IV_LENGTH);
-      const cipher = createCipheriv(ALGORITHM, keys.get(activeVersion)!, iv, {
-        authTagLength: TAG_LENGTH,
-      });
-      cipher.setAAD(aad(purpose, ownerId, recordId));
-      const ciphertext = Buffer.concat([
-        cipher.update(canonicalJson(value), "utf8"),
-        cipher.final(),
-      ]);
-
-      return {
-        ciphertext,
-        iv,
-        tag: cipher.getAuthTag(),
-        keyVersion: activeVersion,
-      };
+      return encryptWithKey(
+        keys.get(activeVersion)!,
+        activeVersion,
+        purpose,
+        ownerId,
+        recordId,
+        value
+      );
     } catch {
       throw new Error(ENCRYPTION_ERROR);
+    }
+  }
+
+  validateRekeyVersions(fromVersion: number, toVersion: number): void {
+    try {
+      const { keys } = this.getConfiguration();
+      if (
+        !isPositiveVersion(fromVersion) ||
+        !isPositiveVersion(toVersion) ||
+        fromVersion === toVersion ||
+        !keys.has(fromVersion) ||
+        !keys.has(toVersion)
+      ) {
+        throw new Error(INVALID_KEY_VERSIONS_ERROR);
+      }
+    } catch {
+      throw new Error(INVALID_KEY_VERSIONS_ERROR);
+    }
+  }
+
+  reencryptToVersion<T>(
+    purpose: string,
+    ownerId: string,
+    recordId: string,
+    value: EncryptedValue,
+    targetVersion: number
+  ): EncryptedValue {
+    try {
+      const { keys } = this.getConfiguration();
+      const targetKey = keys.get(targetVersion);
+      if (!isPositiveVersion(targetVersion) || !targetKey) {
+        throw new Error(REENCRYPTION_ERROR);
+      }
+      const plaintext = this.decrypt<T>(purpose, ownerId, recordId, value);
+      return encryptWithKey(
+        targetKey,
+        targetVersion,
+        purpose,
+        ownerId,
+        recordId,
+        plaintext
+      );
+    } catch {
+      throw new Error(REENCRYPTION_ERROR);
     }
   }
 
@@ -202,6 +240,36 @@ function validateEnvelope(
   const key = keys.get(value.keyVersion);
   if (!key) throw new Error(DECRYPTION_ERROR);
   return key;
+}
+
+function encryptWithKey<T>(
+  key: Buffer,
+  keyVersion: number,
+  purpose: string,
+  ownerId: string,
+  recordId: string,
+  value: T
+): EncryptedValue {
+  const iv = randomBytes(IV_LENGTH);
+  const cipher = createCipheriv(ALGORITHM, key, iv, {
+    authTagLength: TAG_LENGTH,
+  });
+  cipher.setAAD(aad(purpose, ownerId, recordId));
+  const ciphertext = Buffer.concat([
+    cipher.update(canonicalJson(value), "utf8"),
+    cipher.final(),
+  ]);
+
+  return {
+    ciphertext,
+    iv,
+    tag: cipher.getAuthTag(),
+    keyVersion,
+  };
+}
+
+function isPositiveVersion(value: number): boolean {
+  return Number.isSafeInteger(value) && value > 0;
 }
 
 function aad(purpose: string, ownerId: string, recordId: string): Buffer {

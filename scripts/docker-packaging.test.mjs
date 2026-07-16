@@ -90,3 +90,35 @@ test('api images package the compiled Monica import CLI', () => {
   );
   assert.match(workflow, /test -f \.\/dist\/cli\/monica-import\.js/);
 });
+
+test('runtime images package the personal data rekey CLI', () => {
+  const apiPackage = JSON.parse(
+    readFileSync(resolve(root, 'services/api/package.json'), 'utf8'),
+  );
+  assert.equal(
+    apiPackage.scripts['personal-data:rekey'],
+    'node dist/cli/rekey-personal-data.js',
+  );
+
+  const apiDockerfile = readFileSync(
+    resolve(root, 'services/api/Dockerfile'),
+    'utf8',
+  );
+  assert.match(
+    apiDockerfile,
+    /RUN test -f \/app\/services\/api\/dist\/cli\/rekey-personal-data\.js/,
+  );
+  assert.match(
+    apiDockerfile,
+    /COPY --from=builder \/app\/services\/api\/dist \.\/dist[\s\S]*RUN test -f \/app\/dist\/cli\/rekey-personal-data\.js/,
+  );
+
+  const combinedDockerfile = readFileSync(resolve(root, 'Dockerfile'), 'utf8');
+  const artifactCheck =
+    /RUN test -f \/app\/services\/api\/dist\/cli\/rekey-personal-data\.js/g;
+  assert.equal(combinedDockerfile.match(artifactCheck)?.length, 2);
+  assert.match(
+    combinedDockerfile,
+    /COPY --from=builder \/app\/services\/api\/dist \.\/services\/api\/dist/,
+  );
+});

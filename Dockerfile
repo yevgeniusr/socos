@@ -48,6 +48,7 @@ RUN sed -i 's/"module": "nodenext"/"module": "commonjs"/' tsconfig.json && \
     sed -i 's/"moduleResolution": "nodenext"/"moduleResolution": "node"/' tsconfig.json && \
     pnpm build
 RUN test -f /app/services/api/dist/cli/monica-import.js
+RUN test -f /app/services/api/dist/cli/rekey-personal-data.js
 
 FROM node:22-alpine AS runner
 
@@ -73,6 +74,7 @@ COPY --from=builder /app/services/api/node_modules ./services/api/node_modules
 COPY --from=builder /app/services/api/package.json ./services/api/package.json
 COPY --from=builder /app/services/api/prisma ./services/api/prisma
 COPY --from=builder /app/services/api/start.sh ./services/api/start.sh
+RUN test -f /app/services/api/dist/cli/rekey-personal-data.js
 
 # Remove "type":"module" so CommonJS dist runs as CommonJS (not ESM)
 RUN sed -i '/"type": "module",/d' /app/services/api/package.json

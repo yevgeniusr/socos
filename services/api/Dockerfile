@@ -36,6 +36,7 @@ RUN pnpm prisma generate
 RUN pnpm --filter @socos/agent-core build
 RUN pnpm build
 RUN test -f /app/services/api/dist/cli/monica-import.js
+RUN test -f /app/services/api/dist/cli/rekey-personal-data.js
 RUN test -f /app/packages/agent-core/dist/index.cjs
 
 RUN pnpm --filter @socos/api deploy --prod --legacy /prod/api
@@ -61,6 +62,7 @@ COPY --from=builder /app/services/api/dist ./dist
 COPY --from=builder /app/services/api/prisma ./prisma
 COPY --from=builder /app/services/api/package.json ./
 COPY --from=builder /app/services/api/start.sh ./start.sh
+RUN test -f /app/dist/cli/rekey-personal-data.js
 
 USER nestjs
 
