@@ -31,6 +31,7 @@ import { AgentSecurityModule } from './modules/agent-security/agent-security.mod
 import { McpModule } from './modules/mcp/mcp.module.js';
 import { PersonalDataModule } from './modules/personal-data/personal-data.module.js';
 import { LocationModule } from './modules/location/location.module.js';
+import { CalendarModule } from './modules/calendar/calendar.module.js';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { LocationModule } from './modules/location/location.module.js';
     McpModule,
     PersonalDataModule,
     LocationModule,
+    CalendarModule,
   ],
   controllers: [
     HealthController,

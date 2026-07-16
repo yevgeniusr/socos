@@ -5,6 +5,7 @@ import { AiAgentController } from './modules/ai-agent/ai-agent.controller.js';
 import { AiAgentModule } from './modules/ai-agent/ai-agent.module.js';
 import { BriefsController } from './modules/briefs/briefs.controller.js';
 import { BriefsModule } from './modules/briefs/briefs.module.js';
+import { CalendarModule } from './modules/calendar/calendar.module.js';
 import { LocationDeviceController } from './modules/location/location.controller.js';
 import { LocationModule } from './modules/location/location.module.js';
 import { PersonalDataConfigService } from './modules/personal-data/personal-data-config.js';
@@ -148,5 +149,11 @@ describe('AppModule composition', () => {
 
     expect(imports).toContain(LocationModule);
     expect(controllers).not.toContain(LocationDeviceController);
+  });
+
+  it('delegates calendar endpoint ownership to CalendarModule', () => {
+    const imports = Reflect.getMetadata(MODULE_METADATA.IMPORTS, AppModule) as unknown[];
+
+    expect(imports).toContain(CalendarModule);
   });
 });

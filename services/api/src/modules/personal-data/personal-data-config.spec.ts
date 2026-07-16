@@ -47,7 +47,8 @@ function validGoogle(): Record<string, string> {
   return {
     GOOGLE_CALENDAR_CLIENT_ID: "synthetic-client-id",
     GOOGLE_CALENDAR_CLIENT_SECRET: "synthetic-client-secret",
-    GOOGLE_CALENDAR_REDIRECT_URI: "https://example.test/callback",
+    GOOGLE_CALENDAR_REDIRECT_URI:
+      "https://example.test/api/integrations/google-calendar/callback",
     GOOGLE_CALENDAR_WEBHOOK_URL: "https://example.test/webhook",
     GOOGLE_CALENDAR_SETTINGS_RESULT_URL: "https://example.test/settings",
   };
