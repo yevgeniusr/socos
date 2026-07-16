@@ -30,6 +30,7 @@ import { AgentAuthModule } from './modules/agent-auth/agent-auth.module.js';
 import { AgentSecurityModule } from './modules/agent-security/agent-security.module.js';
 import { McpModule } from './modules/mcp/mcp.module.js';
 import { PersonalDataModule } from './modules/personal-data/personal-data.module.js';
+import { LocationModule } from './modules/location/location.module.js';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { PersonalDataModule } from './modules/personal-data/personal-data.module
     AgentSecurityModule,
     McpModule,
     PersonalDataModule,
+    LocationModule,
   ],
   controllers: [
     HealthController,

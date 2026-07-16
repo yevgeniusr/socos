@@ -4,6 +4,7 @@ import * as Sentry from '@sentry/node';
 import { AppModule } from './app.module.js';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter.js';
 import { createApplicationValidationPipe } from './common/application-validation.pipe.js';
+import { configureLocationBodyParsers } from './modules/location/location-raw-body.middleware.js';
 
 // Initialize Sentry before anything else
 Sentry.init({
@@ -16,7 +17,8 @@ Sentry.init({
 });
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { bodyParser: false });
+  configureLocationBodyParsers(app.getHttpAdapter().getInstance());
 
   // Set global prefix for all routes (required for Traefik routing)
   app.setGlobalPrefix('api');

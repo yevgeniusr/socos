@@ -1,0 +1,220 @@
+import { ServiceUnavailableException } from "@nestjs/common";
+import {
+  LocationIngestService,
+  canonicalOwnTracksPayload,
+} from "./location-ingest.service.js";
+
+const DEVICE = { id: "internal-device-id", ownerId: "resolved-owner-id" };
+const RECEIVED_AT = new Date("2026-07-16T12:00:00.000Z");
+const ENVELOPE = {
+  ciphertext: Buffer.from("ciphertext"),
+  iv: Buffer.alloc(12, 1),
+  tag: Buffer.alloc(16, 2),
+  keyVersion: 3,
+};
+
+describe("canonicalOwnTracksPayload", () => {
+  it("uses exact ordered keys, explicit nulls, internal device id, and normalized zero", () => {
+    const canonical = canonicalOwnTracksPayload(DEVICE.id, {
+      _type: "location",
+      tst: 1,
+      lat: -0,
+      lon: 55.25,
+      tid: "ZZ",
+    });
+
+    expect(canonical).toBe(
+      '{"deviceId":"internal-device-id","tst":1,"lat":0,"lon":55.25,"acc":null,"alt":null,"vel":null,"cog":null,"batt":null,"t":null}'
+    );
+    expect(canonical).not.toContain("tid");
+  });
+});
+
+describe("LocationIngestService", () => {
+  let tx: any;
+  let prisma: any;
+  let config: any;
+  let cipher: any;
+  let index: any;
+  let service: LocationIngestService;
+
+  beforeEach(() => {
+    tx = {
+      locationDevice: {
+        findFirst: jest.fn().mockResolvedValue({ lastSeenAt: null }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      locationSample: { create: jest.fn().mockResolvedValue({ id: "sample" }) },
+    };
+    prisma = {
+      $transaction: jest
+        .fn()
+        .mockImplementation((operation: any) => operation(tx)),
+      locationDevice: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    };
+    config = { requireEnabled: jest.fn() };
+    cipher = { encrypt: jest.fn().mockReturnValue(ENVELOPE) };
+    index = { mac: jest.fn().mockReturnValue("b".repeat(64)) };
+    service = new LocationIngestService(prisma, config, cipher, index);
+  });
+
+  it("does no DB, crypto, or MAC work when location ingest is disabled", async () => {
+    config.requireEnabled.mockImplementation(() => {
+      throw new ServiceUnavailableException({
+        code: "integration_not_configured",
+        message: "Integration is not configured",
+      });
+    });
+
+    await expect(
+      service.ingest(DEVICE, validLocation(), RECEIVED_AT)
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(cipher.encrypt).not.toHaveBeenCalled();
+    expect(index.mac).not.toHaveBeenCalled();
+  });
+
+  it("stores only the exact encrypted coordinate envelope and queryable exceptions", async () => {
+    const input = {
+      _type: "location" as const,
+      tst: 1_721_131_200,
+      lat: 25.2048,
+      lon: 55.2708,
+      acc: 7.5,
+      alt: 12,
+      vel: 2.25,
+      cog: 181.5,
+      batt: 84,
+      t: "p",
+      tid: "S1",
+    };
+
+    await expect(service.ingest(DEVICE, input, RECEIVED_AT)).resolves.toEqual(
+      []
+    );
+
+    const canonical =
+      '{"deviceId":"internal-device-id","tst":1721131200,"lat":25.2048,"lon":55.2708,"acc":7.5,"alt":12,"vel":2.25,"cog":181.5,"batt":84,"t":"p"}';
+    expect(index.mac).toHaveBeenCalledWith(
+      "owntracks-payload",
+      DEVICE.ownerId,
+      canonical
+    );
+    const createData = tx.locationSample.create.mock.calls[0][0].data;
+    expect(cipher.encrypt).toHaveBeenCalledWith(
+      "location-sample-coordinates",
+      DEVICE.ownerId,
+      createData.id,
+      { lat: 25.2048, lon: 55.2708, alt: 12, cog: 181.5, vel: 2.25 }
+    );
+    expect(createData).toEqual({
+      id: expect.any(String),
+      ownerId: DEVICE.ownerId,
+      deviceId: DEVICE.id,
+      recordedAt: new Date("2024-07-16T12:00:00.000Z"),
+      receivedAt: RECEIVED_AT,
+      coordinatesCiphertext: ENVELOPE.ciphertext,
+      coordinatesIv: ENVELOPE.iv,
+      coordinatesTag: ENVELOPE.tag,
+      coordinatesKeyVersion: 3,
+      accuracyM: 7.5,
+      batteryPercent: 84,
+      trigger: "p",
+      payloadMac: "b".repeat(64),
+    });
+    expect(createData).not.toHaveProperty("lat");
+    expect(createData).not.toHaveProperty("lon");
+    expect(createData).not.toHaveProperty("tid");
+    expect(createData).not.toHaveProperty("rawPayload");
+    expect(tx.locationDevice.findFirst).toHaveBeenCalledWith({
+      where: { id: DEVICE.id, ownerId: DEVICE.ownerId, status: "active" },
+      select: { lastSeenAt: true },
+    });
+  });
+
+  it("accepts old queued history without a past-age cutoff", async () => {
+    const input = validLocation({ tst: 1 });
+
+    await expect(service.ingest(DEVICE, input, RECEIVED_AT)).resolves.toEqual(
+      []
+    );
+
+    expect(tx.locationSample.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ recordedAt: new Date(1_000) }),
+      })
+    );
+  });
+
+  it("accepts HMAC duplicate delivery and keeps the last-seen update owner-scoped", async () => {
+    prisma.$transaction.mockRejectedValue({
+      code: "P2002",
+      meta: { target: ["deviceId", "payloadMac"] },
+    });
+
+    await expect(
+      service.ingest(DEVICE, validLocation(), RECEIVED_AT)
+    ).resolves.toEqual([]);
+
+    expect(prisma.locationDevice.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: DEVICE.id,
+        ownerId: DEVICE.ownerId,
+        status: "active",
+        OR: [{ lastSeenAt: null }, { lastSeenAt: { lt: new Date(1_000) } }],
+      },
+      data: { lastSeenAt: new Date(1_000) },
+    });
+  });
+
+  it("does not lower lastSeenAt for older queued samples", async () => {
+    tx.locationDevice.findFirst.mockResolvedValue({
+      lastSeenAt: new Date("2026-07-16T11:00:00.000Z"),
+    });
+
+    await service.ingest(DEVICE, validLocation({ tst: 1 }), RECEIVED_AT);
+
+    expect(tx.locationDevice.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("raises lastSeenAt monotonically using an owner-scoped mutation", async () => {
+    const recordedAt = new Date("2026-07-16T11:30:00.000Z");
+
+    await service.ingest(
+      DEVICE,
+      validLocation({ tst: Math.floor(recordedAt.getTime() / 1_000) }),
+      RECEIVED_AT
+    );
+
+    expect(tx.locationDevice.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: DEVICE.id,
+        ownerId: DEVICE.ownerId,
+        status: "active",
+        OR: [{ lastSeenAt: null }, { lastSeenAt: { lt: recordedAt } }],
+      },
+      data: { lastSeenAt: recordedAt },
+    });
+  });
+
+  it("does not treat unrelated database failures as duplicate deliveries", async () => {
+    prisma.$transaction.mockRejectedValue(
+      new Error("synthetic database failure")
+    );
+
+    await expect(
+      service.ingest(DEVICE, validLocation(), RECEIVED_AT)
+    ).rejects.toThrow("synthetic database failure");
+    expect(prisma.locationDevice.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+function validLocation(overrides: Record<string, unknown> = {}) {
+  return {
+    _type: "location" as const,
+    tst: 1,
+    lat: 1,
+    lon: 2,
+    ...overrides,
+  };
+}
