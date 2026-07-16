@@ -2,6 +2,7 @@ import type {
   ProposalHistoryResponse,
   ProposalPreview,
 } from "@/lib/cockpit-contracts";
+import type { Ref } from "react";
 import { proposalReceipt, proposalStatusCopy } from "../proposal-view";
 
 type Proposal = ProposalHistoryResponse["proposals"][number];
@@ -63,12 +64,14 @@ export default function ProposalRow({
   error,
   onApprove,
   onReject,
+  receiptHeadingRef,
 }: {
   proposal: Proposal;
   busy: boolean;
   error: string;
   onApprove: (id: string) => Promise<void>;
   onReject: (id: string) => Promise<void>;
+  receiptHeadingRef?: Ref<HTMLHeadingElement>;
 }) {
   const reviewable =
     proposal.status === "pending" &&
@@ -88,7 +91,13 @@ export default function ProposalRow({
       <div className="mt-4 border-t border-outline-variant/20 pt-3 text-xs text-on-surface-variant">
         {receipt ? (
           <section aria-label="Decision receipt">
-            <p className="font-bold text-on-surface">Decision receipt</p>
+            <h2
+              ref={receiptHeadingRef}
+              tabIndex={-1}
+              className="font-bold text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+            >
+              Decision receipt
+            </h2>
             <dl className="mt-2 grid gap-1.5 sm:grid-cols-[6rem_1fr]">
               <dt className="font-bold text-on-surface-variant">Decision</dt>
               <dd className="text-on-surface">{receipt.decision}</dd>

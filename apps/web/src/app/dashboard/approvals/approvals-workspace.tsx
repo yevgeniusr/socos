@@ -2,12 +2,18 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { apiJson } from "@/lib/api-client";
 import type { ProposalHistoryResponse, ProposalHistoryStatus } from "@/lib/cockpit-contracts";
 import ProposalRow from "./_components/proposal-row";
-import { proposalHistoryStatusAfterDecision } from "./proposal-view";
+import {
+  proposalAfterDecision,
+  proposalHistoryStatusAfterDecision,
+  proposalsWithPinnedReceipt,
+} from "./proposal-view";
+
+type Proposal = ProposalHistoryResponse["proposals"][number];
 
 const statuses: ProposalHistoryStatus[] = ["all", "pending", "approved", "rejected", "expired"];
 
@@ -21,6 +27,11 @@ export default function ApprovalsWorkspace() {
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
+  const [pinnedProposal, setPinnedProposal] = useState<Proposal | null>(null);
+  const [decidedId, setDecidedId] = useState<string | null>(null);
+  const [announcement, setAnnouncement] = useState("");
+  const receiptHeadingRef = useRef<HTMLHeadingElement>(null);
+  const focusedDecisionId = useRef<string | null>(null);
 
   const load = useCallback((signal?: AbortSignal) => {
     setLoading(true);
@@ -37,11 +48,50 @@ export default function ApprovalsWorkspace() {
     return () => controller.abort();
   }, [load]);
 
+  const visibleProposals = useMemo(
+    () =>
+      proposalsWithPinnedReceipt(
+        data?.proposals ?? [],
+        pinnedProposal,
+        status
+      ),
+    [data?.proposals, pinnedProposal, status]
+  );
+
+  useEffect(() => {
+    if (
+      !decidedId ||
+      focusedDecisionId.current === decidedId ||
+      !visibleProposals.some((proposal) => proposal.id === decidedId)
+    ) {
+      return;
+    }
+    const heading = receiptHeadingRef.current;
+    if (!heading) return;
+    heading.focus();
+    if (document.activeElement === heading) {
+      focusedDecisionId.current = decidedId;
+    }
+  }, [decidedId, visibleProposals]);
+
   async function decide(id: string, decision: "approve" | "reject") {
+    const reviewedProposal = visibleProposals.find(
+      (proposal) => proposal.id === id
+    );
     setBusyId(id);
     setRowErrors((current) => ({ ...current, [id]: "" }));
     try {
       await apiJson(`/api/agent-proposals/${encodeURIComponent(id)}/${decision}`, { method: "POST" });
+      if (reviewedProposal) {
+        setPinnedProposal(proposalAfterDecision(reviewedProposal, decision));
+        setDecidedId(id);
+        focusedDecisionId.current = null;
+        setAnnouncement(
+          decision === "approve"
+            ? "Approval recorded. Receipt ready."
+            : "Rejection recorded. Receipt ready."
+        );
+      }
       const decidedStatus = proposalHistoryStatusAfterDecision(status, decision);
       if (decidedStatus !== status) {
         router.replace(`/dashboard/approvals?status=${decidedStatus}`);
@@ -67,10 +117,14 @@ export default function ApprovalsWorkspace() {
         ))}
       </nav>
 
+      <p role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </p>
+
       {loading ? <div aria-busy="true" aria-label="Loading approval history" className="space-y-3"><div className="h-32 animate-pulse rounded-lg bg-surface-container-high" /><div className="h-32 animate-pulse rounded-lg bg-surface-container-high" /></div> : null}
       {error ? <div role="alert" className="rounded-lg border border-error/40 bg-error-container/20 p-4 text-sm text-on-error-container"><p>{error}</p><button type="button" onClick={() => load()} className="mt-3 min-h-11 rounded-lg border border-error/40 px-3 font-bold">Retry</button></div> : null}
-      {!loading && !error && data?.proposals.length ? <ul className="space-y-3">{data.proposals.map((proposal) => <ProposalRow key={proposal.id} proposal={proposal} busy={busyId === proposal.id} error={rowErrors[proposal.id] ?? ""} onApprove={(id) => decide(id, "approve")} onReject={(id) => decide(id, "reject")} />)}</ul> : null}
-      {!loading && !error && data && !data.proposals.length ? <p className="border-y border-outline-variant/25 py-8 text-sm text-on-surface-variant">No {status === "all" ? "" : `${status} `}proposals.</p> : null}
+      {visibleProposals.length ? <ul className="space-y-3">{visibleProposals.map((proposal) => <ProposalRow key={proposal.id} proposal={proposal} busy={busyId === proposal.id} error={rowErrors[proposal.id] ?? ""} onApprove={(id) => decide(id, "approve")} onReject={(id) => decide(id, "reject")} receiptHeadingRef={proposal.id === decidedId ? receiptHeadingRef : undefined} />)}</ul> : null}
+      {!loading && !error && data && !visibleProposals.length ? <p className="border-y border-outline-variant/25 py-8 text-sm text-on-surface-variant">No {status === "all" ? "" : `${status} `}proposals.</p> : null}
       {data && data.total > data.offset + data.limit ? <p className="mt-4 text-xs text-on-surface-variant">Showing {data.offset + 1}-{Math.min(data.total, data.offset + data.limit)} of {data.total}</p> : null}
     </main>
   );

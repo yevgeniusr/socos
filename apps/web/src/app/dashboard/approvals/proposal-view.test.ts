@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  proposalAfterDecision,
   proposalHistoryStatusAfterDecision,
   proposalReceipt,
+  proposalsWithPinnedReceipt,
   proposalStatusCopy,
 } from "./proposal-view";
 import type { ProposalHistoryResponse } from "@/lib/cockpit-contracts";
@@ -84,10 +86,11 @@ describe("proposalReceipt", () => {
   });
 
   it.each([
-    ["queued", "Execution queued"],
-    ["running", "Execution running"],
+    ["pending", "Execution queued"],
+    ["processing", "Execution running"],
     ["completed", "Execution completed"],
     ["failed", "Execution failed"],
+    ["cancelled", "Execution cancelled"],
   ])("reports %s execution separately from approval", (status, execution) => {
     const receipt = proposalReceipt({
       ...proposal,
@@ -111,6 +114,88 @@ describe("proposalReceipt", () => {
       progress: "XP or quest progress not reported",
     });
     expect(JSON.stringify(receipt)).not.toContain("PRIVATE_PROVIDER_DETAIL");
+  });
+});
+
+describe("proposalAfterDecision", () => {
+  it.each([
+    ["approve", "approved"],
+    ["reject", "rejected"],
+  ] as const)(
+    "retains the exact reviewed preview after %s",
+    (decision, expectedStatus) => {
+      const pending = {
+        ...proposal,
+        status: "pending" as const,
+        decidedAt: null,
+      };
+
+      const decided = proposalAfterDecision(pending, decision);
+
+      expect(decided).toEqual({
+        ...pending,
+        status: expectedStatus,
+        grant: null,
+      });
+      expect(decided.preview).toBe(pending.preview);
+    }
+  );
+});
+
+describe("proposalsWithPinnedReceipt", () => {
+  const pinned = {
+    ...proposal,
+    id: "proposal-pinned",
+    preview: {
+      type: "message" as const,
+      contact: { id: "contact-pinned", name: "Pinned Person" },
+      channel: "social",
+      body: "Exact pinned preview",
+    },
+  };
+
+  it("keeps a just-decided proposal ahead of a full first page that omits it", () => {
+    const firstPage = Array.from({ length: 20 }, (_, index) => ({
+      ...proposal,
+      id: `proposal-${index}`,
+    }));
+
+    const visible = proposalsWithPinnedReceipt(firstPage, pinned, "approved");
+
+    expect(visible).toHaveLength(21);
+    expect(visible[0]).toBe(pinned);
+    expect(visible[0].preview).toBe(pinned.preview);
+  });
+
+  it("uses the durable proposal once the decided history includes it", () => {
+    const durable = {
+      ...pinned,
+      grant: {
+        status: "consumed",
+        expiresAt: pinned.expiresAt,
+        consumedAt: pinned.decidedAt,
+        revokedAt: null,
+        outbox: {
+          status: "processing",
+          attempts: 1,
+          completedAt: null,
+          lastErrorCode: null,
+        },
+      },
+    };
+
+    expect(
+      proposalsWithPinnedReceipt([durable], pinned, "approved")
+    ).toEqual([durable]);
+  });
+
+  it("replaces a stale pending copy and hides the pin from other filters", () => {
+    const stalePending = { ...pinned, status: "pending" as const };
+
+    expect(
+      proposalsWithPinnedReceipt([stalePending], pinned, "approved")
+    ).toEqual([pinned]);
+    expect(proposalsWithPinnedReceipt([], pinned, "rejected")).toEqual([]);
   });
 });
 

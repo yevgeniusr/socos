@@ -98,6 +98,7 @@ interface ApiState {
   interactionBodies: Array<Record<string, unknown>>;
   interactionKeys: string[];
   questBodies: Array<Record<string, unknown>>;
+  questCompletionKeys: string[];
   completedReminders: string[];
   reminderQuestCompletionCalls: number;
   decisions: string[];
@@ -117,12 +118,16 @@ async function installApi(
   options: {
     briefReady?: boolean;
     failApprovals?: boolean;
+    failBriefAfterQuest?: boolean;
     holdFeedback?: boolean;
     holdQuestComplete?: boolean;
     holdReminderCreate?: boolean;
     loseFirstReminderQuestResponse?: boolean;
     loseFirstInteractionResponse?: boolean;
     loseFirstReminderCreateResponse?: boolean;
+    loseFirstQuestCompletionResponse?: boolean;
+    omitApprovedHistoryAfterDecision?: boolean;
+    failRejectedHistoryAfterDecision?: boolean;
     statsMode?: "ready" | "deferred-error";
   } = {}
 ): Promise<ApiState> {
@@ -147,6 +152,7 @@ async function installApi(
     interactionBodies: [],
     interactionKeys: [],
     questBodies: [],
+    questCompletionKeys: [],
     completedReminders: [],
     reminderQuestCompletionCalls: 0,
     decisions: [],
@@ -243,6 +249,12 @@ async function installApi(
         checkedInYesterday: true,
         streakAtRisk: false,
       });
+    if (
+      url.pathname === "/api/briefs/today" &&
+      options.failBriefAfterQuest &&
+      state.questBodies.length > 0
+    )
+      return json(route, { message: "Synthetic brief refresh failure" }, 503);
     if (url.pathname === "/api/briefs/today")
       return briefReady
         ? json(route, brief)
@@ -278,22 +290,37 @@ async function installApi(
         ],
         stats: { today: 0, thisWeek: 1, overdue: 0 },
       });
-    if (url.pathname === "/api/agent-proposals/history")
-      return options.failApprovals
-        ? json(route, { message: "Synthetic approval failure" }, 503)
-        : json(route, {
-            proposals:
-              url.searchParams.get("status") &&
-              url.searchParams.get("status") !== "all"
-                ? proposals.filter(
-                    (proposal) =>
-                      proposal.status === url.searchParams.get("status")
-                  )
-                : proposals,
-            total: proposals.length,
-            offset: 0,
-            limit: 20,
-          });
+    if (url.pathname === "/api/agent-proposals/history") {
+      const requestedStatus = url.searchParams.get("status");
+      const rejectedRefreshShouldFail =
+        options.failRejectedHistoryAfterDecision &&
+        requestedStatus === "rejected" &&
+        state.decisions.includes("proposal-reject:reject");
+      if (options.failApprovals || rejectedRefreshShouldFail) {
+        return json(route, { message: "Synthetic approval failure" }, 503);
+      }
+      let visibleProposals =
+        requestedStatus && requestedStatus !== "all"
+          ? proposals.filter(
+              (proposal) => proposal.status === requestedStatus
+            )
+          : proposals;
+      if (
+        options.omitApprovedHistoryAfterDecision &&
+        requestedStatus === "approved" &&
+        state.decisions.includes("proposal-approve:approve")
+      ) {
+        visibleProposals = visibleProposals.filter(
+          (proposal) => proposal.id !== "proposal-approve"
+        );
+      }
+      return json(route, {
+        proposals: visibleProposals,
+        total: visibleProposals.length,
+        offset: 0,
+        limit: 20,
+      });
+    }
     if (url.pathname === "/api/reminders" && method === "POST") {
       state.reminderBodies.push(
         request.postDataJSON() as Record<string, unknown>
@@ -380,7 +407,19 @@ async function installApi(
     );
     if (questComplete && method === "POST") {
       state.questBodies.push(request.postDataJSON() as Record<string, unknown>);
+      state.questCompletionKeys.push(
+        request.headers()["idempotency-key"] ?? ""
+      );
       if (options.holdQuestComplete) await questCompleteGate;
+      if (
+        options.loseFirstQuestCompletionResponse &&
+        state.questBodies.length === 1
+      )
+        return json(
+          route,
+          { message: "Synthetic lost quest completion response" },
+          503
+        );
       return json(route, {
         feedbackId: "quest-feedback",
         questId: questComplete[1],
@@ -446,7 +485,10 @@ async function installApi(
 test("performs durable cockpit actions with exact contracts", async ({
   page,
 }) => {
-  const api = await installApi(page);
+  const api = await installApi(page, {
+    omitApprovedHistoryAfterDecision: true,
+    failRejectedHistoryAfterDecision: true,
+  });
   await page.goto("/dashboard");
   await expect(page).toHaveURL(/\/dashboard\/today$/);
   await expect(page.getByRole("heading", { name: "Today" })).toBeVisible();
@@ -546,6 +588,7 @@ test("performs durable cockpit actions with exact contracts", async ({
   await expect(page.getByRole("heading", { name: "Quest verified" })).toBeFocused();
   await expect(page.getByText("Interaction evidence verified")).toBeVisible();
   await expect(page.getByText("+20 XP awarded")).toBeVisible();
+  await expect(page.getByText("Verified Jul 17, 12:00 PM")).toBeVisible();
 
   const reminderQuest = page
     .locator("li")
@@ -570,14 +613,44 @@ test("performs durable cockpit actions with exact contracts", async ({
   const message = page.locator("li").filter({ hasText: "Synthetic draft" });
   await message.getByRole("button", { name: "Approve" }).click();
   await expect.poll(() => api.decisions).toContain("proposal-approve:approve");
-  await page.getByRole("link", { name: "all" }).click();
-  await expect(page.getByText(/Approval granted/)).toBeVisible();
+  await expect(page).toHaveURL(/\/dashboard\/approvals\?status=approved$/);
+  await expect(
+    message.getByText("Synthetic draft", { exact: true })
+  ).toBeVisible();
+  await expect(
+    message.getByRole("heading", { name: "Decision receipt" })
+  ).toBeFocused();
+  await expect(
+    message.getByText("Approval granted", { exact: true })
+  ).toBeVisible();
+  await expect(message.getByText("Execution not requested")).toBeVisible();
+  await expect(
+    message.getByText("XP or quest progress not reported")
+  ).toBeVisible();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Approval recorded" })
+  ).toBeAttached();
   await expect(page.getByText("Sent")).toHaveCount(0);
+  await page.getByRole("link", { name: "pending" }).click();
   const invitation = page
     .locator("li")
     .filter({ hasText: "Synthetic invitation" });
   await invitation.getByRole("button", { name: "Reject" }).click();
   await expect.poll(() => api.decisions).toContain("proposal-reject:reject");
+  await expect(page).toHaveURL(/\/dashboard\/approvals\?status=rejected$/);
+  await expect(
+    invitation.getByText("Synthetic invitation", { exact: true })
+  ).toBeVisible();
+  await expect(
+    invitation.getByRole("heading", { name: "Decision receipt" })
+  ).toBeFocused();
+  await expect(invitation.getByText("Nothing sent")).toBeVisible();
+  await expect(
+    invitation.getByText("No XP or quest progress awarded")
+  ).toBeVisible();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Rejection recorded" })
+  ).toBeAttached();
 });
 
 test("explains focus priority and prefills reminders from structured date context", async ({
@@ -686,6 +759,43 @@ test("retries lost committed cockpit POST responses with stable intent keys", as
   await expect(
     page.getByRole("heading", { name: "Quest verified" })
   ).toBeFocused();
+});
+
+test("retries a lost quest-completion response with one verified receipt", async ({
+  page,
+}) => {
+  const api = await installApi(page, {
+    loseFirstQuestCompletionResponse: true,
+    failBriefAfterQuest: true,
+  });
+  await page.goto("/dashboard/today");
+
+  const quest = page
+    .locator("li")
+    .filter({ hasText: "Log a synthetic interaction" });
+  await quest.getByRole("button", { name: "Complete quest" }).click();
+  const dialog = page.getByRole("dialog", {
+    name: "Log a synthetic interaction",
+  });
+  await dialog.getByRole("textbox", { name: "Title" }).fill("Completed call");
+  await dialog.getByRole("textbox", { name: "Notes" }).fill("Verified notes");
+  await dialog.getByRole("button", { name: "Log and verify" }).click();
+
+  await expect(dialog.getByRole("alert")).toContainText(
+    "Synthetic lost quest completion response"
+  );
+  await expect(page.getByRole("heading", { name: "Quest verified" })).toHaveCount(0);
+  expect(api.interactionBodies).toHaveLength(1);
+  expect(api.questCompletionKeys).toHaveLength(1);
+
+  await dialog.getByRole("button", { name: "Retry verification" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("heading", { name: "Quest verified" })).toHaveCount(1);
+  await expect(page.getByText("+20 XP awarded")).toHaveCount(1);
+  await expect(page.getByText("Synthetic brief refresh failure")).toBeVisible();
+  expect(api.interactionBodies).toHaveLength(1);
+  expect(api.questCompletionKeys).toHaveLength(2);
+  expect(api.questCompletionKeys[1]).toBe(api.questCompletionKeys[0]);
 });
 
 test("moves focus to the verified receipt after each successful quest", async ({
@@ -946,6 +1056,7 @@ test("keeps each cockpit dialog open for Escape and backdrop while busy", async 
   await expect(
     questDialog.getByRole("button", { name: "Verifying..." })
   ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Quest verified" })).toHaveCount(0);
   await page.keyboard.press("Escape");
   await questDialog.locator("..").click({ position: { x: 1, y: 1 } });
   await expect(questDialog).toBeVisible();

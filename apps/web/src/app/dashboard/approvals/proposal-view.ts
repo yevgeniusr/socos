@@ -53,10 +53,11 @@ export function proposalReceipt(proposal: Proposal): ProposalReceipt | null {
   if (proposal.status !== "approved") return null;
 
   const executionByStatus: Record<string, string> = {
-    queued: "Execution queued",
-    running: "Execution running",
+    pending: "Execution queued",
+    processing: "Execution running",
     completed: "Execution completed",
     failed: "Execution failed",
+    cancelled: "Execution cancelled",
   };
   const outboxStatus = proposal.grant?.outbox?.status;
 
@@ -75,4 +76,50 @@ export function proposalHistoryStatusAfterDecision(
 ): ProposalHistoryStatus {
   if (currentStatus !== "pending") return currentStatus;
   return decision === "approve" ? "approved" : "rejected";
+}
+
+export function proposalAfterDecision(
+  proposal: Proposal,
+  decision: "approve" | "reject"
+): Proposal {
+  return {
+    ...proposal,
+    status: decision === "approve" ? "approved" : "rejected",
+    grant: null,
+  };
+}
+
+function proposalMatchesStatus(
+  proposal: Proposal,
+  status: ProposalHistoryStatus
+): boolean {
+  return status === "all" || proposal.status === status;
+}
+
+export function proposalsWithPinnedReceipt(
+  proposals: Proposal[],
+  pinnedProposal: Proposal | null,
+  status: ProposalHistoryStatus
+): Proposal[] {
+  const visible = proposals.filter((proposal) =>
+    proposalMatchesStatus(proposal, status)
+  );
+  if (
+    !pinnedProposal ||
+    !proposalMatchesStatus(pinnedProposal, status)
+  ) {
+    return visible;
+  }
+
+  const durableProposal = visible.find(
+    (proposal) =>
+      proposal.id === pinnedProposal.id &&
+      proposal.status === pinnedProposal.status
+  );
+  if (durableProposal) return visible;
+
+  return [
+    pinnedProposal,
+    ...visible.filter((proposal) => proposal.id !== pinnedProposal.id),
+  ];
 }
