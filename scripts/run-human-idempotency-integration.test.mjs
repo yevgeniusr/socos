@@ -68,14 +68,14 @@ function run(url, fixture) {
   });
 }
 
-test("default API Jest cannot discover the PostgreSQL integration spec", () => {
+test("default API Jest discovers in-tree integrations but not the moved PostgreSQL spec", () => {
   const config = require(resolve(root, "services/api/jest.config.cjs"));
   const dedicated = require(
     resolve(root, "services/api/jest.human-idempotency.integration.config.cjs"),
   );
 
   assert.equal(config.rootDir, "src");
-  assert.deepEqual(config.testPathIgnorePatterns, ["\\.integration\\.spec\\.ts$"]);
+  assert.equal(config.testPathIgnorePatterns, undefined);
   assert.equal(
     existsSync(
       resolve(
@@ -95,6 +95,34 @@ test("default API Jest cannot discover the PostgreSQL integration spec", () => {
   assert.equal(
     dedicated.testRegex,
     "test/human-idempotency\\.integration\\.spec\\.ts$",
+  );
+
+  const discovery = spawnSync(
+    "pnpm",
+    [
+      "--filter",
+      "@socos/api",
+      "exec",
+      "jest",
+      "--config",
+      "jest.config.cjs",
+      "--listTests",
+    ],
+    { cwd: root, encoding: "utf8" },
+  );
+  assert.equal(discovery.status, 0, discovery.stderr);
+  const testPaths = discovery.stdout.trim().split("\n");
+  assert.equal(
+    testPaths.some((path) =>
+      path.endsWith("/src/cli/monica-import.integration.spec.ts"),
+    ),
+    true,
+  );
+  assert.equal(
+    testPaths.some((path) =>
+      path.endsWith("/test/human-idempotency.integration.spec.ts"),
+    ),
+    false,
   );
 });
 
