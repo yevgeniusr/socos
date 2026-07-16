@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { HealthController } from './health/health.controller.js';
+import { HealthService } from './health/health.service.js';
 import { PrismaService } from './modules/prisma/prisma.service.js';
 import { JwtService } from './modules/jwt/jwt.service.js';
 import { AuthController } from './modules/auth/auth.controller.js';
@@ -67,6 +68,7 @@ import { EventsModule } from './modules/events/events.module.js';
   ],
   providers: [
     PrismaService,
+    HealthService,
     JwtService,
     AuthService,
     AuthGuard,
