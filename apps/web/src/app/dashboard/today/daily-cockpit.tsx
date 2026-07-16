@@ -18,7 +18,12 @@ import ReminderList from "./_components/reminder-list";
 import QuestCompletionDialog from "./_components/quest-completion-dialog";
 import ReminderDialog from "./_components/reminder-dialog";
 import { IntentRegistry } from "./intent-registry";
-import { momentumState, type ReminderDraft } from "./cockpit-view";
+import {
+  formatBriefDate,
+  momentumState,
+  type QuestReceipt,
+  type ReminderDraft,
+} from "./cockpit-view";
 
 type Loadable<T> =
   | { status: "loading" }
@@ -92,9 +97,10 @@ export default function DailyCockpit() {
   const [selectedQuest, setSelectedQuest] = useState<
     DailyBrief["quests"][number] | null
   >(null);
+  const [questReceipt, setQuestReceipt] = useState<QuestReceipt | null>(null);
   const reminderTriggerRef = useRef<HTMLButtonElement>(null);
   const questTriggerRef = useRef<HTMLButtonElement>(null);
-  const questSuccessFocusRef = useRef<HTMLHeadingElement>(null);
+  const questReceiptFocusRef = useRef<HTMLHeadingElement>(null);
   const intents = useRef(new IntentRegistry());
 
   const closeReminderDialog = useCallback(() => {
@@ -103,10 +109,11 @@ export default function DailyCockpit() {
   }, []);
 
   const closeQuestDialog = useCallback(
-    (focusTarget: "trigger" | "page" = "trigger") => {
-      if (focusTarget === "page") questSuccessFocusRef.current?.focus();
+    (focusTarget: "trigger" | "receipt" = "trigger") => {
       setSelectedQuest(null);
-      if (focusTarget === "trigger")
+      if (focusTarget === "receipt")
+        window.requestAnimationFrame(() => questReceiptFocusRef.current?.focus());
+      else
         window.requestAnimationFrame(() => questTriggerRef.current?.focus());
     },
     []
@@ -295,8 +302,6 @@ export default function DailyCockpit() {
             Personal workspace
           </p>
           <h1
-            ref={questSuccessFocusRef}
-            tabIndex={-1}
             className="mt-1 text-2xl font-black sm:text-3xl"
           >
             Today
@@ -403,13 +408,45 @@ export default function DailyCockpit() {
             />
           ) : null}
           {brief.status === "ready" ? (
-            <QuestList
-              quests={brief.data.quests}
-              onOpen={(quest, trigger) => {
-                questTriggerRef.current = trigger;
-                setSelectedQuest(quest);
-              }}
-            />
+            <>
+              {questReceipt ? (
+                <section
+                  role="status"
+                  aria-live="polite"
+                  className="border-t border-secondary/40 bg-secondary/5 px-3 py-4"
+                >
+                  <h2
+                    ref={questReceiptFocusRef}
+                    tabIndex={-1}
+                    className="text-base font-black text-secondary"
+                  >
+                    Quest verified
+                  </h2>
+                  <p className="mt-1 text-sm font-bold text-on-surface">
+                    {questReceipt.title}
+                  </p>
+                  <p className="mt-1 text-sm text-on-surface-variant">
+                    {questReceipt.evidenceType === "interaction"
+                      ? "Interaction"
+                      : "Reminder"}{" "}
+                    evidence verified
+                  </p>
+                  <p className="mt-1 text-sm font-black text-secondary">
+                    +{questReceipt.xpAwarded} XP awarded
+                  </p>
+                  <p className="mt-1 text-xs text-on-surface-variant">
+                    Verified {formatBriefDate(questReceipt.verifiedAt, timeZone)}
+                  </p>
+                </section>
+              ) : null}
+              <QuestList
+                quests={brief.data.quests}
+                onOpen={(quest, trigger) => {
+                  questTriggerRef.current = trigger;
+                  setSelectedQuest(quest);
+                }}
+              />
+            </>
           ) : null}
           {reminders.status === "loading" ? (
             <LoadingLines label="Loading reminders" />
@@ -480,7 +517,10 @@ export default function DailyCockpit() {
         <QuestCompletionDialog
           quest={selectedQuest}
           onClose={closeQuestDialog}
-          onSuccess={refreshQuestData}
+          onSuccess={async (receipt) => {
+            setQuestReceipt(receipt);
+            await refreshQuestData();
+          }}
         />
       ) : null}
     </main>

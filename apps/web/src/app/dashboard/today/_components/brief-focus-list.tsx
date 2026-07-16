@@ -112,7 +112,10 @@ export default function BriefFocusList({
                   onSnooze={onSnooze}
                   onDismiss={onDismiss}
                   onReminder={(trigger) =>
-                    onReminder(buildPersonReminderDraft(item), trigger)
+                    onReminder(
+                      buildPersonReminderDraft(item, brief.timeZone),
+                      trigger
+                    )
                   }
                 />
               </li>
@@ -156,7 +159,10 @@ export default function BriefFocusList({
                   onSnooze={onSnooze}
                   onDismiss={onDismiss}
                   onReminder={(trigger) =>
-                    onReminder(buildDateReminderDraft(item), trigger)
+                    onReminder(
+                      buildDateReminderDraft(item, brief.timeZone),
+                      trigger
+                    )
                   }
                 />
               </li>

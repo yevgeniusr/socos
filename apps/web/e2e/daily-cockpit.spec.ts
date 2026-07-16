@@ -26,8 +26,8 @@ const brief = {
       itemId: "date-item",
       rank: 1,
       contact: { id: "contact-date", name: "Synthetic Friend" },
-      type: "celebration",
-      title: "Synthetic celebration",
+      type: "birthday",
+      title: "Synthetic Friend's birthday",
       date: "2026-07-18",
       daysAway: 1,
       reason: "Tomorrow",
@@ -386,7 +386,7 @@ async function installApi(
         questId: questComplete[1],
         status: "completed",
         completedAt: now,
-        xpAwarded: 20,
+        xpAwarded: questComplete[1] === "reminder-quest" ? 15 : 20,
       });
     }
     const reminderComplete = url.pathname.match(
@@ -543,7 +543,9 @@ test("performs durable cockpit actions with exact contracts", async ({
     .poll(() => api.questBodies)
     .toContainEqual({ interactionId: "interaction-evidence" });
   expect(api.interactionKeys[0]).toMatch(/^[A-Za-z0-9._:-]{8,128}$/);
-  await expect(page.getByRole("heading", { name: "Today" })).toBeFocused();
+  await expect(page.getByRole("heading", { name: "Quest verified" })).toBeFocused();
+  await expect(page.getByText("Interaction evidence verified")).toBeVisible();
+  await expect(page.getByText("+20 XP awarded")).toBeVisible();
 
   const reminderQuest = page
     .locator("li")
@@ -559,7 +561,9 @@ test("performs durable cockpit actions with exact contracts", async ({
   await expect
     .poll(() => api.questBodies)
     .toContainEqual({ reminderId: "quest-reminder-target" });
-  await expect(page.getByRole("heading", { name: "Today" })).toBeFocused();
+  await expect(page.getByRole("heading", { name: "Quest verified" })).toBeFocused();
+  await expect(page.getByText("Reminder evidence verified")).toBeVisible();
+  await expect(page.getByText("+15 XP awarded")).toBeVisible();
 
   await page.getByRole("link", { name: /pending approvals/ }).click();
   await expect(page).toHaveURL(/\/dashboard\/approvals\?status=pending$/);
@@ -593,26 +597,39 @@ test("explains focus priority and prefills reminders from structured date contex
 
   const importantDate = page
     .locator("li")
-    .filter({ hasText: "Synthetic celebration" });
+    .filter({ hasText: "Synthetic Friend's birthday" });
   await importantDate
     .getByRole("button", { name: "Create reminder" })
     .click();
   const dialog = page.getByRole("dialog", { name: "Create reminder" });
-  await expect(dialog.getByLabel("Type")).toHaveValue("custom");
-  await expect(dialog.getByLabel("Title")).toHaveValue("Synthetic celebration");
+  await expect(dialog.getByLabel("Type")).toHaveValue("birthday");
+  await expect(dialog.getByLabel("Title")).toHaveValue(
+    "Synthetic Friend's birthday"
+  );
   await expect(dialog.getByLabel("Scheduled at")).toHaveValue(
     "2026-07-18T09:00"
   );
-  await expect(dialog.getByText("Celebration · Jul 18, 2026")).toBeVisible();
+  await expect(dialog.getByText("Birthday · Jul 18, 2026")).toBeVisible();
   await dialog.getByRole("button", { name: "Create reminder" }).click();
 
   await expect.poll(() => api.reminderBodies).toHaveLength(1);
   expect(api.reminderBodies[0]).toEqual({
     contactId: "contact-date",
-    type: "custom",
-    title: "Synthetic celebration",
+    type: "birthday",
+    title: "Synthetic Friend's birthday",
     scheduledAt: "2026-07-18T05:00:00.000Z",
   });
+
+  await person.getByRole("button", { name: "Create reminder" }).click();
+  const followupDialog = page.getByRole("dialog", { name: "Create reminder" });
+  await expect(followupDialog.getByLabel("Type")).toHaveValue("followup");
+  await expect(followupDialog.getByLabel("Title")).toHaveValue(
+    "Follow up with Synthetic Person"
+  );
+  await expect(followupDialog.getByLabel("Scheduled at")).toHaveValue(
+    /^\d{4}-\d{2}-\d{2}T09:00$/
+  );
+  await followupDialog.getByRole("button", { name: "Close" }).click();
 });
 
 test("retries lost committed cockpit POST responses with stable intent keys", async ({
@@ -666,15 +683,17 @@ test("retries lost committed cockpit POST responses with stable intent keys", as
   expect(api.interactionBodies).toHaveLength(2);
   expect(api.interactionBodies[1]).toEqual(api.interactionBodies[0]);
   expect(api.interactionKeys[1]).toBe(api.interactionKeys[0]);
-  await expect(page.getByRole("heading", { name: "Today" })).toBeFocused();
+  await expect(
+    page.getByRole("heading", { name: "Quest verified" })
+  ).toBeFocused();
 });
 
-test("moves focus to the stable page heading after each successful quest", async ({
+test("moves focus to the verified receipt after each successful quest", async ({
   page,
 }) => {
   await installApi(page);
   await page.goto("/dashboard/today");
-  const todayHeading = page.getByRole("heading", { name: "Today" });
+  const receiptHeading = page.getByRole("heading", { name: "Quest verified" });
 
   const interactionQuest = page
     .locator("li")
@@ -691,7 +710,7 @@ test("moves focus to the stable page heading after each successful quest", async
     .getByRole("button", { name: "Log and verify" })
     .click();
   await expect(interactionDialog).toBeHidden();
-  await expect(todayHeading).toBeFocused();
+  await expect(receiptHeading).toBeFocused();
 
   const reminderQuest = page
     .locator("li")
@@ -704,7 +723,7 @@ test("moves focus to the stable page heading after each successful quest", async
     .getByRole("button", { name: "Complete and verify" })
     .click();
   await expect(reminderDialog).toBeHidden();
-  await expect(todayHeading).toBeFocused();
+  await expect(receiptHeading).toBeFocused();
 });
 
 test("generates only after explicit command and isolates panel failures", async ({

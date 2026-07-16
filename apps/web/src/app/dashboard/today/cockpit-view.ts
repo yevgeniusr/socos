@@ -10,6 +10,22 @@ export interface ReminderDraft {
   title: string;
   scheduledAt: string;
   sourceLabel: string;
+  timeZone: string;
+}
+
+export interface QuestCompletionResult {
+  questId: string;
+  status: "completed";
+  completedAt: string;
+  xpAwarded: number;
+}
+
+export interface QuestReceipt {
+  questId: string;
+  title: string;
+  evidenceType: "interaction" | "reminder";
+  verifiedAt: string;
+  xpAwarded: number;
 }
 
 export function buildCockpitView(brief: DailyBrief) {
@@ -58,13 +74,21 @@ export function healthBandLabel(
 }
 
 export function personPriorityLabel(item: PersonItem): string {
-  const daysOverdue = item.evidence.find(
-    (signal) => signal.code === "days_overdue"
-  )?.value;
+  const signal = (code: string) =>
+    item.evidence.find((entry) => entry.code === code)?.value;
+  const pendingTasks = signal("pending_task_count");
+  const importantDateDays = signal("important_date_days");
+  const daysOverdue = signal("days_overdue");
   const context =
-    typeof daysOverdue === "number" && daysOverdue > 0
-      ? `${daysOverdue} ${daysOverdue === 1 ? "day" : "days"} overdue`
-      : null;
+    typeof pendingTasks === "number" && pendingTasks > 0
+      ? `${pendingTasks} unfinished ${pendingTasks === 1 ? "commitment" : "commitments"}`
+      : typeof importantDateDays === "number" && importantDateDays >= 0
+        ? importantDateDays === 0
+          ? "Important date today"
+          : `Important date in ${importantDateDays} ${importantDateDays === 1 ? "day" : "days"}`
+        : typeof daysOverdue === "number" && daysOverdue > 0
+          ? `${daysOverdue} ${daysOverdue === 1 ? "day" : "days"} overdue`
+          : item.reason.trim() || null;
   return [healthBandLabel(item.health.band), context].filter(Boolean).join(" · ");
 }
 
@@ -81,28 +105,96 @@ export function lastInteractionLabel(
   }).format(new Date(value))}`;
 }
 
-function localDateTimeInput(value: Date): string {
-  const local = new Date(value.getTime() - value.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 16);
+function zonedParts(value: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(value);
+  const number = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value);
+  return {
+    year: number("year"),
+    month: number("month"),
+    day: number("day"),
+    hour: number("hour"),
+    minute: number("minute"),
+    second: number("second"),
+  };
+}
+
+export function zonedLocalDateTimeToIso(
+  value: string,
+  timeZone: string
+): string {
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (!match) throw new Error("Reminder time is invalid");
+  const desired = match.slice(1).map(Number);
+  const desiredUtc = Date.UTC(
+    desired[0],
+    desired[1] - 1,
+    desired[2],
+    desired[3],
+    desired[4],
+    0
+  );
+  let candidate = desiredUtc;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const actual = zonedParts(new Date(candidate), timeZone);
+    const represented = Date.UTC(
+      actual.year,
+      actual.month - 1,
+      actual.day,
+      actual.hour,
+      actual.minute,
+      actual.second
+    );
+    candidate += desiredUtc - represented;
+  }
+  const roundTrip = zonedParts(new Date(candidate), timeZone);
+  if (
+    roundTrip.year !== desired[0] ||
+    roundTrip.month !== desired[1] ||
+    roundTrip.day !== desired[2] ||
+    roundTrip.hour !== desired[3] ||
+    roundTrip.minute !== desired[4]
+  ) {
+    throw new Error("Reminder time does not exist in the selected timezone");
+  }
+  return new Date(candidate).toISOString();
 }
 
 export function buildPersonReminderDraft(
   item: PersonItem,
+  timeZone: string,
   now = new Date()
 ): ReminderDraft {
-  const scheduled = new Date(now);
-  scheduled.setDate(scheduled.getDate() + 1);
-  scheduled.setHours(9, 0, 0, 0);
+  const today = zonedParts(now, timeZone);
+  const tomorrow = new Date(
+    Date.UTC(today.year, today.month - 1, today.day + 1, 12)
+  )
+    .toISOString()
+    .slice(0, 10);
   return {
     contact: item.contact,
     type: "followup",
     title: `Follow up with ${item.contact.name}`,
-    scheduledAt: localDateTimeInput(scheduled),
+    scheduledAt: `${tomorrow}T09:00`,
     sourceLabel: item.reason,
+    timeZone,
   };
 }
 
-export function buildDateReminderDraft(item: DateItem): ReminderDraft {
+export function buildDateReminderDraft(
+  item: DateItem,
+  timeZone: string
+): ReminderDraft {
   const type =
     item.type === "birthday" || item.type === "anniversary"
       ? item.type
@@ -127,6 +219,31 @@ export function buildDateReminderDraft(item: DateItem): ReminderDraft {
     title: item.title,
     scheduledAt: `${item.date}T09:00`,
     sourceLabel: `${sourceType} · ${formattedDate}`,
+    timeZone,
+  };
+}
+
+export function buildQuestReceipt(
+  quest: Quest,
+  evidenceType: QuestReceipt["evidenceType"],
+  result: QuestCompletionResult
+): QuestReceipt {
+  if (
+    result.questId !== quest.questId ||
+    result.status !== "completed" ||
+    evidenceType !== quest.completionType ||
+    !Number.isFinite(result.xpAwarded) ||
+    result.xpAwarded < 0 ||
+    Number.isNaN(Date.parse(result.completedAt))
+  ) {
+    throw new Error("Quest verification response does not match the request");
+  }
+  return {
+    questId: result.questId,
+    title: quest.title,
+    evidenceType,
+    verifiedAt: result.completedAt,
+    xpAwarded: result.xpAwarded,
   };
 }
 

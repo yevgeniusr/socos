@@ -5,6 +5,11 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { apiJson } from "@/lib/api-client";
 import type { DailyBrief, QuestAction } from "@/lib/cockpit-contracts";
 import { getFocusLoopTarget } from "../../contacts/_components/dialog-focus";
+import {
+  buildQuestReceipt,
+  type QuestCompletionResult,
+  type QuestReceipt,
+} from "../cockpit-view";
 import { IntentRegistry } from "../intent-registry";
 
 type Quest = DailyBrief["quests"][number];
@@ -25,8 +30,8 @@ export default function QuestCompletionDialog({
   onSuccess,
 }: {
   quest: Quest;
-  onClose: (focusTarget?: "trigger" | "page") => void;
-  onSuccess: () => Promise<void>;
+  onClose: (focusTarget?: "trigger" | "receipt") => void;
+  onSuccess: (receipt: QuestReceipt) => Promise<void>;
 }) {
   const [action, setAction] = useState<QuestAction | null>(null);
   const [loading, setLoading] = useState(true);
@@ -95,13 +100,13 @@ export default function QuestCompletionDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [busy, onClose]);
 
-  async function completeQuest(id: string) {
+  async function completeQuest(id: string): Promise<QuestReceipt> {
     const body =
       action?.completionType === "reminder"
         ? { reminderId: id }
         : { interactionId: id };
     const key = registry.current.keyFor(quest.questId, "complete", body);
-    await apiJson(
+    const result = await apiJson<QuestCompletionResult>(
       `/api/briefs/quests/${encodeURIComponent(quest.questId)}/complete`,
       {
         method: "POST",
@@ -110,6 +115,7 @@ export default function QuestCompletionDialog({
       }
     );
     registry.current.resolve(quest.questId, "complete", body);
+    return buildQuestReceipt(quest, action?.completionType ?? "interaction", result);
   }
 
   async function submitInteraction(event: FormEvent) {
@@ -143,9 +149,9 @@ export default function QuestCompletionDialog({
         id = created.interaction.id;
         setEvidenceId(id);
       }
-      await completeQuest(id);
-      onClose("page");
-      await onSuccess();
+      const receipt = await completeQuest(id);
+      await onSuccess(receipt);
+      onClose("receipt");
     } catch (reason) {
       setError(
         reason instanceof Error
@@ -179,9 +185,9 @@ export default function QuestCompletionDialog({
         id = latest.reminder.id;
         setEvidenceId(id);
       }
-      await completeQuest(id);
-      onClose("page");
-      await onSuccess();
+      const receipt = await completeQuest(id);
+      await onSuccess(receipt);
+      onClose("receipt");
     } catch (reason) {
       setError(
         reason instanceof Error

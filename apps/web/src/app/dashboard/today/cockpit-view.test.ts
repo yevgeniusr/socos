@@ -5,12 +5,14 @@ import {
   buildCockpitView,
   buildDateReminderDraft,
   buildPersonReminderDraft,
+  buildQuestReceipt,
   formatBriefDate,
   healthBandLabel,
   itemStateLabel,
   lastInteractionLabel,
   momentumState,
   personPriorityLabel,
+  zonedLocalDateTimeToIso,
 } from "./cockpit-view";
 
 const baseBrief: DailyBrief = {
@@ -141,11 +143,32 @@ describe("cockpit view", () => {
       "Last contact May 3, 2026"
     );
     expect(lastInteractionLabel(null, "UTC")).toBe("No interaction logged");
+
+    expect(
+      personPriorityLabel({
+        ...person,
+        evidence: [
+          { code: "pending_task_count", value: 2 },
+          { code: "important_date_days", value: 3 },
+          { code: "days_overdue", value: 61 },
+        ],
+      })
+    ).toBe("At risk · 2 unfinished commitments");
+    expect(
+      personPriorityLabel({
+        ...person,
+        evidence: [{ code: "important_date_days", value: 3 }],
+      })
+    ).toBe("At risk · Important date in 3 days");
+    expect(personPriorityLabel({ ...person, evidence: [] })).toBe(
+      "At risk · Synthetic reason"
+    );
   });
 
   it("builds structured reminder drafts without inferring type from prose", () => {
     const personDraft = buildPersonReminderDraft(
       baseBrief.people[0],
+      "Asia/Dubai",
       new Date("2026-07-17T05:00:00.000Z")
     );
     expect(personDraft).toMatchObject({
@@ -153,6 +176,7 @@ describe("cockpit view", () => {
       type: "followup",
       title: "Follow up with Synthetic Person",
       sourceLabel: "Synthetic reason",
+      timeZone: "Asia/Dubai",
     });
     expect(personDraft.scheduledAt).toMatch(/^2026-07-18T09:00$/);
 
@@ -167,20 +191,64 @@ describe("cockpit view", () => {
       reason: "A birthday is coming up.",
       state: "pending" as const,
     };
-    expect(buildDateReminderDraft(birthday)).toEqual({
+    expect(buildDateReminderDraft(birthday, "Asia/Dubai")).toEqual({
       contact: birthday.contact,
       type: "birthday",
       title: birthday.title,
       scheduledAt: "2026-07-19T09:00",
       sourceLabel: "Birthday · Jul 19, 2026",
+      timeZone: "Asia/Dubai",
     });
 
     expect(
-      buildDateReminderDraft({
-        ...birthday,
-        type: "celebration",
-        title: "Synthetic celebration",
-      }).type
+      buildDateReminderDraft(
+        {
+          ...birthday,
+          type: "celebration",
+          title: "Synthetic celebration",
+        },
+        "Asia/Dubai"
+      ).type
     ).toBe("custom");
+
+    expect(
+      buildPersonReminderDraft(
+        baseBrief.people[0],
+        "Asia/Dubai",
+        new Date("2026-07-17T21:30:00.000Z")
+      ).scheduledAt
+    ).toBe("2026-07-19T09:00");
+    expect(
+      zonedLocalDateTimeToIso("2026-07-19T09:00", "Asia/Dubai")
+    ).toBe("2026-07-19T05:00:00.000Z");
+    expect(
+      zonedLocalDateTimeToIso("2026-07-19T09:00", "America/New_York")
+    ).toBe("2026-07-19T13:00:00.000Z");
+  });
+
+  it("builds quest receipts only from the verified server result", () => {
+    expect(
+      buildQuestReceipt(baseBrief.quests[0], "interaction", {
+        questId: "quest-synthetic",
+        status: "completed",
+        completedAt: "2026-07-17T08:00:00.000Z",
+        xpAwarded: 20,
+      })
+    ).toEqual({
+      questId: "quest-synthetic",
+      title: "Synthetic quest",
+      evidenceType: "interaction",
+      verifiedAt: "2026-07-17T08:00:00.000Z",
+      xpAwarded: 20,
+    });
+
+    expect(() =>
+      buildQuestReceipt(baseBrief.quests[0], "interaction", {
+        questId: "different-quest",
+        status: "completed",
+        completedAt: "2026-07-17T08:00:00.000Z",
+        xpAwarded: 20,
+      })
+    ).toThrow("Quest verification response does not match the request");
   });
 });

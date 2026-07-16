@@ -4,7 +4,10 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import { apiJson } from "@/lib/api-client";
 import { getFocusLoopTarget } from "../../contacts/_components/dialog-focus";
-import type { ReminderDraft } from "../cockpit-view";
+import {
+  zonedLocalDateTimeToIso,
+  type ReminderDraft,
+} from "../cockpit-view";
 import { IntentRegistry } from "../intent-registry";
 
 export default function ReminderDialog({
@@ -65,7 +68,7 @@ export default function ReminderDialog({
         contactId: draft.contact.id,
         type,
         title: title.trim(),
-        scheduledAt: new Date(scheduledAt).toISOString(),
+        scheduledAt: zonedLocalDateTimeToIso(scheduledAt, draft.timeZone),
       };
       const key = registry.current.keyFor(
         draft.contact.id,
