@@ -325,7 +325,7 @@ function requiredString(value: unknown): string {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error(SAFE_ERROR);
   }
-  return value.trim();
+  return value;
 }
 
 function publicText(

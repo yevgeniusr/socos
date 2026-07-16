@@ -56,6 +56,36 @@ END:VEVENT`),
     ]);
   });
 
+  it("preserves exact nonblank UIDs when grouping and building identities", () => {
+    const result = adapter.parse(
+      calendar(`
+BEGIN:VEVENT
+UID:abc
+DTSTAMP:20260715T120000Z
+DTSTART:20260717T180000Z
+DTEND:20260717T190000Z
+SUMMARY:Exact UID
+END:VEVENT
+BEGIN:VEVENT
+UID:${" abc "}
+DTSTAMP:20260715T120000Z
+DTSTART:20260717T180000Z
+DTEND:20260717T190000Z
+SUMMARY:Whitespace UID
+END:VEVENT`),
+      NOW
+    );
+
+    expect(result.map((event) => event.providerEventId)).toEqual([
+      " abc :2026-07-17T18:00:00.000Z",
+      "abc:2026-07-17T18:00:00.000Z",
+    ]);
+    expect(result.map((event) => event.canonicalIdentity)).toEqual([
+      " abc :2026-07-17T18:00:00.000Z",
+      "abc:2026-07-17T18:00:00.000Z",
+    ]);
+  });
+
   it("expands recurrence, moves exceptions, and represents EXDATE cancellation", () => {
     const result = adapter.parse(
       calendar(`
@@ -401,6 +431,13 @@ BEGIN:VEVENT
 DTSTART:20260717T100000Z
 DTEND:20260717T110000Z
 SUMMARY:Missing UID
+END:VEVENT`),
+    calendar(`
+BEGIN:VEVENT
+UID:${"   "}
+DTSTART:20260717T100000Z
+DTEND:20260717T110000Z
+SUMMARY:Blank UID
 END:VEVENT`),
     calendar(`
 BEGIN:VEVENT
