@@ -49,4 +49,19 @@ describe("apiJson errors", () => {
     expect(failure).toMatchObject({ name: "ApiError", status: 400, message });
     expect((failure as ApiError).code).toBeUndefined();
   });
+
+  it("wraps malformed JSON errors with the HTTP status", async () => {
+    mockedAuthFetch.mockResolvedValue(
+      new Response("{", {
+        status: 502,
+        headers: { "content-type": "application/json" },
+      })
+    );
+
+    await expect(apiJson("/api/test")).rejects.toMatchObject({
+      name: "ApiError",
+      status: 502,
+      message: "Request failed with status 502",
+    });
+  });
 });

@@ -229,7 +229,7 @@ test.describe("personal Contacts workspace", () => {
   }) => {
     const api = await installSyntheticApi(page);
 
-    await page.goto("/dashboard");
+    await page.goto("/dashboard/contacts");
     await expect(page).toHaveURL(/\/dashboard\/contacts$/);
     await expect(page.getByText("Showing 1-25 of 106")).toBeVisible();
     await expect.poll(() => api.listRequests.length).toBeGreaterThan(0);

@@ -1,6 +1,6 @@
 import type { DailyBrief } from "@/lib/cockpit-contracts";
 
-export default function QuestList({ quests }: { quests: DailyBrief["quests"] }) {
+export default function QuestList({ quests, onOpen }: { quests: DailyBrief["quests"]; onOpen: (quest: DailyBrief["quests"][number]) => void }) {
   const pending = quests.filter((quest) => quest.status === "pending");
   return (
     <section aria-labelledby="quests-heading" className="border-t border-outline-variant/25 pt-5">
@@ -17,7 +17,7 @@ export default function QuestList({ quests }: { quests: DailyBrief["quests"] }) 
                 <span className="shrink-0 text-xs font-black text-secondary">+{quest.xpReward} XP</span>
               </div>
               <p className="mt-1 text-xs text-on-surface-variant">Requires verified {quest.completionType} evidence.</p>
-              <button type="button" disabled title="Available after action verification" className="mt-3 min-h-11 w-full rounded-lg border border-outline-variant/30 text-sm font-bold text-on-surface-variant opacity-60">Complete quest</button>
+              <button type="button" onClick={() => onOpen(quest)} className="mt-3 min-h-11 w-full rounded-lg border border-secondary/50 text-sm font-bold text-secondary focus-visible:outline focus-visible:outline-2 focus-visible:outline-secondary">Complete quest</button>
             </li>
           ))}
         </ul>

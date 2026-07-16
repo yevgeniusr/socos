@@ -37,9 +37,20 @@ export async function apiJson<T>(
 ): Promise<T> {
   const response = await authFetch(path, options);
   const contentType = response.headers.get("content-type") ?? "";
-  const body: unknown = contentType.includes("application/json")
-    ? await response.json()
-    : await response.text();
+  let body: unknown;
+  try {
+    body = contentType.includes("application/json")
+      ? await response.json()
+      : await response.text();
+  } catch {
+    if (!response.ok) {
+      throw new ApiError(
+        `Request failed with status ${response.status}`,
+        response.status
+      );
+    }
+    throw new ApiError("Response was not valid JSON", response.status);
+  }
 
   if (!response.ok) {
     throw new ApiError(

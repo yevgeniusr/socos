@@ -42,6 +42,7 @@ interface DashboardContextValue {
   user: StoredUser | null;
   stats: Stats | null;
   upcomingCount: number;
+  statsStatus: "loading" | "ready" | "error";
 }
 
 const DashboardContext = createContext<DashboardContextValue | null>(null);
@@ -122,7 +123,7 @@ function Toast({
   return (
     <div
       role="status"
-      className={`fixed bottom-5 left-4 right-4 z-[80] rounded-lg px-4 py-3 text-sm font-semibold shadow-2xl sm:left-auto sm:right-6 sm:max-w-sm ${styles[type]}`}
+      className={`fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] left-4 right-4 z-[80] rounded-lg px-4 py-3 text-sm font-semibold shadow-2xl sm:bottom-5 sm:left-auto sm:right-6 sm:max-w-sm ${styles[type]}`}
     >
       {message}
     </div>
@@ -135,6 +136,7 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
   const [authenticated, setAuthenticated] = useState(false);
   const [user, setUser] = useState<StoredUser | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [statsStatus, setStatsStatus] = useState<"loading" | "ready" | "error">("loading");
   const [upcomingCount, setUpcomingCount] = useState(0);
   const [toast, setToast] = useState<{
     message: string;
@@ -146,11 +148,18 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
   }, []);
 
   const refreshDashboardStats = useCallback(async () => {
-    const response = await apiJson<DashboardStatsResponse>(
-      "/api/gamification/stats"
-    );
-    if (response.user) setUser(response.user);
-    if (response.stats) setStats(response.stats);
+    setStatsStatus("loading");
+    try {
+      const response = await apiJson<DashboardStatsResponse>(
+        "/api/gamification/stats"
+      );
+      if (response.user) setUser(response.user);
+      setStats(response.stats);
+      setStatsStatus("ready");
+    } catch (error) {
+      setStatsStatus("error");
+      throw error;
+    }
   }, []);
 
   const refreshUpcomingReminders = useCallback(async () => {
@@ -187,12 +196,14 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
       user,
       stats,
       upcomingCount,
+      statsStatus,
     }),
     [
       refreshDashboardStats,
       refreshUpcomingReminders,
       showToast,
       stats,
+      statsStatus,
       upcomingCount,
       user,
     ]
@@ -255,10 +266,9 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
                 <button
                   key={item.label}
                   type="button"
-                  onClick={() =>
-                    showToast(`${item.label} is coming later`, "info")
-                  }
-                  className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-sm font-semibold text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+                  disabled
+                  aria-disabled="true"
+                  className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-sm font-semibold text-on-surface-variant opacity-50"
                 >
                   <SymbolIcon name={item.icon} className="text-[20px]" />
                   {item.label}

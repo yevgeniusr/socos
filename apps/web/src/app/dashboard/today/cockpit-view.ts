@@ -55,3 +55,12 @@ export function itemStateLabel(state: BriefItemState): string {
     dismissed: "Dismissed",
   }[state];
 }
+
+export function momentumState(
+  stats: "loading" | "ready" | "error",
+  streak: "loading" | "ready" | "error"
+): "loading" | "ready" | "unavailable" {
+  if (stats === "error" || streak === "error") return "unavailable";
+  if (stats === "loading" || streak === "loading") return "loading";
+  return "ready";
+}

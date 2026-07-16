@@ -41,9 +41,9 @@ export type ProposalPreview =
 export interface ProposalHistoryResponse {
   proposals: Array<{
     id: string;
-    actionType: "message" | "introduction" | "invitation" | "merge" | "delete";
+    actionType: "message" | "introduction" | "invitation" | "merge" | "delete" | "unavailable";
     preview: ProposalPreview;
-    status: Exclude<ProposalHistoryStatus, "all">;
+    status: Exclude<ProposalHistoryStatus, "all"> | "unavailable";
     expiresAt: string;
     decidedAt: string | null;
     createdAt: string;

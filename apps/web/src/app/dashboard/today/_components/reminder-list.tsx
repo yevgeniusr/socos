@@ -1,7 +1,7 @@
 import type { UpcomingRemindersResponse } from "@/lib/cockpit-contracts";
 import { formatBriefDate } from "../cockpit-view";
 
-export default function ReminderList({ data, timeZone }: { data: UpcomingRemindersResponse; timeZone: string }) {
+export default function ReminderList({ data, timeZone, busyId, errors, onComplete }: { data: UpcomingRemindersResponse; timeZone: string; busyId: string | null; errors: Record<string, string>; onComplete: (id: string) => Promise<void> }) {
   return (
     <section aria-labelledby="reminders-heading" className="border-t border-outline-variant/25 pt-5">
       <div className="flex items-center justify-between gap-3">
@@ -16,6 +16,8 @@ export default function ReminderList({ data, timeZone }: { data: UpcomingReminde
               <p className="mt-1 text-xs text-on-surface-variant">
                 {[reminder.contact.firstName, reminder.contact.lastName].filter(Boolean).join(" ")} · {formatBriefDate(reminder.scheduledAt, timeZone)}
               </p>
+              <button type="button" disabled={busyId === reminder.id} onClick={() => void onComplete(reminder.id)} className="mt-2 min-h-11 rounded-lg border border-outline-variant/40 px-3 text-xs font-bold text-on-surface-variant disabled:opacity-60">{busyId === reminder.id ? "Completing..." : "Complete"}</button>
+              {errors[reminder.id] ? <p role="alert" className="mt-1 text-xs text-error">{errors[reminder.id]}</p> : null}
             </li>
           ))}
         </ul>

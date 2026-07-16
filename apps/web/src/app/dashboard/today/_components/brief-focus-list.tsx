@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import type { DailyBrief } from "@/lib/cockpit-contracts";
 import { healthBandLabel, itemStateLabel } from "../cockpit-view";
+import BriefItemActions from "./brief-item-actions";
 
 function StateBadge({ state }: { state: DailyBrief["people"][number]["state"] }) {
   return (
@@ -11,7 +12,17 @@ function StateBadge({ state }: { state: DailyBrief["people"][number]["state"] })
   );
 }
 
-export default function BriefFocusList({ brief }: { brief: DailyBrief }) {
+interface BriefFocusListProps {
+  brief: DailyBrief;
+  busyItemId: string | null;
+  itemErrors: Record<string, string>;
+  onKeep: (itemId: string) => Promise<boolean>;
+  onSnooze: (itemId: string, hours: 24 | 168) => Promise<boolean>;
+  onDismiss: (itemId: string, reason: string) => Promise<boolean>;
+  onReminder: (contact: { id: string; name: string }) => void;
+}
+
+export default function BriefFocusList({ brief, busyItemId, itemErrors, onKeep, onSnooze, onDismiss, onReminder }: BriefFocusListProps) {
   const events = brief.schemaVersion === "1.1" ? brief.events : [];
   if (!brief.people.length && !brief.dates.length && !events.length) {
     return <p className="py-6 text-sm text-on-surface-variant">No relationship priorities need attention today.</p>;
@@ -40,13 +51,13 @@ export default function BriefFocusList({ brief }: { brief: DailyBrief }) {
                   <StateBadge state={item.state} />
                 </div>
                 <p className="mt-3 break-words text-sm leading-6 text-on-surface-variant">{item.reason}</p>
-                <div className="mt-4 flex flex-wrap gap-2" aria-label={`Actions for ${item.contact.name}`}>
+                <div className="mt-4 flex flex-wrap gap-2">
                   <Link href={`/dashboard/contacts?contact=${encodeURIComponent(item.contact.id)}`} className="flex min-h-11 items-center gap-2 rounded-lg bg-primary px-3 text-sm font-black text-on-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-secondary">
                     <span className="material-symbols-outlined text-[19px]" aria-hidden="true">person</span>
                     Open contact
                   </Link>
-                  <button type="button" disabled title="Available after action verification" className="min-h-11 rounded-lg border border-outline-variant/30 px-3 text-sm font-bold text-on-surface-variant opacity-60">Keep</button>
                 </div>
+                <BriefItemActions itemId={item.itemId} busy={busyItemId === item.itemId} error={itemErrors[item.itemId] ?? ""} onKeep={onKeep} onSnooze={onSnooze} onDismiss={onDismiss} onReminder={() => onReminder(item.contact)} />
               </li>
             ))}
           </ul>
@@ -67,6 +78,7 @@ export default function BriefFocusList({ brief }: { brief: DailyBrief }) {
                   <StateBadge state={item.state} />
                 </div>
                 <p className="mt-3 text-sm text-on-surface-variant">{item.daysAway === 0 ? "Today" : `In ${item.daysAway} days`} · {item.reason}</p>
+                <BriefItemActions itemId={item.itemId} busy={busyItemId === item.itemId} error={itemErrors[item.itemId] ?? ""} onKeep={onKeep} onSnooze={onSnooze} onDismiss={onDismiss} onReminder={() => onReminder(item.contact)} />
               </li>
             ))}
           </ul>
@@ -81,6 +93,7 @@ export default function BriefFocusList({ brief }: { brief: DailyBrief }) {
               <li key={item.itemId} className="rounded-lg border border-outline-variant/30 bg-surface-container-low p-4">
                 <div className="flex items-start justify-between gap-3"><p className="break-words font-black">{item.title}</p><StateBadge state={item.state} /></div>
                 <p className="mt-2 text-sm text-on-surface-variant">{item.city ?? "Location pending"} · {item.reason}</p>
+                <BriefItemActions itemId={item.itemId} busy={busyItemId === item.itemId} error={itemErrors[item.itemId] ?? ""} onKeep={onKeep} onSnooze={onSnooze} onDismiss={onDismiss} />
               </li>
             ))}
           </ul>

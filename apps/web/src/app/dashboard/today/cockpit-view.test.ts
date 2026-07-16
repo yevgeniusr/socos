@@ -6,6 +6,7 @@ import {
   formatBriefDate,
   healthBandLabel,
   itemStateLabel,
+  momentumState,
 } from "./cockpit-view";
 
 const baseBrief: DailyBrief = {
@@ -111,5 +112,12 @@ describe("cockpit view", () => {
     expect(healthBandLabel("needs-attention")).toBe("Needs attention");
     expect(itemStateLabel("snoozed")).toBe("Snoozed");
     expect(formatBriefDate("2026-07-17T21:30:00.000Z", "Asia/Dubai")).toContain("Jul 18");
+  });
+
+  it("never turns loading or failed momentum into real zero values", () => {
+    expect(momentumState("loading", "loading")).toBe("loading");
+    expect(momentumState("error", "ready")).toBe("unavailable");
+    expect(momentumState("ready", "error")).toBe("unavailable");
+    expect(momentumState("ready", "ready")).toBe("ready");
   });
 });
