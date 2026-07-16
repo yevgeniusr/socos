@@ -6,6 +6,7 @@ import {
 import { ConfigService } from "@nestjs/config";
 import { PersonalDataCipherService } from "./personal-data-cipher.service.js";
 import { PersonalDataIndexService } from "./personal-data-index.service.js";
+import { parseAllowedEventHosts } from "../events/event-source-policy.js";
 
 export type PersonalDataFeature =
   | "calendarSync"
@@ -57,6 +58,13 @@ export class PersonalDataConfigService implements OnModuleInit {
     }
     if (enabledFeatures.includes("eventDiscovery")) {
       this.requireConfiguredValues(["EVENT_SOURCE_ALLOWED_HOSTS"]);
+      try {
+        parseAllowedEventHosts(
+          this.configService.get<string>("EVENT_SOURCE_ALLOWED_HOSTS")
+        );
+      } catch {
+        throw new Error(INTEGRATION_CONFIGURATION_ERROR);
+      }
     }
   }
 

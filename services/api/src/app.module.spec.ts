@@ -6,6 +6,7 @@ import { AiAgentModule } from './modules/ai-agent/ai-agent.module.js';
 import { BriefsController } from './modules/briefs/briefs.controller.js';
 import { BriefsModule } from './modules/briefs/briefs.module.js';
 import { CalendarModule } from './modules/calendar/calendar.module.js';
+import { EventsModule } from './modules/events/events.module.js';
 import { LocationDeviceController } from './modules/location/location.controller.js';
 import { LocationModule } from './modules/location/location.module.js';
 import { PersonalDataConfigService } from './modules/personal-data/personal-data-config.js';
@@ -18,6 +19,7 @@ const APP_STARTUP_ENV = [
   'LOCATION_INGEST_ENABLED',
   'EVENT_DISCOVERY_ENABLED',
   'EVENT_BRIEF_ENABLED',
+  'EVENT_SOURCE_ALLOWED_HOSTS',
   'PERSONAL_DATA_KEYS',
   'PERSONAL_DATA_ACTIVE_KEY_VERSION',
   'PERSONAL_DATA_INDEX_KEY',
@@ -155,5 +157,11 @@ describe('AppModule composition', () => {
     const imports = Reflect.getMetadata(MODULE_METADATA.IMPORTS, AppModule) as unknown[];
 
     expect(imports).toContain(CalendarModule);
+  });
+
+  it('delegates event discovery ownership to EventsModule', () => {
+    const imports = Reflect.getMetadata(MODULE_METADATA.IMPORTS, AppModule) as unknown[];
+
+    expect(imports).toContain(EventsModule);
   });
 });

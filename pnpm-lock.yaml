@@ -289,6 +289,9 @@ importers:
       googleapis:
         specifier: 173.0.0
         version: 173.0.0
+      ical.js:
+        specifier: 2.2.1
+        version: 2.2.1
       jsonwebtoken:
         specifier: ^9.0.3
         version: 9.0.3
@@ -3795,6 +3798,9 @@ packages:
   human-signals@2.1.0:
     resolution: {integrity: sha512-B4FFZ6q/T2jhhksgkbEW3HBvWIfDW85snkQgawt07S7J5QXTk6BkNV+0yAeZrM5QpMAdYlocGoljn0sJ/WQkFw==}
     engines: {node: '>=10.17.0'}
+
+  ical.js@2.2.1:
+    resolution: {integrity: sha512-yK/UlPbEs316igb/tjRgbFA8ZV75rCsBJp/hWOatpyaPNlgw0dGDmU+FoicOcwX4xXkeXOkYiOmCqNPFpNPkQg==}
 
   iconv-lite@0.6.3:
     resolution: {integrity: sha512-4fCk79wshMdzMp2rH06qWrJE4iolqLhCUH+OiuIgU++RB0+94NlDL81atO7GX55uUKueo0txHNtvEyI6D7WdMw==}
@@ -9798,6 +9804,8 @@ snapshots:
       - supports-color
 
   human-signals@2.1.0: {}
+
+  ical.js@2.2.1: {}
 
   iconv-lite@0.6.3:
     dependencies:

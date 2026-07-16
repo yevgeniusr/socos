@@ -150,6 +150,24 @@ describe("PersonalDataConfigService", () => {
     );
   });
 
+  it.each([
+    "Events.example.com",
+    "events.example.com,",
+    "events.example.com,events.example.com",
+    "127.0.0.1",
+    "*.example.com",
+  ])("fails startup closed for malformed event allowlist %s", (allowlist) => {
+    const { service } = createService({
+      ...validKeys(),
+      EVENT_DISCOVERY_ENABLED: "true",
+      EVENT_SOURCE_ALLOWED_HOSTS: allowlist,
+    });
+
+    expect(() => service.onModuleInit()).toThrow(
+      "Invalid personal data integration configuration"
+    );
+  });
+
   it("returns a sanitized 503 boundary for a disabled human integration", () => {
     const { service } = createService();
 

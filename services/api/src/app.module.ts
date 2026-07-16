@@ -32,6 +32,7 @@ import { McpModule } from './modules/mcp/mcp.module.js';
 import { PersonalDataModule } from './modules/personal-data/personal-data.module.js';
 import { LocationModule } from './modules/location/location.module.js';
 import { CalendarModule } from './modules/calendar/calendar.module.js';
+import { EventsModule } from './modules/events/events.module.js';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { CalendarModule } from './modules/calendar/calendar.module.js';
     PersonalDataModule,
     LocationModule,
     CalendarModule,
+    EventsModule,
   ],
   controllers: [
     HealthController,
