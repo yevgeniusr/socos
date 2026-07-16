@@ -8,22 +8,22 @@ Socos is a personal-first, agent-driven CRM for maintaining relationships, remem
 
 The backend and operating foundation are substantially built. Production contains all 106 requested Monica contacts in Coolify PostgreSQL, has durable briefs and gamification, exposes an authenticated 11-tool MCP interface, and delivers a daily brief through Hermes to Discord. Calendar, Pixel location, and public-event modules exist but remain deliberately disabled until account/device setup is completed.
 
-The highest-priority product gap was the authenticated Contacts workspace. Its API and action-integrity tasks are implemented and independently approved. The route-backed web workspace is implemented locally and has passed focused tests, typecheck, lint, and production build. Its independent review did not return a verdict before this handoff and must be rerun. Browser proof, push, deployment, and production smoke remain.
+The authenticated Contacts workspace is now implemented, independently reviewed, browser-proven at desktop and Pixel dimensions, pushed, and deployed. Production was verified at the exact reviewed code SHA with aggregate-only database evidence: 106 non-demo contacts and 7 isolated demos. The next highest-value product gap is the authenticated Daily Cockpit, followed by the invite flow, a real-backend Betabots gate, and staged Calendar/Pixel/event activation.
 
 ## Status At A Glance
 
 | Area | State | Evidence / next boundary |
 | --- | --- | --- |
-| Security, CI, migrations, backups, Coolify | Done and deployed | Production is healthy on deployed SHA `32db6518336cb427f94938c2ecb8b2493696b2a0`. |
+| Security, CI, migrations, backups, Coolify | Done and deployed | Production is healthy on deployed code SHA `fd5f40b6b2a1621c8c6d5f8d74dcc70c87acf9bd`. |
 | Monica import | Done and production-verified | 106 non-demo contacts; 7 demo contacts isolated. Real rows remain cloud-only. |
-| Daily brief, relationship health, dates, reminders, quests, XP | Backend done; authenticated UI incomplete | Durable services and APIs exist. Build the Daily Cockpit after Contacts ships. |
+| Daily brief, relationship health, dates, reminders, quests, XP | Backend done; authenticated UI incomplete | Durable services and APIs exist. Build the Daily Cockpit next. |
 | MCP/API agent interface | Core done and deployed | 11 authenticated tools; Hermes, Codex, and Claude clients validated. Outbound executors remain absent. |
 | Hermes Discord | Brief delivery done | Daily job runs at 09:00 Asia/Dubai. Reply-to-action journeys still need full product verification. |
 | Calendar, Pixel location, events | Code done; integrations disabled | Four feature flags are false. Google consent, Pixel enrollment, and an approved ICS source remain. |
 | Public demo/sample workspace | Partially done and deployed | Useful product proof, but not proof of the authenticated personal workflow. |
-| Contacts API | Done locally; independently approved | Commits `e077a2b` and `ab2e5b8`; 65 focused tests passed. |
-| Interaction/reminder integrity | Done locally; independently approved | Commits `02b95b7` and `8f8f841`; 103 broad contact-action tests passed. |
-| Contacts web workspace | Implemented locally; independent review pending | Commit `2f27cce`; 6 focused tests, typecheck, lint, and build pass. Browser proof remains. |
+| Contacts API | Done, reviewed, and deployed | Explicit owner-scoped projections, bounded pagination, safe profile mutations, and demo exclusion. |
+| Interaction/reminder integrity | Done, reviewed, and deployed | Atomic writes and recurring-reminder completion; demo contacts cannot receive human reminders. |
+| Contacts web workspace | Done, reviewed, browser-proven, and deployed | All 106 records are reachable; desktop and Pixel `412x915` journeys pass. |
 | Invite request | Not implemented | Public CTA still reaches invite-code-only signup. |
 | Betabots release gate | Partial and not passed | Directional cohort evidence exists; no real-backend-attested formal pass. |
 
@@ -32,16 +32,22 @@ The highest-priority product gap was the authenticated Contacts workspace. Its A
 - Repository: `https://github.com/yevgeniusr/socos`
 - Checkout: `/Users/mac/Desktop/projects/personal/socos`
 - Branch: `main`
-- Local head before this document update: `2f27cce541b4b838dd2777032c69c2ae1236f991`
-- Local branch state before this document update: seven commits ahead of `origin/main`; working tree clean.
+- Reviewed and pushed Contacts code SHA: `fd5f40b6b2a1621c8c6d5f8d74dcc70c87acf9bd`
+- Branch state before this document update: local `main` matched `origin/main`; working tree clean.
 - Production: `https://socos.rachkovan.com`
 - Coolify application UUID: `swwcg80gkw4k0k4oco8w8wgw`
-- Production deployed SHA: `32db6518336cb427f94938c2ecb8b2493696b2a0`
-- The seven local Contacts commits have not been pushed or deployed.
+- Production deployed code SHA: `fd5f40b6b2a1621c8c6d5f8d74dcc70c87acf9bd`
+- Coolify deployment UUID: `stat2ao60x8di527vtw5rhhk` (`finished`)
+- Coolify application status after deployment: `running:healthy`
 
-Local commit chain:
+Contacts release commit chain:
 
 ```text
+fd5f40b fix(contacts): close final review gaps
+0f2e5d6 fix(web): stabilize contacts mobile proof
+cc6613a test(web): verify contacts workspace journeys
+635835f fix(web): contain add contact dialog focus
+b9c223e docs: update Socos continuation handoff
 2f27cce feat(web): add personal contacts workspace
 8f8f841 fix(api): restore interaction reward notifications
 02b95b7 fix(api): make contact actions atomic
@@ -147,9 +153,9 @@ Task 2, contact action integrity, is done and independently approved:
 - Reward notifications occur only after commit while preserving human and agent response contracts.
 - Verification: 6 suites, 103 broad contact-action tests; focused interaction/gamification 27/27; API typecheck and diff check passed.
 
-### Personal Contacts Slice: Task 3 Implementation
+### Personal Contacts Workspace: Shipped
 
-Commit `2f27cce` implements:
+Commits `2f27cce` through `fd5f40b` implement and harden:
 
 - Route-backed `/dashboard/contacts`; `/dashboard` redirects there.
 - An authenticated dashboard shell that preserves logout, navigation, stats, XP, reminders, and toasts.
@@ -159,38 +165,44 @@ Commit `2f27cce` implements:
 - Profile viewing/editing for identity, memory, work, cadence, dates, first-met context, labels/tags/groups, social links, and contact methods.
 - Interaction logging, reminder creation/completion, and Add Contact with the correct nested `contactFields` contract.
 - Draft-preserving mutation errors and refresh-after-mutation behavior.
+- Live Tab/Shift+Tab focus containment in the Add Contact dialog with trigger restoration.
+- Explicit minimal nested contact projections with owner filters and pending-reminder filters.
+- Human reminder creation rejects demo contacts before persistence or notification.
 - No new dependency, database migration, second token store, personal fixtures, or personal-value logging.
 
-Verification already passed:
+Independent review found no remaining Critical, Important, or Minor issues after fixes. Final verification passed:
 
 ```text
-Vitest contact query/pagination: 6/6
-Web TypeScript typecheck: pass
-Web lint: pass, 0 errors; 38 existing warnings outside Task 3
-Next.js production build: pass; 13 pages generated
-git diff --check 8f8f841..2f27cce: pass
+API contact slice: 6 suites, 104/104
+API typecheck and production build: pass
+Web Vitest: 4 files, 14/14
+Web typecheck and production build: pass
+Web lint: pass, 0 errors; 38 pre-existing warnings
+Contacts Playwright: 2/2 on desktop and Pixel 412x915
+Task 4 Pixel stability repeat: 5/5; final-SHA Pixel case: 1/1
+Node security/package tests: 58/58; Coolify operations tests: 6/6
+E2E host policy: 5/5
+Security scanner: pass across 501 tracked files
+git diff --check: pass
 ```
 
-The independent Task 3 reviewer was stopped without returning a verdict. Dispatch a fresh read-only review and do not call this slice review-clean until its explicit verdict is recorded and all Critical/Important findings are fixed and re-reviewed.
+Production smoke after deployment:
+
+```text
+/=200 /sample-workspace=200 /auth/signup=200
+/dashboard/contacts=200 /api/health-check=200
+/api/mcp=401
+POST /api/location/owntracks with empty body=503 (feature disabled)
+contacts_non_demo=106 contacts_demo=7 contacts_total=113
+```
+
+The database query ran inside the Coolify host and emitted aggregate counts only. No production row or credential was copied into the workspace.
 
 ## In Progress
 
-1. A fresh independent code/UX review of Contacts Task 3 (`8f8f841..2f27cce`); the prior reviewer returned no verdict.
-2. After approval, deterministic Playwright proof with synthetic intercepted APIs at desktop and Pixel `412x915` viewports.
-3. Final broad API/web/security verification of the complete local Contacts slice.
-4. Push exact reviewed commits, deploy the exact SHA through Coolify, and perform aggregate-only production smoke.
-
-The research-weighted eight-persona Betabots wave is also incomplete. Bots 001-005 completed, 006-007 were interrupted, and 008 did not start. It lacked real-backend attestation, so its findings are qualitative and it cannot satisfy the release gate.
+No implementation slice is partially edited at this handoff. The next slice to start is the authenticated Daily Cockpit. The research-weighted eight-persona Betabots wave remains incomplete: bots 001-005 completed, 006-007 were interrupted, and 008 did not start. It lacked real-backend attestation, so its findings are qualitative and cannot satisfy the release gate.
 
 ## What Is Left
-
-### P0: Ship The Contacts Workspace
-
-1. Resolve the independent Task 3 review and fix every Critical/Important finding test-first.
-2. Add Playwright coverage using synthetic data for redirect, page 1/page 2 reachability across 106 records, search/filter reset, keyboard opening, profile rendering, edit payloads, interactions, reminders, completion, and mobile no-overflow behavior.
-3. Verify screenshots at desktop and Pixel `412x915`; confirm no overlap, inaccessible controls, or personal values.
-4. Run broad Contacts/API tests, web tests, typechecks, lint, build, security/package checks, and `git diff --check`.
-5. Push the reviewed SHA, confirm `origin/main`, deploy through `scripts/coolify.sh`, verify the deployed SHA, and run aggregate-only smoke. Confirm the production non-demo contact count remains 106 without printing rows.
 
 ### P1: Build The Authenticated Daily Cockpit
 
@@ -243,13 +255,12 @@ These need explicit user/device actions only at the final setup boundary:
 
 ## Known Risks And Truth Boundaries
 
-- Production still runs `32db651`; none of the local Contacts commits are live.
-- Task 3 implementation is locally verified but not yet independently approved or browser-verified; the first reviewer returned no verdict.
 - Calendar, location, event discovery, and event briefs are disabled in production.
 - Approved outbound actions have no real executors.
 - The invite-request CTA remains a dead end for users without a code.
 - Betabots have not passed a real-backend-attested release gate.
 - Backend capability does not equal a complete product surface; briefs, approvals, integrations, and richer gamification remain underexposed in the authenticated web app.
+- Browser authentication still relies partly on localStorage bearer tokens; the httpOnly-cookie/BFF hardening slice is deferred.
 - Never expose production contact rows, interaction bodies, exact coordinates, OAuth data, tokens, database URLs, invite codes, private keys, or Coolify credentials.
 
 ## Operating Rules For The Next AI
@@ -273,10 +284,12 @@ These need explicit user/device actions only at the final setup boundary:
 5. `.superpowers/sdd/task-1-report.md`
 6. `.superpowers/sdd/contacts-task-2-report.md`
 7. `.superpowers/sdd/contacts-task-3-report.md`
-8. `docs/plans/2026-07-15-personal-first-socos-design.md`
-9. `docs/runbooks/database-backup-restore.md`
-10. `docs/runbooks/calendar-location-operations.md`
-11. `docs/validation/agent-interface-v1.md` as historical evidence, not current release identity.
+8. `.superpowers/sdd/contacts-task-4-report.md`
+9. `.superpowers/sdd/contacts-final-review-fix-report.md`
+10. `docs/plans/2026-07-15-personal-first-socos-design.md`
+11. `docs/runbooks/database-backup-restore.md`
+12. `docs/runbooks/calendar-location-operations.md`
+13. `docs/validation/agent-interface-v1.md` as historical evidence, not current release identity.
 
 Older README/PRD/MVP/API documents and unchecked plan boxes contain stale claims. Prefer current code, the progress ledger, task reports, and this handoff.
 
@@ -293,40 +306,35 @@ First read:
 5. `.superpowers/sdd/task-1-report.md`
 6. `.superpowers/sdd/contacts-task-2-report.md`
 7. `.superpowers/sdd/contacts-task-3-report.md`
-8. `docs/plans/2026-07-15-personal-first-socos-design.md`
-9. `docs/runbooks/database-backup-restore.md`
-10. `docs/runbooks/calendar-location-operations.md`
-11. `git status --short --branch` and `git log --oneline -12`
+8. `.superpowers/sdd/contacts-task-4-report.md`
+9. `.superpowers/sdd/contacts-final-review-fix-report.md`
+10. `docs/plans/2026-07-15-personal-first-socos-design.md`
+11. `docs/runbooks/database-backup-restore.md`
+12. `docs/runbooks/calendar-location-operations.md`
+13. `git status --short --branch` and `git log --oneline -12`
 
 Recover product context from Mem0 when useful. Search `user_id="yev"` across all agent scopes, never Codex-only by default. If no native Mem0 tool is exposed, use the configured local MCP bridge/source at `/Users/mac/Desktop/projects/claw/second-brain/mem0_rest_mcp.py` or the available `second-brain/scripts/mem0_query.py profile --top-k 20`. Use conclusions for prioritization, but never put raw private notes, contact rows, interaction contents, exact locations, or credentials in code, logs, tests, screenshots, or documents.
 
 Current state before the handoff-document commit:
 - Production: `https://socos.rachkovan.com`
 - Coolify app UUID: `swwcg80gkw4k0k4oco8w8wgw`
-- Production SHA: `32db6518336cb427f94938c2ecb8b2493696b2a0`
-- Local head: `2f27cce541b4b838dd2777032c69c2ae1236f991`
-- Local `main` is seven commits ahead of `origin/main`; the Contacts slice is not pushed or deployed.
+- Reviewed/pushed/deployed Contacts code SHA: `fd5f40b6b2a1621c8c6d5f8d74dcc70c87acf9bd`
+- Coolify deployment UUID: `stat2ao60x8di527vtw5rhhk`, status `finished`; application `running:healthy`.
 - Production contains 106 non-demo Monica contacts plus 7 isolated demos.
 - Hermes, Codex, and Claude MCP clients are validated; Hermes posts a daily Discord brief at 09:00 Asia/Dubai.
 - Calendar, location, event discovery, and event brief flags are false.
 - Contacts Task 1 is implemented/review-approved at `e077a2b` + `ab2e5b8`; Contacts tests 65/65 and API typecheck pass.
 - Contact-action Task 2 is implemented/review-approved at `02b95b7` + `8f8f841`; broad tests 103/103 and API typecheck pass.
-- Contacts web Task 3 is implemented at `2f27cce`; Vitest 6/6, web typecheck, lint, build, and diff check pass. The first independent reviewer was stopped without a verdict; dispatch a fresh read-only reviewer.
+- Contacts Tasks 3/4 are implemented and review-approved through `fd5f40b`. Final gates: API 104/104, web Vitest 14/14, final-SHA Playwright 2/2 including Pixel 1/1, prior Pixel stability repeat 5/5, security/package 58/58, Coolify operations 6/6, host policy 5/5, typechecks/builds/scanner/diff pass.
+- Production smoke: public and Contacts routes `200`, MCP unauthenticated `401`, disabled OwnTracks `503`, aggregate contacts `106/7/113`.
 
 Immediate execution order:
-1. Dispatch a fresh independent review of `8f8f841..2f27cce`. Fix every Critical/Important finding test-first and obtain a clean re-review.
-2. Implement the Contacts Task 4 Playwright suite using synthetic intercepted APIs. Prove `/dashboard` redirect, page 1 and page 2 across 106 contacts, server search/filter reset, keyboard profile opening, complete profile rendering, edit payloads, interaction logging, reminder creation/completion, and no horizontal overflow at Pixel `412x915`. Capture only synthetic screenshots.
-3. Run broad relevant API/web tests, typechecks, lint, builds, security/packaging checks, and `git diff --check`.
-4. Update `.superpowers/sdd/progress.md`, push exact reviewed commits, verify `origin/main`, deploy the exact SHA through `scripts/coolify.sh`, confirm the deployed SHA, and run aggregate-only production smoke. Confirm the non-demo contact count remains 106 without printing rows.
-5. Update this handoff with exact commit/deployment UUID/test/smoke evidence.
-
-Then continue the roadmap in order:
-- Authenticated Daily Cockpit with today's brief, dates, reminders, quests, item actions, approval inbox/history, and meaningful gamification.
-- Enumeration-resistant invite-request queue and reviewer UI while keeping registration invite-code-only.
-- Safe real-PostgreSQL integrity attestation and an eight-persona real-backend Betabots run using synthetic accounts/data; iterate until the formal gate passes.
-- Prepare Google Calendar consent, Pixel OwnTracks enrollment, and one certified ICS source. Ask Yev only for the actual OAuth/device steps. Enable one feature flag at a time after backup and aggregate verification.
-- Proactive introduction ranking and provider-specific approved outbound executors.
-- Richer memory provenance/correction/export/deletion, weekly social campaigns, celebrations/adventures, import-integrity UI, and product analytics.
+1. Build the authenticated Daily Cockpit with today's durable brief, important dates, reminders, quests, ranked suggestions, executable item actions, approval inbox/history, and useful XP/streak/reward feedback.
+2. Build the enumeration-resistant invite-request queue and reviewer UI while keeping registration invite-code-only.
+3. Add a safe real-PostgreSQL integrity attestation and run eight synthetic Yev-like Betabots against the real backend. Iterate until happiness >=70, no critical defects, >=90% applicable core-journey completion, and no unresolved high-confidence blocker.
+4. Prepare Google Calendar consent, Pixel OwnTracks enrollment, and one certified ICS source. Ask Yev only for the actual OAuth/device steps. Enable one feature flag at a time after backup and aggregate verification.
+5. Add proactive introduction ranking and provider-specific approved outbound executors.
+6. Add richer memory provenance/correction/export/deletion, weekly social campaigns, celebrations/adventures, import-integrity UI, and product analytics.
 
 Non-negotiable constraints:
 - Real personal data stays only in Coolify PostgreSQL. Use synthetic tests; production inspection is aggregate-only.
@@ -338,5 +346,5 @@ Non-negotiable constraints:
 - Preserve unrelated user changes; never reset or rewrite them.
 - Keep `.betabots/` ignored.
 
-For substantial work, use a fresh test-first implementer and a separate read-only reviewer. Fix all Critical/Important findings and record the exact evidence in `.superpowers/sdd/progress.md`. Do not claim completion based on sample/marketing pages; prove the authenticated personal workflow.
+For substantial work, start with a written design/plan, use a fresh test-first implementer and a separate read-only reviewer, and run Betabots when the user-facing slice is usable. Fix all Critical/Important findings and record exact evidence in `.superpowers/sdd/progress.md`. Do not claim completion based on sample/marketing pages; prove the authenticated personal workflow.
 ```
