@@ -54,15 +54,13 @@ services:
       - EVENT_BRIEF_ENABLED=${EVENT_BRIEF_ENABLED:-false}
       - GOOGLE_CALENDAR_CLIENT_ID=${GOOGLE_CALENDAR_CLIENT_ID:?GOOGLE_CALENDAR_CLIENT_ID is required}
       - GOOGLE_CALENDAR_CLIENT_SECRET=${GOOGLE_CALENDAR_CLIENT_SECRET:?GOOGLE_CALENDAR_CLIENT_SECRET is required}
-      - GOOGLE_CALENDAR_REDIRECT_URI=${GOOGLE_CALENDAR_REDIRECT_URI:?GOOGLE_CALENDAR_REDIRECT_URI is required}
-      - GOOGLE_CALENDAR_WEBHOOK_URL=${GOOGLE_CALENDAR_WEBHOOK_URL:?GOOGLE_CALENDAR_WEBHOOK_URL is required}
-      - GOOGLE_CALENDAR_SETTINGS_RESULT_URL=${GOOGLE_CALENDAR_SETTINGS_RESULT_URL:?GOOGLE_CALENDAR_SETTINGS_RESULT_URL is required}
-      - GOOGLE_CALENDAR_CALLBACK_SECRET=${GOOGLE_CALENDAR_CALLBACK_SECRET:?GOOGLE_CALENDAR_CALLBACK_SECRET is required}
-      - OWNTRACKS_WEBHOOK_SECRET=${OWNTRACKS_WEBHOOK_SECRET:?OWNTRACKS_WEBHOOK_SECRET is required}
+      - GOOGLE_CALENDAR_REDIRECT_URI=https://socos.rachkovan.com/api/integrations/google-calendar/callback
+      - GOOGLE_CALENDAR_WEBHOOK_URL=https://socos.rachkovan.com/api/integrations/google-calendar/webhook
+      - GOOGLE_CALENDAR_SETTINGS_RESULT_URL=https://socos.rachkovan.com/dashboard
       - PERSONAL_DATA_KEYS=${PERSONAL_DATA_KEYS:?PERSONAL_DATA_KEYS is required}
-      - PERSONAL_DATA_ACTIVE_KEY_VERSION=${PERSONAL_DATA_ACTIVE_KEY_VERSION:?PERSONAL_DATA_ACTIVE_KEY_VERSION is required}
+      - PERSONAL_DATA_ACTIVE_KEY_VERSION=1
       - PERSONAL_DATA_INDEX_KEY=${PERSONAL_DATA_INDEX_KEY:?PERSONAL_DATA_INDEX_KEY is required}
-      - EVENT_SOURCE_ALLOWED_HOSTS=${EVENT_SOURCE_ALLOWED_HOSTS:?EVENT_SOURCE_ALLOWED_HOSTS is required}
+      - EVENT_SOURCE_ALLOWED_HOSTS=${EVENT_SOURCE_ALLOWED_HOSTS:-}
       - PORT=3001
     labels:
       - "traefik.enable=true"
@@ -70,9 +68,23 @@ services:
       - "traefik.http.routers.api-swwcg80gkw4k0k4oco8w8wgw.entryPoints=http"
       - "traefik.http.services.api-swwcg80gkw4k0k4oco8w8wgw.loadbalancer.server.port=3001"
       - "traefik.docker.network=coolify"
+      - "traefik.http.routers.api-owntracks-swwcg80gkw4k0k4oco8w8wgw.rule=Host(`socos.rachkovan.com`) && Path(`/api/location/owntracks`)"
+      - "traefik.http.routers.api-owntracks-swwcg80gkw4k0k4oco8w8wgw.entryPoints=http"
+      - "traefik.http.routers.api-owntracks-swwcg80gkw4k0k4oco8w8wgw.priority=200"
+      - "traefik.http.routers.api-owntracks-swwcg80gkw4k0k4oco8w8wgw.service=api-swwcg80gkw4k0k4oco8w8wgw"
+      - "traefik.http.routers.api-owntracks-swwcg80gkw4k0k4oco8w8wgw.middlewares=api-owntracks-ratelimit-swwcg80gkw4k0k4oco8w8wgw"
+      - "traefik.http.middlewares.api-owntracks-ratelimit-swwcg80gkw4k0k4oco8w8wgw.ratelimit.average=30"
+      - "traefik.http.middlewares.api-owntracks-ratelimit-swwcg80gkw4k0k4oco8w8wgw.ratelimit.period=1m"
+      - "traefik.http.middlewares.api-owntracks-ratelimit-swwcg80gkw4k0k4oco8w8wgw.ratelimit.burst=10"
       - "traefik.http.routers.api-swwcg80gkw4k0k4oco8w8wgw-https.rule=Host(`socos.rachkovan.com`) && PathPrefix(`/api`)"
       - "traefik.http.routers.api-swwcg80gkw4k0k4oco8w8wgw-https.entryPoints=https"
       - "traefik.http.routers.api-swwcg80gkw4k0k4oco8w8wgw-https.tls=true"
+      - "traefik.http.routers.api-owntracks-swwcg80gkw4k0k4oco8w8wgw-https.rule=Host(`socos.rachkovan.com`) && Path(`/api/location/owntracks`)"
+      - "traefik.http.routers.api-owntracks-swwcg80gkw4k0k4oco8w8wgw-https.entryPoints=https"
+      - "traefik.http.routers.api-owntracks-swwcg80gkw4k0k4oco8w8wgw-https.tls=true"
+      - "traefik.http.routers.api-owntracks-swwcg80gkw4k0k4oco8w8wgw-https.priority=200"
+      - "traefik.http.routers.api-owntracks-swwcg80gkw4k0k4oco8w8wgw-https.service=api-swwcg80gkw4k0k4oco8w8wgw"
+      - "traefik.http.routers.api-owntracks-swwcg80gkw4k0k4oco8w8wgw-https.middlewares=api-owntracks-ratelimit-swwcg80gkw4k0k4oco8w8wgw"
     expose:
       - "3001"
     networks:

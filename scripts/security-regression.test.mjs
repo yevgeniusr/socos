@@ -920,7 +920,7 @@ test("rejects Task 16 secrets in Docker build args, Docker ENV, or public fronte
   for (const [file, source] of [
     [
       "services/api/Dockerfile",
-      "ARG GOOGLE_CALENDAR_CLIENT_SECRET\nENV PERSONAL_DATA_KEYS=synthetic\n",
+      "ARG GOOGLE_CALENDAR_CLIENT_ID\nENV GOOGLE_CALENDAR_REDIRECT_URI=https://example.test/callback\n",
     ],
     [
       "apps/web/src/env.ts",

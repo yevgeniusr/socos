@@ -159,21 +159,64 @@ test('all API runtime images assert Prisma schema, current personal-data migrati
 test('calendar location event secrets are runtime-only Compose inputs', () => {
   const compose = readFileSync(resolve(root, 'docker-compose.prod.yml'), 'utf8');
   for (const name of [
+    'GOOGLE_CALENDAR_CLIENT_ID',
     'GOOGLE_CALENDAR_CLIENT_SECRET',
-    'GOOGLE_CALENDAR_CALLBACK_SECRET',
-    'OWNTRACKS_WEBHOOK_SECRET',
     'PERSONAL_DATA_KEYS',
     'PERSONAL_DATA_INDEX_KEY',
-    'EVENT_SOURCE_ALLOWED_HOSTS',
   ]) {
     assert.match(compose, new RegExp(`- ${name}=\\$\\{${name}:\\?${name} is required\\}`));
+  }
+
+  assert.match(
+    compose,
+    /- GOOGLE_CALENDAR_REDIRECT_URI=https:\/\/socos\.rachkovan\.com\/api\/integrations\/google-calendar\/callback/,
+  );
+  assert.match(
+    compose,
+    /- GOOGLE_CALENDAR_WEBHOOK_URL=https:\/\/socos\.rachkovan\.com\/api\/integrations\/google-calendar\/webhook/,
+  );
+  assert.match(
+    compose,
+    /- GOOGLE_CALENDAR_SETTINGS_RESULT_URL=https:\/\/socos\.rachkovan\.com\/dashboard/,
+  );
+  assert.match(compose, /- PERSONAL_DATA_ACTIVE_KEY_VERSION=1/);
+  assert.match(compose, /- EVENT_SOURCE_ALLOWED_HOSTS=\$\{EVENT_SOURCE_ALLOWED_HOSTS:-\}/);
+
+  for (const name of [
+    'CALENDAR_SYNC_ENABLED',
+    'LOCATION_INGEST_ENABLED',
+    'EVENT_DISCOVERY_ENABLED',
+    'EVENT_BRIEF_ENABLED',
+  ]) {
+    assert.match(compose, new RegExp(`- ${name}=\\$\\{${name}:-false\\}`));
+  }
+
+  for (const forbidden of ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET']) {
+    assert.doesNotMatch(compose, new RegExp(`\\b${forbidden}\\b`));
+  }
+
+  for (const label of [
+    'traefik.http.routers.api-owntracks-swwcg80gkw4k0k4oco8w8wgw.rule=Host(`socos.rachkovan.com`) && Path(`/api/location/owntracks`)',
+    'traefik.http.routers.api-owntracks-swwcg80gkw4k0k4oco8w8wgw.priority=200',
+    'traefik.http.routers.api-owntracks-swwcg80gkw4k0k4oco8w8wgw.middlewares=api-owntracks-ratelimit-swwcg80gkw4k0k4oco8w8wgw',
+    'traefik.http.middlewares.api-owntracks-ratelimit-swwcg80gkw4k0k4oco8w8wgw.ratelimit.average=30',
+    'traefik.http.middlewares.api-owntracks-ratelimit-swwcg80gkw4k0k4oco8w8wgw.ratelimit.period=1m',
+    'traefik.http.middlewares.api-owntracks-ratelimit-swwcg80gkw4k0k4oco8w8wgw.ratelimit.burst=10',
+    'traefik.http.routers.api-owntracks-swwcg80gkw4k0k4oco8w8wgw-https.rule=Host(`socos.rachkovan.com`) && Path(`/api/location/owntracks`)',
+    'traefik.http.routers.api-owntracks-swwcg80gkw4k0k4oco8w8wgw-https.tls=true',
+  ]) {
+    assert.match(compose, new RegExp(escapeRegExp(label)));
   }
 
   for (const path of ['services/api/Dockerfile', 'docker/Dockerfile.backend', 'Dockerfile']) {
     const dockerfile = readFileSync(resolve(root, path), 'utf8');
     assert.doesNotMatch(
       dockerfile,
-      /^\s*(?:ARG|ENV)\s+(?:GOOGLE_CALENDAR_CLIENT_SECRET|GOOGLE_CALENDAR_CALLBACK_SECRET|OWNTRACKS_WEBHOOK_SECRET|PERSONAL_DATA_KEYS|PERSONAL_DATA_INDEX_KEY|EVENT_SOURCE_ALLOWED_HOSTS)\b/m,
+      /^\s*(?:ARG|ENV)\s+(?:GOOGLE_CALENDAR_CLIENT_ID|GOOGLE_CALENDAR_CLIENT_SECRET|GOOGLE_CALENDAR_REDIRECT_URI|GOOGLE_CALENDAR_WEBHOOK_URL|GOOGLE_CALENDAR_SETTINGS_RESULT_URL|GOOGLE_CALENDAR_CALLBACK_SECRET|OWNTRACKS_WEBHOOK_SECRET|PERSONAL_DATA_KEYS|PERSONAL_DATA_INDEX_KEY|EVENT_SOURCE_ALLOWED_HOSTS)\b/m,
     );
   }
 });
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
