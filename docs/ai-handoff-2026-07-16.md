@@ -2,6 +2,8 @@
 
 This is the source-of-truth handoff for the current personal-first Socos work. It separates implemented backend capability from what is actually usable in the web product, records production evidence without exposing personal rows or credentials, and ends with a continuation prompt for another AI.
 
+Last updated: 2026-07-16 after local completion of Personal Contacts Workspace Task 1. Production remains on the earlier deployed SHA listed below.
+
 ## Executive Status
 
 | Area | Status | What that means |
@@ -13,7 +15,7 @@ This is the source-of-truth handoff for the current personal-first Socos work. I
 | Hermes Discord delivery | Done for brief delivery | A 09:00 Asia/Dubai job was manually production-validated. Continue verifying reply-to-action workflows as the product surface expands. |
 | Calendar, Pixel location, events | Code deployed disabled-first | Secure modules, schema, ranking, encryption, deletion, rekeying, tests, and runbooks exist. Google consent, Pixel enrollment, source configuration, and feature enablement are not complete. |
 | Public product proof | Partially done and deployed | The public demo and `/sample-workspace` explain the intended workflow. They do not provide real access or prove the authenticated personal workflow. |
-| Personal Contacts workspace | Not implemented; highest product priority | The dashboard fetches only 50 contacts and filters locally. More than half of the 106 imported contacts are unreachable in the UI; no useful profile workspace exists. |
+| Personal Contacts workspace | API foundation complete locally; independent review pending | Bounded owner-scoped pagination, facets, safe contact profiles, nested contact methods, and profile updates are implemented at `e077a2b`. Interaction/reminder integrity and the responsive web workspace remain. None of this slice is deployed yet. |
 | Invite request flow | Not implemented | `Request invite access` ends at an invite-code-only signup screen. |
 | Betabots release gate | Partial; not passed | A research-weighted eight-persona directional run produced useful evidence but was stopped for this handoff. It is not real-backend-attested and cannot satisfy the release gate. |
 
@@ -22,12 +24,13 @@ This is the source-of-truth handoff for the current personal-first Socos work. I
 - GitHub: `https://github.com/yevgeniusr/socos`
 - Local checkout: `/Users/mac/Desktop/projects/personal/socos`
 - Branch: `main`
-- Current repository commit before this handoff update: `d1c11b6` (`docs: add Socos AI handoff`)
+- Current local commit before this handoff update: `e077a2bd218dc251cbe8c19be654778d3792a67e` (`feat(api): expose personal contact profiles`)
+- Current local branch state: `main` is two commits ahead of `origin/main` (`06ea29c`, `e077a2b`) before this document update.
 - Current deployed application code: `32db6518336cb427f94938c2ecb8b2493696b2a0`
 - Production: `https://socos.rachkovan.com`
 - Coolify application UUID: `swwcg80gkw4k0k4oco8w8wgw`
 - Deployment recorded for `32db651...`: `ajliakg70dfajcx71hs3jpk6`
-- Working tree was clean and `main` matched `origin/main` before this document was edited.
+- Working tree was clean before this document was edited. The two local Contacts commits had not been pushed or deployed.
 
 Real personal data belongs only in the Coolify PostgreSQL database. Do not copy contacts, Calendar rows, precise location samples, interaction contents, tokens, or production dumps into the repository or local fixtures.
 
@@ -137,6 +140,39 @@ The exact personal notes and contact contents are deliberately not reproduced he
 - The earlier local Playwright invocation hung; public behavior was also checked through production-rendered HTML. Do not treat that as full browser confidence.
 - A fresh aggregate-only smoke while preparing this handoff returned: home `200`, sample workspace `200`, signup `200`, health `200`, unauthenticated MCP `401`, and disabled OwnTracks ingest `503`.
 
+### 9. Current Local Contacts Slice
+
+The route-backed Contacts workspace was designed and split into five test-first tasks:
+
+- Design: `docs/plans/2026-07-16-personal-contacts-workspace-design.md`
+- Execution plan: `docs/superpowers/plans/2026-07-16-personal-contacts-workspace.md`
+- Planning commit: `06ea29c786b71a37f2337eacb49f2a453676ede6`
+- Task 1 implementation commit: `e077a2bd218dc251cbe8c19be654778d3792a67e`
+- Task 1 report: `.superpowers/sdd/task-1-report.md`
+
+Task 1 is implemented locally:
+
+- Contact queries now validate `limit`, `offset`, fixed sort fields/order, and group filtering.
+- Personal list, count, label, tag, group, and detail reads are owner-scoped and exclude demo contacts.
+- List/detail reads use explicit projections; list default is 25 and maximum is 100 with a stable ID tie-break.
+- Contact detail includes ordered contact methods, recent interactions, pending reminders, and counts.
+- Create/update accept validated nested contact methods, including atomic complete replacement on update.
+- Profile updates include groups, social links, important dates, and first-met data; relationship score is read-only.
+- Social links use allowlisted HTTP(S) keys and support legacy JSON-string reads while storing new values as objects.
+- Update ownership checks and nested contact-method replacement run in a serializable transaction.
+- `GET /contacts/groups` exists as a static route before `GET /contacts/:id`.
+
+Task 1 verification completed locally with synthetic mocks only: 4 Contacts suites, 60 tests, API typecheck, and `git diff --check` all passed. The independent review did not complete before handoff and the reviewer was stopped; dispatch a fresh read-only reviewer. Do not call Task 1 review-clean until that review is resolved. In particular, confirm that create/update mutation responses do not expose full Prisma rows or provider source IDs, and address every Critical or Important reviewer finding before starting Task 2.
+
+Tasks 2-5 remain:
+
+1. Converge human and agent interaction writes onto one validated serializable path; make recurring reminder completion atomic and idempotent.
+2. Build `/dashboard/contacts` as a responsive route-backed master-detail workspace with server search, filters, pagination, profile editing, interaction logging, and reminder actions.
+3. Add deterministic browser proof using synthetic API data at desktop and Pixel `412x915` viewports.
+4. Run broad API/web verification, push exact commits, deploy through Coolify, perform aggregate-only production smoke, and record the deployed SHA and deployment UUID.
+
+No schema migration or frontend dependency is planned for this Contacts slice. `ContactField` ownership/uniqueness database constraints and moving browser auth entirely behind an httpOnly proxy remain separate hardening work after the product slice.
+
 ## Betabots Status
 
 ### Research-Weighted Betabots Wave
@@ -166,23 +202,23 @@ Older runs under `20260716-162300-post-demo-fix` and `20260716-171509-post-works
 
 This is the highest-priority product work. Do it before optimizing public acquisition.
 
-1. Replace the dashboard's fixed `GET /api/contacts?limit=50` local subset with server-driven pagination, search, labels/tags, and an accurate `showing X of 106` view.
-2. Make every contact open a responsive profile workspace/drawer.
-3. Extend the contact-detail API response to include safe owner-scoped contact fields and the data the UI needs.
-4. Show and edit name, nickname, bio/memory, company/title, importance, cadence, first-met context, birthday, anniversary, labels, tags, groups, social links, and contact methods.
-5. Show an interaction timeline and pending reminders; allow logging an interaction and creating/scheduling/completing reminders.
-6. Add focused synthetic tests for pagination/query contracts, owner isolation, profile rendering, editing, interactions, and reminders.
-7. Keep personal values out of fixtures, screenshots, logs, and commits.
+1. Finish the independent review of local API commit `e077a2b`; fix all Critical/Important findings and re-run the focused Contacts suite/typecheck.
+2. Converge duplicate human/agent interaction writes and make recurring reminder completion atomic/idempotent as Task 2 of the Contacts plan.
+3. Replace the dashboard's fixed `GET /api/contacts?limit=50` local subset with `/dashboard/contacts`, server-driven pagination/search/facets, and an accurate `Showing X-Y of 106` view.
+4. Make every contact open an accessible responsive profile workspace, including a full-screen mobile profile at Pixel size.
+5. Show and edit the safe profile contract delivered by Task 1: identity, bio/memory, work, importance/cadence, first-met context, dates, labels/tags/groups, social links, and contact methods.
+6. Show interactions and pending reminders; allow logging interactions and creating/scheduling/completing reminders through the hardened Task 2 services.
+7. Add pure query tests, focused API tests, deterministic synthetic Playwright coverage, and desktop/mobile visual verification.
+8. Push, deploy, and verify an exact SHA only after review and broad verification. Keep personal values out of fixtures, screenshots, logs, and commits.
 
 Known code evidence:
 
 - `apps/web/src/app/dashboard/dashboard-client.tsx` fetches `limit=50` and filters only the loaded array.
 - `ContactCard` accepts an `onClick` prop but does not wire it to the outer card, and the dashboard passes no profile action.
-- `ContactsController` already exposes list/detail/update/delete and per-contact interactions.
+- `ContactsController` now exposes bounded list/detail/update, owner-scoped facets including groups, and per-contact interactions locally; its duplicate interaction path is intentionally scheduled for Task 2 removal.
 - `RemindersController` already exposes create/list/update/complete/delete.
-- `ContactsService.findOne` currently includes recent interactions and reminders but not `contactFields`.
-- `UpdateContactDto` does not currently expose all first-met/profile fields.
-- The Add Contact form submits `email` and `phone`, but `CreateContactDto` accepts neither and global validation forbids unknown fields. Creating a contact with either populated currently returns `400`. Contact methods are stored as `ContactField` relations and need an owner-scoped API/UI contract.
+- Local Task 1 now supplies contact fields and the missing profile fields, but the deployed API does not yet contain those changes.
+- The deployed Add Contact form still submits unsupported top-level `email` and `phone`; the planned web Task 3 must send nested `contactFields` against the local API contract.
 
 ### P0: Put The Daily Loop In The Authenticated Web App
 
@@ -253,6 +289,7 @@ Recommended design already audited:
 ## Known Risks And Do-Not-Claim List
 
 - Do not claim all 106 contacts are usable in the web UI yet; only 50 are loaded by the current dashboard.
+- Do not claim the local Contacts API slice is deployed or review-clean; `e077a2b` is local and its independent review remains pending.
 - Do not claim Google Calendar is connected or syncing; the production flag is false and user consent remains.
 - Do not claim Pixel live location is active; phone enrollment and the production flag remain.
 - Do not claim event discovery or event brief suggestions are active; both flags remain false.
@@ -321,23 +358,28 @@ You are taking over Socos, a personal-first agent-driven CRM, from another Codex
 
 Read these before changing code:
 1. `docs/ai-handoff-2026-07-16.md` (authoritative current handoff)
-2. `.superpowers/sdd/progress.md` (completed implementation/review ledger)
-3. `docs/validation/agent-interface-v1.md` (production aggregate evidence)
-4. `docs/plans/2026-07-15-personal-first-socos-design.md` (product and safety contract)
-5. `docs/runbooks/database-backup-restore.md`
-6. `docs/runbooks/calendar-location-operations.md`
-7. `git status --short --branch` and `git log --oneline -12`
+2. `docs/plans/2026-07-16-personal-contacts-workspace-design.md`
+3. `docs/superpowers/plans/2026-07-16-personal-contacts-workspace.md`
+4. `.superpowers/sdd/task-1-report.md` and `.superpowers/sdd/progress.md`
+5. `docs/validation/agent-interface-v1.md` (historical production aggregate evidence)
+6. `docs/plans/2026-07-15-personal-first-socos-design.md` (product and safety contract)
+7. `docs/runbooks/database-backup-restore.md` and `docs/runbooks/calendar-location-operations.md`
+8. `git status --short --branch` and `git log --oneline -12`
 
-Recover personal product context from Mem0 when needed. Search `user_id="yev"` across `agent_id="all"`; do not restrict to Codex-only memories. If no native Mem0 tool is available, from `/Users/mac/Desktop/projects/claw` run `python3 second-brain/scripts/mem0_query.py profile --top-k 20`. Use relevant conclusions, but never dump raw memories or contact rows into code, logs, tests, or the handoff.
+Recover personal product context from Mem0 when needed. Search `user_id="yev"` across all agent scopes; do not restrict to Codex-only memories. If no native Mem0 tool is available, from `/Users/mac/Desktop/projects/personal/claw-workspace` run `python3 second-brain/scripts/mem0_query.py profile --top-k 20`. Use conclusions for prioritization, but never dump raw memories or contact rows into code, logs, tests, or the handoff.
 
-Current deployment:
+Current state:
 - Production: `https://socos.rachkovan.com`
 - Coolify app UUID: `swwcg80gkw4k0k4oco8w8wgw`
 - Current deployed code SHA: `32db6518336cb427f94938c2ecb8b2493696b2a0`
+- Local planning commit: `06ea29c786b71a37f2337eacb49f2a453676ede6`
+- Local Contacts API implementation: `e077a2bd218dc251cbe8c19be654778d3792a67e`
+- The local Contacts commits are not deployed. Inspect branch/origin status before pushing.
 - 106 non-demo Monica contacts and 7 isolated demo contacts are in the Coolify PostgreSQL database.
 - Hermes, Codex, and Claude production MCP clients were validated; Hermes daily Discord delivery runs at 09:00 Asia/Dubai.
 - The 11-tool MCP boundary supports reads and safe CRM mutations. Proposal/approval infrastructure exists, but actual outbound message/introduction/invitation/merge/delete executors are still unimplemented.
 - Calendar, location, event discovery, and event brief flags are all false.
+- Contacts Task 1 has 4 passing suites/60 tests plus API typecheck, but its independent review did not complete before handoff. Dispatch a fresh reviewer and do not treat it as review-clean without an explicit result.
 
 Non-negotiable safety rules:
 - Never print or expose tokens, database URLs, private keys, OAuth values, invite codes, Coolify credentials, contact contents, interaction contents, or exact location samples.
@@ -347,18 +389,16 @@ Non-negotiable safety rules:
 - Use additive forward-only migrations, take/verify a backup before schema changes, deploy an exact pushed SHA, and run production smoke.
 - Do not enable Calendar/location/event flags until Yev completes account/device consent and staged verification is ready.
 - Keep `.betabots/` ignored.
+- Preserve existing unrelated changes and never reset or rewrite work you did not create.
 
-First inspect the partial research-weighted Betabots run at `.betabots/runs/20260716-213200-post-workspace-research-weighted/`. Its runner was intentionally stopped for this handoff after bots 001-005 completed, 006-007 were interrupted late, and 008 did not start. Analyze its raw journeys and screenshots as qualitative evidence only. It lacks real-backend attestation and final analysis artifacts; do not call the formal gate passed or resume from an assumed complete state.
-
-Then execute the roadmap in this order:
+Execute the roadmap in this order:
 
 1. Personal Contacts workspace (highest priority)
-   - Replace the dashboard's fixed `limit=50` local subset with server-side pagination/search/filtering so all 106 contacts are reachable.
-   - Add an accessible responsive contact profile with contact fields, bio/memory, work, relationship metadata, important dates, first-met context, provenance, interactions, and reminders.
-   - Support editing, logging interactions, and scheduling/completing reminders.
-   - Extend the owner-scoped API contract where needed.
-   - Fix Add Contact: the web currently sends email/phone fields rejected by `CreateContactDto`; implement contact-method CRUD through `ContactField` instead of bypassing validation.
-   - Use TDD with synthetic data and verify desktop plus Pixel-sized mobile behavior.
+   - Review `06ea29c..e077a2b` against Task 1. Fix all Critical/Important findings, especially any create/update mutation response that spreads a full Prisma row or exposes `sourceId`. Re-run Contacts tests, API typecheck, and `git diff --check`; record the clean review in `.superpowers/sdd/progress.md`.
+   - Execute Task 2 test-first: converge human/agent interaction writes on one serializable service and make recurring reminder completion atomic/idempotent.
+   - Execute Task 3 test-first: build route-backed `/dashboard/contacts` with server pagination/search/facets, all 106 contacts reachable, profile editing, nested contact methods, interactions, and reminders. Remove the broken top-level email/phone form contract.
+   - Execute Task 4 browser proof with synthetic intercepted data at desktop and Pixel `412x915`; verify keyboard/touch behavior, no overflow, and no overlap.
+   - Execute Task 5 broad verification, push exact commits, back up if required, deploy through Coolify, confirm deployed SHA, and run aggregate-only production smoke.
 
 2. Authenticated daily cockpit
    - Surface today's durable brief, relationship reasoning, important dates, event items, and quests.
@@ -369,6 +409,7 @@ Then execute the roadmap in this order:
    - Implement a minimal DB-backed, rate-limited, enumeration-resistant invite request queue with generic 202 responses, no-PII Discord/Hermes notification, reviewer-only APIs/UI, cleanup, and tests. Keep registration invite-code-only.
    - Add `/api/health/integrity` that executes a real PostgreSQL check and returns a fixed safe real-backend attestation; fixed sanitized 503 on failure.
    - Deploy and rerun the eight-persona cohort with real-backend attestation and synthetic test data. Iterate on repeated/high-severity findings.
+   - The partial run at `.betabots/runs/20260716-213200-post-workspace-research-weighted/` is qualitative only: bots 001-005 completed, 006-007 were interrupted, and 008 did not start. Never claim the formal gate passed from it.
 
 4. Personal integrations with Yev's required actions
    - Prepare Google read-only OAuth and ask Yev only when the actual consent click is required.
