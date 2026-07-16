@@ -81,6 +81,7 @@ const contactDetail = {
 
 interface SyntheticApiState {
   listRequests: URL[];
+  writeRequests: Array<{ method: string; pathname: string }>;
   updatePayloads: Array<Record<string, unknown>>;
   interactionPayloads: Array<Record<string, unknown>>;
   reminderPayloads: Array<Record<string, unknown>>;
@@ -98,6 +99,7 @@ function json(route: Route, body: unknown, status = 200) {
 async function installSyntheticApi(page: Page): Promise<SyntheticApiState> {
   const state: SyntheticApiState = {
     listRequests: [],
+    writeRequests: [],
     updatePayloads: [],
     interactionPayloads: [],
     reminderPayloads: [],
@@ -122,6 +124,10 @@ async function installSyntheticApi(page: Page): Promise<SyntheticApiState> {
     const request = route.request();
     const url = new URL(request.url());
     const method = request.method();
+
+    if (method !== "GET") {
+      state.writeRequests.push({ method, pathname: url.pathname });
+    }
 
     if (url.pathname === "/api/gamification/stats") {
       return json(route, {
@@ -267,6 +273,8 @@ test.describe("personal Contacts workspace", () => {
     await expect(
       interactionForm.getByRole("combobox", { name: "Type" })
     ).toHaveValue("message");
+    await expect(profile).not.toContainText(/\b(sent|delivered)\b/i);
+    expect(api.writeRequests).toEqual([]);
     expect(api.interactionPayloads).toEqual([]);
 
     const semanticCopy = await page
