@@ -136,6 +136,11 @@ describe("ActionProposalService", () => {
       clientId: principal.clientId,
       actionType: "message",
       payloadHash: "a".repeat(64),
+      preview: {
+        contactId: "contact-synthetic",
+        channel: "social",
+        body: "Synthetic draft",
+      },
       status: "pending",
       expiresAt: new Date("2026-07-16T13:00:00.000Z"),
     });
@@ -180,6 +185,26 @@ describe("ActionProposalService", () => {
     expect(tx.approvalGrant.create).not.toHaveBeenCalled();
   });
 
+  it("refuses to approve a proposal whose persisted preview is unreviewable", async () => {
+    const { service, tx } = harness();
+    tx.actionProposal.findFirst.mockResolvedValue({
+      id: "proposal-corrupt",
+      ownerId: principal.ownerId,
+      clientId: principal.clientId,
+      actionType: "message",
+      payloadHash: "a".repeat(64),
+      preview: { contactId: "contact-synthetic", unexpected: "hidden" },
+      status: "pending",
+      expiresAt: new Date("2026-07-16T13:00:00.000Z"),
+    });
+
+    await expect(
+      service.approve(principal.ownerId, "proposal-corrupt")
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.actionProposal.updateMany).not.toHaveBeenCalled();
+    expect(tx.approvalGrant.create).not.toHaveBeenCalled();
+  });
+
   it("rejects expired proposals without creating a grant", async () => {
     const { service, tx } = harness();
     tx.actionProposal.findFirst.mockResolvedValue({
@@ -188,6 +213,11 @@ describe("ActionProposalService", () => {
       clientId: principal.clientId,
       actionType: "message",
       payloadHash: "a".repeat(64),
+      preview: {
+        contactId: "contact-synthetic",
+        channel: "social",
+        body: "Synthetic draft",
+      },
       status: "pending",
       expiresAt: new Date("2026-07-16T11:59:00.000Z"),
     });

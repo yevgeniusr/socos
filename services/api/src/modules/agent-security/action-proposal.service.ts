@@ -190,6 +190,7 @@ export class ActionProposalService {
             clientId: true,
             actionType: true,
             payloadHash: true,
+            preview: true,
             status: true,
             expiresAt: true,
           },
@@ -205,6 +206,12 @@ export class ActionProposalService {
         if (proposal.status !== "pending" || proposal.expiresAt <= now) {
           throw approvalConflict();
         }
+        const reviewable = agentActionProposalInputSchema.safeParse({
+          actionType: proposal.actionType,
+          idempotencyKey: "approval:review",
+          payload: proposal.preview,
+        });
+        if (!reviewable.success) throw approvalConflict();
 
         const claim = await tx.actionProposal.updateMany({
           where: {
