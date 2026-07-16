@@ -3,7 +3,7 @@ import { ConfigService } from "@nestjs/config";
 import type { Prisma } from "@prisma/client";
 import { createHash, randomUUID } from "node:crypto";
 import { google } from "googleapis";
-import type { LocationAliasService } from "../location/location-alias.service.js";
+import { LocationAliasService } from "../location/location-alias.service.js";
 import type { EncryptedValue } from "../personal-data/personal-data-cipher.service.js";
 import { PersonalDataCipherService } from "../personal-data/personal-data-cipher.service.js";
 import { PersonalDataConfigService } from "../personal-data/personal-data-config.js";
@@ -227,6 +227,7 @@ type SourceClaim = {
   calendarId: string;
   timeZone: string | null;
   accessToken: string;
+  connectionUpdatedAt: Date;
 };
 
 export type NormalizedProviderEvent = {
@@ -354,6 +355,9 @@ export class CalendarSyncService {
     });
     if (!row || !row.calendarListPendingAt) return false;
     const lease = new Date(runNow.getTime() + LEASE_MS);
+    const connectionGeneration = new Date(
+      Math.max(runNow.getTime(), row.updatedAt.getTime() + 1)
+    );
     const claimed = await this.prisma.googleCalendarConnection.updateMany({
       where: {
         id: row.id,
@@ -365,7 +369,10 @@ export class CalendarSyncService {
           { calendarListLeaseUntil: { lt: runNow } },
         ],
       },
-      data: { calendarListLeaseUntil: lease },
+      data: {
+        calendarListLeaseUntil: lease,
+        updatedAt: connectionGeneration,
+      },
     });
     if (claimed.count !== 1) return false;
     const refreshToken = this.decryptRefresh(row);
@@ -374,24 +381,11 @@ export class CalendarSyncService {
       accessToken = (await this.provider.authorize(refreshToken)).accessToken;
     } catch (error) {
       if (isInvalidGrant(error)) {
-        await this.prisma.$transaction(async (tx) => {
-          await tx.googleCalendarConnection.updateMany({
-            where: {
-              id: row.id,
-              ownerId: row.ownerId,
-              calendarListLeaseUntil: lease,
-            },
-            data: {
-              status: "needs_reauth",
-              errorCode: "google_invalid_grant",
-              calendarListLeaseUntil: null,
-            },
-          });
-          await tx.calendarSource.updateMany({
-            where: { ownerId: row.ownerId, connectionId: row.id },
-            data: { syncLeaseUntil: null, errorCode: "google_invalid_grant" },
-          });
-        });
+        await this.markCalendarListNeedsReauth(
+          row,
+          lease,
+          connectionGeneration
+        );
       } else {
         await this.releaseCalendarListWithBackoff(row, lease, runNow);
       }
@@ -429,16 +423,32 @@ export class CalendarSyncService {
             id: row.id,
             ownerId: row.ownerId,
             status: "active",
+            updatedAt: connectionGeneration,
+            calendarListPendingAt: row.calendarListPendingAt,
             calendarListLeaseUntil: lease,
           },
-          data: { calendarListLeaseUntil: lease },
+          data: {
+            calendarListLeaseUntil: lease,
+            updatedAt: connectionGeneration,
+          },
         });
         if (fenced.count !== 1) return true;
       } while (pageToken);
       if (!terminal) throw new Error("google_calendar_missing_terminal_token");
     } catch (error) {
       if (isGone(error)) {
-        await this.resetCalendarListGone(row, lease, runNow);
+        await this.resetCalendarListGone(
+          row,
+          lease,
+          runNow,
+          connectionGeneration
+        );
+      } else if (isInvalidGrant(error)) {
+        await this.markCalendarListNeedsReauth(
+          row,
+          lease,
+          connectionGeneration
+        );
       } else {
         await this.releaseCalendarListWithBackoff(row, lease, runNow);
       }
@@ -451,7 +461,8 @@ export class CalendarSyncService {
       calendars,
       terminal,
       syncToken === null,
-      runNow
+      runNow,
+      connectionGeneration
     );
     return true;
   }
@@ -477,28 +488,79 @@ export class CalendarSyncService {
     });
   }
 
-  async markDailyReconciliation(now: Date, slot: number): Promise<void> {
+  async markDailyReconciliation(now: Date, _slot: number): Promise<void> {
     let cursor: string | undefined;
     while (true) {
       const sources = await this.prisma.calendarSource.findMany({
         where: { selected: true, connection: { status: "active" } },
         orderBy: { id: "asc" },
         take: 500,
-        select: { id: true, ownerId: true, pendingSyncAt: true },
+        select: {
+          id: true,
+          ownerId: true,
+          pendingSyncAt: true,
+          lastFullReconciledAt: true,
+        },
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       });
       for (const source of sources) {
-        if (sourceBucket(source.id) !== slot) continue;
-        await this.prisma.calendarSource.updateMany({
-          where: { id: source.id, ownerId: source.ownerId, selected: true },
-          data: {
-            fullSyncRequired: true,
-            ...(source.pendingSyncAt === null ? { pendingSyncAt: now } : {}),
-          },
-        });
+        if (
+          !reconciliationDue(
+            source.lastFullReconciledAt,
+            now,
+            sourceBucket(source.ownerId)
+          )
+        ) {
+          continue;
+        }
+        await this.markSourceFullRequired(source, now);
       }
       if (sources.length < 500) return;
       cursor = sources.at(-1)!.id;
+    }
+  }
+
+  private async markSourceFullRequired(
+    initial: {
+      id: string;
+      ownerId: string;
+      pendingSyncAt: Date | null;
+      lastFullReconciledAt: Date | null;
+    },
+    now: Date
+  ): Promise<void> {
+    let source = initial;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const updated = await this.prisma.calendarSource.updateMany({
+        where: {
+          id: source.id,
+          ownerId: source.ownerId,
+          selected: true,
+          pendingSyncAt: source.pendingSyncAt,
+          lastFullReconciledAt: source.lastFullReconciledAt,
+        },
+        data: {
+          fullSyncRequired: true,
+          pendingSyncAt: advancePending(source.pendingSyncAt, now),
+        },
+      });
+      if (updated.count === 1) return;
+      const current = await this.prisma.calendarSource.findFirst({
+        where: {
+          id: source.id,
+          ownerId: source.ownerId,
+          selected: true,
+          connection: { status: "active" },
+        },
+        select: {
+          id: true,
+          ownerId: true,
+          pendingSyncAt: true,
+          lastFullReconciledAt: true,
+        },
+      });
+      if (!current) return;
+      source = current;
     }
   }
 
@@ -555,6 +617,7 @@ export class CalendarSyncService {
         ),
         timeZone: row.timeZone,
         accessToken,
+        connectionUpdatedAt: row.connection.updatedAt,
       };
     } catch (error) {
       if (isInvalidGrant(error))
@@ -563,7 +626,9 @@ export class CalendarSyncService {
             id: row.id,
             ownerId: row.ownerId,
             connectionId: row.connectionId,
+            pendingSyncAt: row.pendingSyncAt,
             lease,
+            connectionUpdatedAt: row.connection.updatedAt,
           } as SourceClaim,
           runNow
         );
@@ -857,15 +922,32 @@ export class CalendarSyncService {
   }
 
   private async markNeedsReauth(
-    claim: Pick<SourceClaim, "id" | "ownerId" | "connectionId" | "lease">,
+    claim: Pick<
+      SourceClaim,
+      | "id"
+      | "ownerId"
+      | "connectionId"
+      | "pendingSyncAt"
+      | "lease"
+      | "connectionUpdatedAt"
+    >,
     _now: Date
   ): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
-      await tx.googleCalendarConnection.updateMany({
+      const demoted = await tx.googleCalendarConnection.updateMany({
         where: {
           id: claim.connectionId,
           ownerId: claim.ownerId,
           status: "active",
+          updatedAt: claim.connectionUpdatedAt,
+          sources: {
+            some: {
+              id: claim.id,
+              ownerId: claim.ownerId,
+              pendingSyncAt: claim.pendingSyncAt,
+              syncLeaseUntil: claim.lease,
+            },
+          },
         },
         data: {
           status: "needs_reauth",
@@ -873,6 +955,7 @@ export class CalendarSyncService {
           calendarListLeaseUntil: null,
         },
       });
+      if (demoted.count !== 1) return;
       await tx.calendarSource.updateMany({
         where: { ownerId: claim.ownerId, connectionId: claim.connectionId },
         data: { syncLeaseUntil: null, errorCode: "google_invalid_grant" },
@@ -945,25 +1028,66 @@ export class CalendarSyncService {
     }
   }
 
+  private async markCalendarListNeedsReauth(
+    row: {
+      id: string;
+      ownerId: string;
+      calendarListPendingAt: Date;
+    },
+    lease: Date,
+    connectionGeneration: Date
+  ): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const demoted = await tx.googleCalendarConnection.updateMany({
+        where: {
+          id: row.id,
+          ownerId: row.ownerId,
+          status: "active",
+          updatedAt: connectionGeneration,
+          calendarListLeaseUntil: lease,
+          calendarListPendingAt: row.calendarListPendingAt,
+        },
+        data: {
+          status: "needs_reauth",
+          errorCode: "google_invalid_grant",
+          calendarListLeaseUntil: null,
+        },
+      });
+      if (demoted.count !== 1) return;
+      await tx.calendarSource.updateMany({
+        where: { ownerId: row.ownerId, connectionId: row.id },
+        data: { syncLeaseUntil: null, errorCode: "google_invalid_grant" },
+      });
+    });
+  }
+
   private async resetCalendarListGone(
     row: { id: string; ownerId: string; calendarListPendingAt: Date },
     lease: Date,
-    now: Date
+    now: Date,
+    connectionGeneration: Date
   ): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
       const fenced = await tx.googleCalendarConnection.updateMany({
         where: {
           id: row.id,
           ownerId: row.ownerId,
+          status: "active",
+          updatedAt: connectionGeneration,
           calendarListLeaseUntil: lease,
         },
-        data: { calendarListLeaseUntil: lease },
+        data: {
+          calendarListLeaseUntil: lease,
+          updatedAt: connectionGeneration,
+        },
       });
       if (fenced.count !== 1) return;
       const current = await tx.googleCalendarConnection.findFirst({
         where: {
           id: row.id,
           ownerId: row.ownerId,
+          status: "active",
+          updatedAt: connectionGeneration,
           calendarListLeaseUntil: lease,
         },
         select: { calendarListPendingAt: true },
@@ -972,6 +1096,8 @@ export class CalendarSyncService {
         where: {
           id: row.id,
           ownerId: row.ownerId,
+          status: "active",
+          updatedAt: connectionGeneration,
           calendarListLeaseUntil: lease,
         },
         data: {
@@ -984,6 +1110,7 @@ export class CalendarSyncService {
             now
           ),
           calendarListLeaseUntil: null,
+          updatedAt: connectionGeneration,
         },
       });
     });
@@ -995,7 +1122,8 @@ export class CalendarSyncService {
     calendars: ProviderCalendar[],
     terminal: string,
     full: boolean,
-    now: Date
+    now: Date,
+    connectionGeneration: Date
   ): Promise<void> {
     const token = this.cipher.encrypt(
       LIST_TOKEN_PURPOSE,
@@ -1009,10 +1137,14 @@ export class CalendarSyncService {
           id: row.id,
           ownerId: row.ownerId,
           status: "active",
+          updatedAt: connectionGeneration,
           calendarListPendingAt: row.calendarListPendingAt,
           calendarListLeaseUntil: lease,
         },
-        data: { calendarListLeaseUntil: lease },
+        data: {
+          calendarListLeaseUntil: lease,
+          updatedAt: connectionGeneration,
+        },
       });
       if (fenced.count !== 1) return;
       const incoming = new Set<string>();
@@ -1021,6 +1153,26 @@ export class CalendarSyncService {
         const mac = this.index.mac(SOURCE_ID_PURPOSE, row.ownerId, calendar.id);
         incoming.add(mac);
         if (calendar.deleted) {
+          const removed = await tx.calendarSource.findFirst({
+            where: {
+              connectionId: row.id,
+              ownerId: row.ownerId,
+              externalIdMac: mac,
+            },
+            select: { id: true },
+          });
+          if (removed) {
+            await tx.calendarWatch.updateMany({
+              where: {
+                ownerId: row.ownerId,
+                connectionId: row.id,
+                targetType: "events",
+                targetKey: removed.id,
+                status: "active",
+              },
+              data: { status: "stopping" },
+            });
+          }
           await tx.calendarSource.deleteMany({
             where: {
               connectionId: row.id,
@@ -1051,9 +1203,6 @@ export class CalendarSyncService {
               ...tokenColumns("name", name),
               timeZone: calendar.timeZone ?? null,
               isPrimary: calendar.primary === true,
-              ...(calendar.selected === true
-                ? { selected: true, pendingSyncAt: now }
-                : {}),
             },
           });
         } else {
@@ -1088,6 +1237,26 @@ export class CalendarSyncService {
         }
       }
       if (full) {
+        const removed = await tx.calendarSource.findMany({
+          where: {
+            connectionId: row.id,
+            ownerId: row.ownerId,
+            externalIdMac: { notIn: [...incoming] },
+          },
+          select: { id: true },
+        });
+        if (removed.length > 0) {
+          await tx.calendarWatch.updateMany({
+            where: {
+              ownerId: row.ownerId,
+              connectionId: row.id,
+              targetType: "events",
+              targetKey: { in: removed.map((source) => source.id) },
+              status: "active",
+            },
+            data: { status: "stopping" },
+          });
+        }
         await tx.calendarSource.deleteMany({
           where: {
             connectionId: row.id,
@@ -1103,6 +1272,7 @@ export class CalendarSyncService {
           ownerId: row.ownerId,
           calendarListPendingAt: row.calendarListPendingAt,
           calendarListLeaseUntil: lease,
+          updatedAt: connectionGeneration,
         },
         data: {
           ...tokenColumns("calendarListSyncToken", token),
@@ -1110,6 +1280,7 @@ export class CalendarSyncService {
           calendarListLeaseUntil: null,
           lastSyncedAt: now,
           errorCode: null,
+          updatedAt: connectionGeneration,
         },
       });
     });
@@ -1273,6 +1444,22 @@ function zonedMidnightUtc(date: string, timeZone: string): Date {
   }
   const result = new Date(candidate);
   if (!Number.isFinite(result.getTime())) throw new Error("invalid_time_zone");
+  const verified = Object.fromEntries(
+    formatter
+      .formatToParts(result)
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, Number(part.value)])
+  );
+  if (
+    verified.year !== year ||
+    verified.month !== month ||
+    verified.day !== day ||
+    verified.hour !== 0 ||
+    verified.minute !== 0 ||
+    verified.second !== 0
+  ) {
+    throw new Error("invalid_local_midnight");
+  }
   return result;
 }
 
@@ -1353,6 +1540,23 @@ function advancePending(current: Date | null, now: Date): Date {
 
 function sourceBucket(id: string): number {
   return createHash("sha256").update(id, "utf8").digest().readUInt32BE(0) % 96;
+}
+
+function reconciliationDue(
+  lastFullReconciledAt: Date | null,
+  now: Date,
+  ownerSlot: number
+): boolean {
+  const today = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate()
+  );
+  const scheduledToday = new Date(today + ownerSlot * 15 * 60 * 1000);
+  const scheduledYesterday = new Date(scheduledToday.getTime() - DAY_MS);
+  if (!lastFullReconciledAt) return now >= scheduledToday;
+  if (lastFullReconciledAt < scheduledYesterday) return true;
+  return now >= scheduledToday && lastFullReconciledAt < scheduledToday;
 }
 
 const eventSelect = {

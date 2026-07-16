@@ -22,7 +22,10 @@ function harness() {
       create: jest.fn(),
       updateMany: jest.fn(),
       findMany: jest.fn(),
+      findFirst: jest.fn().mockResolvedValue({ id: "watch-new" }),
     },
+    calendarEvent: { findMany: jest.fn() },
+    cityStay: { deleteMany: jest.fn() },
     calendarSource: {
       findFirst: jest.fn().mockResolvedValue({ pendingSyncAt: null }),
       updateMany: jest.fn(),
@@ -30,7 +33,9 @@ function harness() {
     googleCalendarConnection: {
       findFirst: jest.fn().mockResolvedValue({ calendarListPendingAt: null }),
       updateMany: jest.fn(),
+      deleteMany: jest.fn(),
     },
+    $queryRaw: jest.fn(),
   };
   const prisma = {
     calendarWatch: {
@@ -40,8 +45,12 @@ function harness() {
       updateMany: jest.fn(),
       deleteMany: jest.fn(),
     },
-    calendarSource: { findFirst: jest.fn() },
-    googleCalendarConnection: { findFirst: jest.fn() },
+    calendarSource: { findFirst: jest.fn(), findMany: jest.fn() },
+    googleCalendarConnection: {
+      findFirst: jest.fn(),
+      findUnique: jest.fn(),
+      findMany: jest.fn(),
+    },
     $transaction: jest.fn(async (fn: (arg: typeof tx) => unknown) => fn(tx)),
   };
   const cipher = {
@@ -120,11 +129,11 @@ describe("CalendarWatchService", () => {
     const enqueueOrder =
       tx.googleCalendarConnection.updateMany.mock.invocationCallOrder[1];
     const stoppingOrder =
-      prisma.calendarWatch.updateMany.mock.invocationCallOrder[0];
+      tx.calendarWatch.updateMany.mock.invocationCallOrder[0];
     expect(createOrder).toBeLessThan(enqueueOrder);
     expect(enqueueOrder).toBeLessThan(stoppingOrder);
-    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-    expect(tx.calendarWatch.updateMany).not.toHaveBeenCalled();
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
   });
 
   it("keeps a future target backoff monotonic when a new watch enqueues work", async () => {
@@ -221,6 +230,48 @@ describe("CalendarWatchService", () => {
     });
   });
 
+  it("stops only its own channel when another renewal wins election", async () => {
+    const { service, prisma, tx, provider } = harness();
+    prisma.googleCalendarConnection.findFirst.mockResolvedValue({
+      id: "connection",
+      ownerId: "owner",
+      status: "active",
+      refreshTokenCiphertext: Buffer.from("r"),
+      refreshTokenIv: envelope.iv,
+      refreshTokenTag: envelope.tag,
+      refreshTokenKeyVersion: 1,
+    });
+    tx.googleCalendarConnection.updateMany.mockResolvedValue({ count: 1 });
+    tx.calendarWatch.create.mockResolvedValue({ id: "watch-new" });
+    tx.calendarWatch.findFirst.mockResolvedValue(null);
+    prisma.calendarWatch.findMany.mockResolvedValue([
+      {
+        id: "watch-new",
+        channelId: "channel-new",
+        status: "stopping",
+        expiresAt: new Date("2026-07-23T12:00:00Z"),
+        resourceIdCiphertext: Buffer.from("resource"),
+        resourceIdIv: envelope.iv,
+        resourceIdTag: envelope.tag,
+        resourceIdKeyVersion: 1,
+      },
+    ]);
+
+    await service.createOrRenew(
+      "owner",
+      "connection",
+      "calendar_list",
+      "connection",
+      NOW
+    );
+
+    expect(tx.calendarWatch.updateMany).not.toHaveBeenCalled();
+    expect(provider.stopChannel).toHaveBeenCalledWith("access", {
+      channelId: "channel-new",
+      resourceId: "resource",
+    });
+  });
+
   it("validates opaque headers and advances a target only for a larger signed bigint", async () => {
     const { service, prisma, tx } = harness();
     prisma.calendarWatch.findUnique.mockResolvedValue({
@@ -264,6 +315,215 @@ describe("CalendarWatchService", () => {
     expect(tx.calendarSource.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: { pendingSyncAt: new Date(NOW.getTime() + 1) },
+      })
+    );
+  });
+
+  it("retries a target CAS race before committing the webhook message", async () => {
+    const { service, prisma, tx } = harness();
+    prisma.calendarWatch.findUnique.mockResolvedValue({
+      id: "watch",
+      ownerId: "owner",
+      connectionId: "connection",
+      targetType: "events",
+      targetKey: "source",
+      status: "active",
+      expiresAt: new Date("2026-07-16T13:00:00Z"),
+      tokenMac: "mac:token",
+      resourceIdMac: "mac:resource",
+      lastMessageNumber: 8n,
+    });
+    tx.calendarWatch.updateMany.mockResolvedValue({ count: 1 });
+    tx.calendarSource.findFirst
+      .mockResolvedValueOnce({ pendingSyncAt: NOW })
+      .mockResolvedValueOnce({
+        pendingSyncAt: new Date(NOW.getTime() + 4),
+      });
+    tx.calendarSource.updateMany
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 1 });
+
+    await expect(
+      service.handleWebhook(
+        {
+          channelId: "opaque",
+          token: "token",
+          resourceId: "resource",
+          resourceState: "exists",
+          messageNumber: 9n,
+        },
+        NOW
+      )
+    ).resolves.toBe("accepted");
+    expect(tx.calendarSource.updateMany).toHaveBeenCalledTimes(2);
+  });
+
+  it("rolls back the webhook message when target enqueue cannot win", async () => {
+    const { service, prisma, tx } = harness();
+    prisma.calendarWatch.findUnique.mockResolvedValue({
+      id: "watch",
+      ownerId: "owner",
+      connectionId: "connection",
+      targetType: "events",
+      targetKey: "source",
+      status: "active",
+      expiresAt: new Date("2026-07-16T13:00:00Z"),
+      tokenMac: "mac:token",
+      resourceIdMac: "mac:resource",
+      lastMessageNumber: 8n,
+    });
+    tx.calendarWatch.updateMany.mockResolvedValue({ count: 1 });
+    tx.calendarSource.findFirst.mockResolvedValue({ pendingSyncAt: NOW });
+    tx.calendarSource.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      service.handleWebhook(
+        {
+          channelId: "opaque",
+          token: "token",
+          resourceId: "resource",
+          resourceState: "exists",
+          messageNumber: 9n,
+        },
+        NOW
+      )
+    ).rejects.toMatchObject({ status: 503 });
+    expect(tx.calendarSource.updateMany).toHaveBeenCalledTimes(3);
+  });
+
+  it("prepares owner stops without mutating watch state", async () => {
+    const { service, prisma } = harness();
+    prisma.googleCalendarConnection.findUnique.mockResolvedValue({
+      id: "connection",
+      ownerId: "owner",
+      refreshTokenCiphertext: Buffer.from("r"),
+      refreshTokenIv: envelope.iv,
+      refreshTokenTag: envelope.tag,
+      refreshTokenKeyVersion: 1,
+    });
+    prisma.calendarWatch.findMany.mockResolvedValue([]);
+
+    await service.prepareOwnerStops("owner", NOW);
+
+    expect(prisma.calendarWatch.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("prepares, transitions, and deletes an active event watch on deselection", async () => {
+    const { service, prisma, provider } = harness();
+    prisma.calendarSource.findFirst.mockResolvedValue({
+      connectionId: "connection",
+    });
+    prisma.googleCalendarConnection.findFirst.mockResolvedValue({
+      id: "connection",
+      ownerId: "owner",
+      status: "active",
+      refreshTokenCiphertext: Buffer.from("r"),
+      refreshTokenIv: envelope.iv,
+      refreshTokenTag: envelope.tag,
+      refreshTokenKeyVersion: 1,
+    });
+    prisma.calendarWatch.findMany.mockResolvedValue([
+      {
+        id: "active-watch",
+        channelId: "active-channel",
+        status: "active",
+        expiresAt: new Date("2026-07-17T12:00:00Z"),
+        resourceIdCiphertext: Buffer.from("resource"),
+        resourceIdIv: envelope.iv,
+        resourceIdTag: envelope.tag,
+        resourceIdKeyVersion: 1,
+      },
+    ]);
+    prisma.calendarWatch.updateMany.mockResolvedValue({ count: 1 });
+    prisma.calendarWatch.deleteMany.mockResolvedValue({ count: 1 });
+
+    const prepared = await service.prepareSourceStops("owner", "source");
+    await service.transitionPreparedStops(prepared);
+    await service.stopPreparedBestEffort(prepared, NOW);
+
+    expect(prisma.calendarWatch.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          targetType: "events",
+          targetKey: "source",
+          status: { in: ["active", "stopping"] },
+        }),
+      })
+    );
+    expect(provider.stopChannel).toHaveBeenCalledWith("access", {
+      channelId: "active-channel",
+      resourceId: "resource",
+    });
+    expect(prisma.calendarWatch.deleteMany).toHaveBeenCalledWith({
+      where: {
+        id: "active-watch",
+        ownerId: "owner",
+        connectionId: "connection",
+        status: "stopping",
+      },
+    });
+  });
+
+  it("removes calendar CityStays before finalizing a watchless disconnected connection", async () => {
+    const { service, tx } = harness();
+    tx.googleCalendarConnection.findFirst.mockResolvedValue({
+      id: "connection",
+    });
+    tx.calendarEvent.findMany.mockResolvedValue([{ id: "event" }]);
+    tx.cityStay.deleteMany.mockResolvedValue({ count: 1 });
+
+    await service.removeDisconnectedCalendarStays("owner");
+
+    expect(tx.cityStay.deleteMany).toHaveBeenCalledWith({
+      where: {
+        ownerId: "owner",
+        source: "calendar",
+        sourceId: { in: ["event"] },
+      },
+    });
+
+    tx.calendarWatch.findFirst.mockResolvedValue(null);
+    tx.googleCalendarConnection.deleteMany.mockResolvedValue({ count: 1 });
+    await expect(service.finalizeDisconnectedOwner("owner")).resolves.toBe(
+      true
+    );
+    expect(tx.googleCalendarConnection.deleteMany).toHaveBeenCalledWith({
+      where: {
+        id: "connection",
+        ownerId: "owner",
+        status: "disconnected",
+        watches: { none: {} },
+      },
+    });
+  });
+
+  it("keyset-pages watch maintenance beyond a persistent first hundred", async () => {
+    const { service, prisma } = harness();
+    const first = Array.from({ length: 100 }, (_, index) => ({
+      id: `w${String(index).padStart(3, "0")}`,
+      ownerId: "owner",
+      connectionId: "connection",
+      targetType: "events",
+      targetKey: "source",
+      status: "stopping",
+      expiresAt: new Date("2026-07-16T11:00:00Z"),
+    }));
+    const last = [{ ...first[0], id: "w100" }];
+    prisma.calendarWatch.findMany.mockImplementation((args) => {
+      if (args.where?.OR) {
+        return Promise.resolve(args.where.id ? last : first);
+      }
+      return Promise.resolve([]);
+    });
+    prisma.googleCalendarConnection.findFirst.mockResolvedValue(null);
+    prisma.googleCalendarConnection.findMany.mockResolvedValue([]);
+    prisma.calendarSource.findMany.mockResolvedValue([]);
+
+    await service.maintain(NOW);
+
+    expect(prisma.calendarWatch.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: { gt: "w099" } }),
       })
     );
   });

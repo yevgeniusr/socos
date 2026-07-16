@@ -15,6 +15,7 @@ const OWNER = "owner-synthetic";
 const CONNECTION = "connection-synthetic";
 const SOURCE = "source-synthetic";
 const LEASE = new Date("2026-07-16T12:05:00.000Z");
+const CONNECTION_GENERATION = new Date("2026-07-16T11:59:00.000Z");
 const envelope = {
   ciphertext: Buffer.from("cipher"),
   iv: Buffer.alloc(12, 1),
@@ -37,7 +38,7 @@ function harness() {
   const transaction = {
     calendarSource: {
       findFirst: jest.fn(),
-      findMany: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
       updateMany: jest.fn(),
       deleteMany: jest.fn(),
       create: jest.fn(),
@@ -48,8 +49,12 @@ function harness() {
       create: jest.fn(),
       updateMany: jest.fn(),
     },
+    calendarWatch: { updateMany: jest.fn() },
     cityStay: { deleteMany: jest.fn() },
-    googleCalendarConnection: { updateMany: jest.fn() },
+    googleCalendarConnection: {
+      findFirst: jest.fn(),
+      updateMany: jest.fn(),
+    },
   };
   const prisma = {
     calendarSource: {
@@ -354,23 +359,232 @@ describe("CalendarSyncService", () => {
     });
   });
 
+  it("does not demote or clear leases when reconnect wins a source invalid_grant race", async () => {
+    const { service, prisma, transaction, google } = harness();
+    prisma.calendarSource.findFirst.mockResolvedValue({
+      id: SOURCE,
+      ownerId: OWNER,
+      connectionId: CONNECTION,
+      pendingSyncAt: NOW,
+      syncLeaseUntil: null,
+      fullSyncRequired: false,
+      syncTokenCiphertext: Buffer.from("s"),
+      syncTokenIv: envelope.iv,
+      syncTokenTag: envelope.tag,
+      syncTokenKeyVersion: 1,
+      externalIdCiphertext: Buffer.from("x"),
+      externalIdIv: envelope.iv,
+      externalIdTag: envelope.tag,
+      externalIdKeyVersion: 1,
+      connection: {
+        status: "active",
+        updatedAt: CONNECTION_GENERATION,
+        refreshTokenCiphertext: Buffer.from("r"),
+        refreshTokenIv: envelope.iv,
+        refreshTokenTag: envelope.tag,
+        refreshTokenKeyVersion: 1,
+      },
+    });
+    prisma.calendarSource.updateMany.mockResolvedValue({ count: 1 });
+    google.listEvents.mockRejectedValue({ code: "invalid_grant" });
+    transaction.googleCalendarConnection.updateMany.mockResolvedValue({
+      count: 0,
+    });
+
+    await service.runNextSource(NOW);
+
+    expect(
+      transaction.googleCalendarConnection.updateMany
+    ).toHaveBeenCalledWith({
+      where: {
+        id: CONNECTION,
+        ownerId: OWNER,
+        status: "active",
+        updatedAt: CONNECTION_GENERATION,
+        sources: {
+          some: {
+            id: SOURCE,
+            ownerId: OWNER,
+            pendingSyncAt: NOW,
+            syncLeaseUntil: LEASE,
+          },
+        },
+      },
+      data: expect.objectContaining({ status: "needs_reauth" }),
+    });
+    expect(transaction.calendarSource.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("does not demote or clear leases when reconnect wins a list invalid_grant race", async () => {
+    const { service, prisma, transaction, google } = harness();
+    prisma.googleCalendarConnection.findFirst.mockResolvedValue({
+      id: CONNECTION,
+      ownerId: OWNER,
+      status: "active",
+      updatedAt: CONNECTION_GENERATION,
+      calendarListPendingAt: NOW,
+      calendarListLeaseUntil: null,
+      calendarListSyncTokenCiphertext: null,
+      refreshTokenCiphertext: Buffer.from("r"),
+      refreshTokenIv: envelope.iv,
+      refreshTokenTag: envelope.tag,
+      refreshTokenKeyVersion: 1,
+    });
+    prisma.googleCalendarConnection.updateMany.mockResolvedValue({ count: 1 });
+    google.authorize.mockRejectedValue({ code: "invalid_grant" });
+    transaction.googleCalendarConnection.updateMany.mockResolvedValue({
+      count: 0,
+    });
+
+    await service.runNextCalendarList(NOW);
+
+    expect(
+      transaction.googleCalendarConnection.updateMany
+    ).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        id: CONNECTION,
+        ownerId: OWNER,
+        status: "active",
+        calendarListLeaseUntil: LEASE,
+        calendarListPendingAt: NOW,
+      }),
+      data: expect.objectContaining({ status: "needs_reauth" }),
+    });
+    expect(transaction.calendarSource.updateMany).not.toHaveBeenCalled();
+  });
+
   it("marks daily full reconciliation without overwriting future backoff", async () => {
     const { service, prisma } = harness();
     const future = new Date("2026-07-16T12:10:00.000Z");
     prisma.calendarSource.findMany.mockResolvedValue([
-      { id: SOURCE, ownerId: OWNER, pendingSyncAt: future },
+      {
+        id: SOURCE,
+        ownerId: OWNER,
+        pendingSyncAt: future,
+        lastFullReconciledAt: new Date("2026-07-14T00:00:00.000Z"),
+      },
     ]);
     prisma.calendarSource.updateMany.mockResolvedValue({ count: 1 });
     const { createHash } = await import("node:crypto");
     const slot =
-      createHash("sha256").update(SOURCE).digest().readUInt32BE(0) % 96;
+      createHash("sha256").update(OWNER).digest().readUInt32BE(0) % 96;
 
     await service.markDailyReconciliation(NOW, slot);
 
     expect(prisma.calendarSource.updateMany).toHaveBeenCalledWith({
-      where: { id: SOURCE, ownerId: OWNER, selected: true },
-      data: { fullSyncRequired: true },
+      where: {
+        id: SOURCE,
+        ownerId: OWNER,
+        selected: true,
+        pendingSyncAt: future,
+        lastFullReconciledAt: new Date("2026-07-14T00:00:00.000Z"),
+      },
+      data: {
+        fullSyncRequired: true,
+        pendingSyncAt: new Date(future.getTime() + 1),
+      },
     });
+  });
+
+  it("repeats exact calendar-list parameters and preserves local selection on commit", async () => {
+    const { service, prisma, transaction, google } = harness();
+    prisma.googleCalendarConnection.findFirst.mockResolvedValue({
+      id: CONNECTION,
+      ownerId: OWNER,
+      status: "active",
+      updatedAt: CONNECTION_GENERATION,
+      calendarListPendingAt: NOW,
+      calendarListLeaseUntil: null,
+      calendarListSyncTokenCiphertext: null,
+      refreshTokenCiphertext: Buffer.from("r"),
+      refreshTokenIv: envelope.iv,
+      refreshTokenTag: envelope.tag,
+      refreshTokenKeyVersion: 1,
+    });
+    prisma.googleCalendarConnection.updateMany.mockResolvedValue({ count: 1 });
+    google.listCalendars
+      .mockResolvedValueOnce({ items: [], nextPageToken: "page-2" })
+      .mockResolvedValueOnce({
+        items: [
+          {
+            id: "provider-calendar",
+            summary: "Provider name",
+            selected: true,
+          },
+        ],
+        nextSyncToken: "terminal-list-token",
+      });
+    transaction.googleCalendarConnection.updateMany.mockResolvedValue({
+      count: 1,
+    });
+    transaction.calendarSource.findFirst.mockResolvedValue({
+      id: SOURCE,
+      selected: false,
+    });
+
+    await service.runNextCalendarList(NOW);
+
+    const base = { showDeleted: true, showHidden: true, maxResults: 250 };
+    expect(google.listCalendars).toHaveBeenNthCalledWith(1, "access", base);
+    expect(google.listCalendars).toHaveBeenNthCalledWith(2, "access", {
+      ...base,
+      pageToken: "page-2",
+    });
+    const sourceUpdate = transaction.calendarSource.updateMany.mock.calls[0][0];
+    expect(sourceUpdate.data).not.toHaveProperty("selected");
+    expect(sourceUpdate.data).not.toHaveProperty("pendingSyncAt");
+    expect(
+      transaction.googleCalendarConnection.updateMany
+    ).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          calendarListPendingAt: null,
+          calendarListLeaseUntil: null,
+        }),
+      })
+    );
+  });
+
+  it("resets a 410 while preserving a newer calendar-list pending generation", async () => {
+    const { service, prisma, transaction, google } = harness();
+    const newer = new Date(NOW.getTime() + 20);
+    prisma.googleCalendarConnection.findFirst.mockResolvedValue({
+      id: CONNECTION,
+      ownerId: OWNER,
+      status: "active",
+      updatedAt: CONNECTION_GENERATION,
+      calendarListPendingAt: NOW,
+      calendarListLeaseUntil: null,
+      calendarListSyncTokenCiphertext: Buffer.from("s"),
+      calendarListSyncTokenIv: envelope.iv,
+      calendarListSyncTokenTag: envelope.tag,
+      calendarListSyncTokenKeyVersion: 1,
+      refreshTokenCiphertext: Buffer.from("r"),
+      refreshTokenIv: envelope.iv,
+      refreshTokenTag: envelope.tag,
+      refreshTokenKeyVersion: 1,
+    });
+    prisma.googleCalendarConnection.updateMany.mockResolvedValue({ count: 1 });
+    google.listCalendars.mockRejectedValue({ code: 410 });
+    transaction.googleCalendarConnection.updateMany.mockResolvedValue({
+      count: 1,
+    });
+    transaction.googleCalendarConnection.findFirst.mockResolvedValue({
+      calendarListPendingAt: newer,
+    });
+
+    await service.runNextCalendarList(NOW);
+
+    expect(
+      transaction.googleCalendarConnection.updateMany
+    ).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          calendarListPendingAt: new Date(newer.getTime() + 1),
+          calendarListSyncTokenCiphertext: null,
+        }),
+      })
+    );
   });
 });
 
@@ -426,6 +640,20 @@ describe("normalizeProviderEvent", () => {
       startAt: null,
       endAt: null,
     });
+  });
+
+  it("fails closed when a civil date has no local midnight", () => {
+    expect(
+      normalizeProviderEvent(
+        {
+          id: "skipped-date",
+          start: { date: "2011-12-30" },
+          end: { date: "2011-12-31" },
+        },
+        "Pacific/Apia",
+        NOW
+      )
+    ).toBeNull();
   });
 });
 

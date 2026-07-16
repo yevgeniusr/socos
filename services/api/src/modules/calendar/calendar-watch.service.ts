@@ -1,5 +1,10 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  Inject,
+  Injectable,
+  NotFoundException,
+  ServiceUnavailableException,
+} from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { Prisma } from "@prisma/client";
 import type { EncryptedValue } from "../personal-data/personal-data-cipher.service.js";
@@ -32,7 +37,7 @@ export type ParsedWebhook = {
   messageNumber: bigint;
 };
 
-type PreparedWatchStop = {
+export type PreparedWatchStop = {
   id: string;
   ownerId: string;
   connectionId: string;
@@ -211,17 +216,14 @@ export class CalendarWatchService {
       throw error;
     }
 
-    await this.prisma.calendarWatch.updateMany({
-      where: {
-        ownerId,
-        connectionId,
-        targetType,
-        targetKey,
-        status: "active",
-        id: { not: watchId },
-      },
-      data: { status: "stopping" },
-    });
+    await this.electReplacement(
+      ownerId,
+      connectionId,
+      targetType,
+      targetKey,
+      watchId,
+      now
+    );
 
     await this.stopPreparedBestEffort(
       await this.prepareTargetStops(
@@ -229,7 +231,7 @@ export class CalendarWatchService {
         connectionId,
         targetType,
         targetKey,
-        watchId,
+        "",
         accessToken
       ),
       now
@@ -281,53 +283,8 @@ export class CalendarWatchService {
       });
       if (advanced.count !== 1) return "duplicate";
 
-      if (watch.targetType === "calendar_list") {
-        const target = await tx.googleCalendarConnection.findFirst({
-          where: {
-            id: watch.targetKey,
-            ownerId: watch.ownerId,
-            status: "active",
-          },
-          select: { calendarListPendingAt: true },
-        });
-        if (target) {
-          await tx.googleCalendarConnection.updateMany({
-            where: {
-              id: watch.targetKey,
-              ownerId: watch.ownerId,
-              status: "active",
-              calendarListPendingAt: target.calendarListPendingAt,
-            },
-            data: {
-              calendarListPendingAt: advancePending(
-                target.calendarListPendingAt,
-                now
-              ),
-            },
-          });
-        }
-      } else {
-        const target = await tx.calendarSource.findFirst({
-          where: {
-            id: watch.targetKey,
-            ownerId: watch.ownerId,
-            connectionId: watch.connectionId,
-            selected: true,
-          },
-          select: { pendingSyncAt: true },
-        });
-        if (target) {
-          await tx.calendarSource.updateMany({
-            where: {
-              id: watch.targetKey,
-              ownerId: watch.ownerId,
-              connectionId: watch.connectionId,
-              selected: true,
-              pendingSyncAt: target.pendingSyncAt,
-            },
-            data: { pendingSyncAt: advancePending(target.pendingSyncAt, now) },
-          });
-        }
+      if (!(await this.enqueueWebhookTarget(tx, watch, now))) {
+        throw webhookUnavailable();
       }
       return "accepted";
     });
@@ -341,10 +298,6 @@ export class CalendarWatchService {
       where: { ownerId },
     });
     if (!connection) return [];
-    await this.prisma.calendarWatch.updateMany({
-      where: { ownerId, connectionId: connection.id },
-      data: { status: "stopping" },
-    });
     let accessToken: string | null = null;
     try {
       accessToken = await this.authorize(connection);
@@ -369,6 +322,204 @@ export class CalendarWatchService {
       expiresAt: watch.expiresAt,
       accessToken,
     }));
+  }
+
+  async transitionPreparedStops(
+    prepared: readonly PreparedWatchStop[]
+  ): Promise<void> {
+    for (const watch of prepared) {
+      await this.prisma.calendarWatch.updateMany({
+        where: {
+          id: watch.id,
+          ownerId: watch.ownerId,
+          connectionId: watch.connectionId,
+          status: "active",
+        },
+        data: { status: "stopping" },
+      });
+    }
+  }
+
+  async prepareSourceStops(
+    ownerId: string,
+    sourceId: string
+  ): Promise<PreparedWatchStop[]> {
+    const source = await this.prisma.calendarSource.findFirst({
+      where: { id: sourceId, ownerId },
+      select: { connectionId: true },
+    });
+    if (!source) return [];
+    const connection = await this.prisma.googleCalendarConnection.findFirst({
+      where: { id: source.connectionId, ownerId, status: "active" },
+    });
+    let accessToken: string | null = null;
+    if (connection) {
+      try {
+        accessToken = await this.authorize(connection);
+      } catch {
+        accessToken = null;
+      }
+    }
+    return this.prepareTargetStops(
+      ownerId,
+      source.connectionId,
+      "events",
+      sourceId,
+      "",
+      accessToken,
+      ["active", "stopping"]
+    );
+  }
+
+  async removeDisconnectedCalendarStays(ownerId: string): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const connection = await tx.googleCalendarConnection.findFirst({
+        where: { ownerId, status: "disconnected" },
+        select: { id: true },
+      });
+      if (!connection) return;
+      const events = await tx.calendarEvent.findMany({
+        where: {
+          ownerId,
+          source: { connectionId: connection.id, ownerId },
+        },
+        select: { id: true },
+      });
+      if (events.length > 0) {
+        await tx.cityStay.deleteMany({
+          where: {
+            ownerId,
+            source: "calendar",
+            sourceId: { in: events.map((event) => event.id) },
+          },
+        });
+      }
+    });
+  }
+
+  async finalizeDisconnectedOwner(ownerId: string): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      const connection = await tx.googleCalendarConnection.findFirst({
+        where: { ownerId, status: "disconnected" },
+        select: { id: true },
+      });
+      if (!connection) return false;
+      const watch = await tx.calendarWatch.findFirst({
+        where: { ownerId, connectionId: connection.id },
+        select: { id: true },
+      });
+      if (watch) return false;
+      const deleted = await tx.googleCalendarConnection.deleteMany({
+        where: {
+          id: connection.id,
+          ownerId,
+          status: "disconnected",
+          watches: { none: {} },
+        },
+      });
+      return deleted.count === 1;
+    });
+  }
+
+  private async electReplacement(
+    ownerId: string,
+    connectionId: string,
+    targetType: CalendarWatchTargetType,
+    targetKey: string,
+    watchId: string,
+    now: Date
+  ): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const lockKey = `${ownerId}:${connectionId}:${targetType}:${targetKey}`;
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+      const own = await tx.calendarWatch.findFirst({
+        where: {
+          id: watchId,
+          ownerId,
+          connectionId,
+          targetType,
+          targetKey,
+          status: "active",
+          expiresAt: { gt: now },
+        },
+        select: { id: true },
+      });
+      if (!own) return;
+      await tx.calendarWatch.updateMany({
+        where: {
+          ownerId,
+          connectionId,
+          targetType,
+          targetKey,
+          status: "active",
+          id: { not: watchId },
+        },
+        data: { status: "stopping" },
+      });
+    });
+  }
+
+  private async enqueueWebhookTarget(
+    tx: any,
+    watch: {
+      ownerId: string;
+      connectionId: string;
+      targetType: string;
+      targetKey: string;
+    },
+    now: Date
+  ): Promise<boolean> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (watch.targetType === "calendar_list") {
+        const target = await tx.googleCalendarConnection.findFirst({
+          where: {
+            id: watch.targetKey,
+            ownerId: watch.ownerId,
+            status: "active",
+          },
+          select: { calendarListPendingAt: true },
+        });
+        if (!target) return false;
+        const updated = await tx.googleCalendarConnection.updateMany({
+          where: {
+            id: watch.targetKey,
+            ownerId: watch.ownerId,
+            status: "active",
+            calendarListPendingAt: target.calendarListPendingAt,
+          },
+          data: {
+            calendarListPendingAt: advancePending(
+              target.calendarListPendingAt,
+              now
+            ),
+          },
+        });
+        if (updated.count === 1) return true;
+      } else {
+        const target = await tx.calendarSource.findFirst({
+          where: {
+            id: watch.targetKey,
+            ownerId: watch.ownerId,
+            connectionId: watch.connectionId,
+            selected: true,
+          },
+          select: { pendingSyncAt: true },
+        });
+        if (!target) return false;
+        const updated = await tx.calendarSource.updateMany({
+          where: {
+            id: watch.targetKey,
+            ownerId: watch.ownerId,
+            connectionId: watch.connectionId,
+            selected: true,
+            pendingSyncAt: target.pendingSyncAt,
+          },
+          data: { pendingSyncAt: advancePending(target.pendingSyncAt, now) },
+        });
+        if (updated.count === 1) return true;
+      }
+    }
+    return false;
   }
 
   async stopPreparedBestEffort(
@@ -402,132 +553,188 @@ export class CalendarWatchService {
   }
 
   async maintain(now = new Date()): Promise<void> {
-    const stopping = await this.prisma.calendarWatch.findMany({
-      where: {
-        OR: [
-          { status: "stopping" },
-          { expiresAt: { lte: new Date(now.getTime() + 24 * 60 * 60 * 1000) } },
-        ],
-      },
-      orderBy: { expiresAt: "asc" },
-      take: 100,
-    });
-    for (const watch of stopping) {
-      if (watch.status === "active" && watch.expiresAt > now) {
-        try {
-          await this.createOrRenew(
-            watch.ownerId,
-            watch.connectionId,
-            watch.targetType as CalendarWatchTargetType,
-            watch.targetKey,
-            now
-          );
-        } catch {
-          // A later maintenance run retries without exposing provider details.
-        }
-        continue;
-      }
-      if (watch.status === "active") {
-        await this.prisma.calendarWatch.updateMany({
-          where: {
-            id: watch.id,
-            ownerId: watch.ownerId,
-            connectionId: watch.connectionId,
-            status: "active",
-          },
-          data: { status: "stopping" },
-        });
-      }
-      const connection = await this.prisma.googleCalendarConnection.findFirst({
+    let watchAfter: string | undefined;
+    while (true) {
+      const stopping = await this.prisma.calendarWatch.findMany({
         where: {
-          id: watch.connectionId,
-          ownerId: watch.ownerId,
-          status: { in: ["active", "disconnected"] },
+          OR: [
+            { status: "stopping" },
+            {
+              expiresAt: {
+                lte: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+              },
+            },
+          ],
+          ...(watchAfter ? { id: { gt: watchAfter } } : {}),
         },
+        orderBy: { id: "asc" },
+        take: 100,
       });
-      let accessToken: string | null = null;
-      if (connection) {
-        try {
-          accessToken = await this.authorize(connection);
-        } catch {
-          accessToken = null;
-        }
+      for (const watch of stopping) {
+        await this.maintainWatch(watch, now);
       }
-      const prepared = await this.prepareTargetStops(
-        watch.ownerId,
-        watch.connectionId,
-        watch.targetType as CalendarWatchTargetType,
-        watch.targetKey,
-        "",
-        accessToken
-      );
-      await this.stopPreparedBestEffort(prepared, now);
+      if (stopping.length < 100) break;
+      watchAfter = stopping.at(-1)!.id;
     }
     await this.repairMissing(now);
+    await this.finalizeDisconnectedConnections();
+  }
+
+  private async maintainWatch(watch: any, now: Date): Promise<void> {
+    if (watch.status === "active" && watch.expiresAt > now) {
+      try {
+        await this.createOrRenew(
+          watch.ownerId,
+          watch.connectionId,
+          watch.targetType as CalendarWatchTargetType,
+          watch.targetKey,
+          now
+        );
+      } catch {
+        // A later maintenance run retries without exposing provider details.
+      }
+      return;
+    }
+    if (watch.status === "active") {
+      await this.prisma.calendarWatch.updateMany({
+        where: {
+          id: watch.id,
+          ownerId: watch.ownerId,
+          connectionId: watch.connectionId,
+          status: "active",
+        },
+        data: { status: "stopping" },
+      });
+    }
+    const connection = await this.prisma.googleCalendarConnection.findFirst({
+      where: {
+        id: watch.connectionId,
+        ownerId: watch.ownerId,
+        status: { in: ["active", "disconnected"] },
+      },
+    });
+    let accessToken: string | null = null;
+    if (connection) {
+      try {
+        accessToken = await this.authorize(connection);
+      } catch {
+        accessToken = null;
+      }
+    }
+    const prepared = await this.prepareTargetStops(
+      watch.ownerId,
+      watch.connectionId,
+      watch.targetType as CalendarWatchTargetType,
+      watch.targetKey,
+      "",
+      accessToken
+    );
+    await this.stopPreparedBestEffort(prepared, now);
+  }
+
+  private async finalizeDisconnectedConnections(): Promise<void> {
+    let cursor: string | undefined;
+    while (true) {
+      const connections = await this.prisma.googleCalendarConnection.findMany({
+        where: {
+          status: "disconnected",
+          ...(cursor ? { id: { gt: cursor } } : {}),
+        },
+        orderBy: { id: "asc" },
+        take: 100,
+        select: { id: true, ownerId: true },
+      });
+      for (const connection of connections) {
+        await this.removeDisconnectedCalendarStays(connection.ownerId);
+        await this.finalizeDisconnectedOwner(connection.ownerId);
+      }
+      if (connections.length < 100) return;
+      cursor = connections.at(-1)!.id;
+    }
   }
 
   private async repairMissing(now: Date): Promise<void> {
-    const connections = await this.prisma.googleCalendarConnection.findMany({
-      where: { status: "active" },
-      select: { id: true, ownerId: true },
-      take: 100,
-    });
-    for (const connection of connections) {
-      const listWatches = await this.prisma.calendarWatch.findMany({
+    let connectionAfter: string | undefined;
+    while (true) {
+      const connections = await this.prisma.googleCalendarConnection.findMany({
         where: {
-          ownerId: connection.ownerId,
-          connectionId: connection.id,
-          targetType: "calendar_list",
-          targetKey: connection.id,
           status: "active",
-          expiresAt: { gt: now },
+          ...(connectionAfter ? { id: { gt: connectionAfter } } : {}),
         },
-        orderBy: [{ expiresAt: "desc" }, { id: "desc" }],
+        orderBy: { id: "asc" },
+        select: { id: true, ownerId: true },
+        take: 100,
       });
-      if (listWatches.length !== 1) {
-        try {
-          await this.createOrRenew(
-            connection.ownerId,
-            connection.id,
-            "calendar_list",
-            connection.id,
-            now
-          );
-        } catch {
-          // A later maintenance run retries without exposing provider details.
+      for (const connection of connections) {
+        const listWatches = await this.prisma.calendarWatch.findMany({
+          where: {
+            ownerId: connection.ownerId,
+            connectionId: connection.id,
+            targetType: "calendar_list",
+            targetKey: connection.id,
+            status: "active",
+            expiresAt: { gt: now },
+          },
+          orderBy: [{ expiresAt: "desc" }, { id: "desc" }],
+        });
+        if (listWatches.length !== 1) {
+          try {
+            await this.createOrRenew(
+              connection.ownerId,
+              connection.id,
+              "calendar_list",
+              connection.id,
+              now
+            );
+          } catch {
+            // A later maintenance run retries without exposing provider details.
+          }
         }
       }
+      if (connections.length < 100) break;
+      connectionAfter = connections.at(-1)!.id;
     }
-    const sources = await this.prisma.calendarSource.findMany({
-      where: { selected: true, connection: { status: "active" } },
-      select: { id: true, ownerId: true, connectionId: true },
-      take: 100,
-    });
-    for (const source of sources) {
-      const activeWatches = await this.prisma.calendarWatch.findMany({
+
+    let sourceAfter: string | undefined;
+    while (true) {
+      const sources = await this.prisma.calendarSource.findMany({
         where: {
-          ownerId: source.ownerId,
-          connectionId: source.connectionId,
-          targetType: "events",
-          targetKey: source.id,
-          status: "active",
-          expiresAt: { gt: now },
+          selected: true,
+          connection: { status: "active" },
+          ...(sourceAfter ? { id: { gt: sourceAfter } } : {}),
         },
-        orderBy: [{ expiresAt: "desc" }, { id: "desc" }],
+        orderBy: { id: "asc" },
+        select: { id: true, ownerId: true, connectionId: true },
+        take: 100,
       });
-      if (activeWatches.length !== 1) {
-        try {
-          await this.createOrRenew(
-            source.ownerId,
-            source.connectionId,
-            "events",
-            source.id,
-            now
-          );
-        } catch {
-          // A later maintenance run retries without exposing provider details.
+      for (const source of sources) {
+        const activeWatches = await this.prisma.calendarWatch.findMany({
+          where: {
+            ownerId: source.ownerId,
+            connectionId: source.connectionId,
+            targetType: "events",
+            targetKey: source.id,
+            status: "active",
+            expiresAt: { gt: now },
+          },
+          orderBy: [{ expiresAt: "desc" }, { id: "desc" }],
+        });
+        if (activeWatches.length !== 1) {
+          try {
+            await this.createOrRenew(
+              source.ownerId,
+              source.connectionId,
+              "events",
+              source.id,
+              now
+            );
+          } catch {
+            // A later maintenance run retries without exposing provider details.
+          }
         }
       }
+      if (sources.length < 100) break;
+      sourceAfter = sources.at(-1)!.id;
     }
   }
 
@@ -537,7 +744,8 @@ export class CalendarWatchService {
     targetType: CalendarWatchTargetType,
     targetKey: string,
     exceptId: string,
-    accessToken: string | null
+    accessToken: string | null,
+    statuses: readonly ("active" | "stopping")[] = ["stopping"]
   ): Promise<PreparedWatchStop[]> {
     const rows = await this.prisma.calendarWatch.findMany({
       where: {
@@ -545,7 +753,7 @@ export class CalendarWatchService {
         connectionId,
         targetType,
         targetKey,
-        status: "stopping",
+        status: { in: [...statuses] },
         ...(exceptId ? { id: { not: exceptId } } : {}),
       },
       orderBy: { id: "asc" },
@@ -621,6 +829,14 @@ function opaqueWebhookError(): NotFoundException {
     statusCode: 404,
     code: "calendar_webhook_not_found",
     message: "Not found",
+  });
+}
+
+function webhookUnavailable(): ServiceUnavailableException {
+  return new ServiceUnavailableException({
+    statusCode: 503,
+    code: "calendar_webhook_unavailable",
+    message: "Calendar webhook unavailable",
   });
 }
 

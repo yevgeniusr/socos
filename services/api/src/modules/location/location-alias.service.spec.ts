@@ -213,7 +213,13 @@ describe("LocationAliasService", () => {
         where: expect.objectContaining({
           ownerId: OWNER,
           status: { not: "cancelled" },
-          source: { is: { ownerId: OWNER, selected: true } },
+          source: {
+            is: {
+              ownerId: OWNER,
+              selected: true,
+              connection: { status: "active" },
+            },
+          },
         }),
       })
     );

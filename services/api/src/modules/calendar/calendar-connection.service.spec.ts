@@ -32,7 +32,11 @@ function harness() {
       updateMany: jest.fn(),
       deleteMany: jest.fn(),
     },
-    calendarSource: { findMany: jest.fn(), updateMany: jest.fn() },
+    calendarSource: {
+      findFirst: jest.fn(),
+      findMany: jest.fn(),
+      updateMany: jest.fn(),
+    },
     calendarWatch: { count: jest.fn() },
   };
   const cipher = { encrypt: jest.fn().mockReturnValue(REFRESH_ENVELOPE) };
@@ -58,6 +62,10 @@ function harness() {
   const idGenerator = jest.fn().mockReturnValue(CONNECTION_ID);
   const watches = {
     prepareOwnerStops: jest.fn().mockResolvedValue([]),
+    prepareSourceStops: jest.fn().mockResolvedValue([]),
+    transitionPreparedStops: jest.fn().mockResolvedValue(undefined),
+    removeDisconnectedCalendarStays: jest.fn().mockResolvedValue(undefined),
+    finalizeDisconnectedOwner: jest.fn().mockResolvedValue(true),
     stopPreparedBestEffort: jest.fn().mockResolvedValue(undefined),
   };
   const service = new CalendarConnectionService(
@@ -177,6 +185,7 @@ describe("CalendarConnectionService", () => {
         status: "active",
         errorCode: null,
         calendarListPendingAt: expect.any(Date),
+        calendarListLeaseUntil: null,
       },
     });
   });
@@ -317,16 +326,39 @@ describe("CalendarConnectionService", () => {
       data: { status: "disconnected", calendarListLeaseUntil: null },
     });
     expect(watches.prepareOwnerStops).toHaveBeenCalledWith(OWNER_ID);
+    expect(watches.transitionPreparedStops).toHaveBeenCalledWith([]);
+    expect(watches.removeDisconnectedCalendarStays).toHaveBeenCalledWith(
+      OWNER_ID
+    );
     expect(watches.stopPreparedBestEffort).toHaveBeenCalledWith([]);
-    expect(prisma.googleCalendarConnection.deleteMany).toHaveBeenCalledWith({
-      where: {
-        ownerId: OWNER_ID,
-        status: "disconnected",
-        watches: { none: {} },
-      },
-    });
+    expect(watches.finalizeDisconnectedOwner).toHaveBeenCalledWith(OWNER_ID);
+    expect(prisma.googleCalendarConnection.deleteMany).not.toHaveBeenCalled();
     expect(
       JSON.stringify(prisma.googleCalendarConnection.updateMany.mock.calls)
     ).not.toContain(OTHER_OWNER_ID);
+  });
+
+  it("durably deselects a source before preparing and stopping its watch", async () => {
+    const { service, prisma, watches } = harness();
+    prisma.calendarSource.findFirst.mockResolvedValue({ id: "source" });
+    prisma.calendarSource.updateMany.mockResolvedValue({ count: 1 });
+    const prepared = [{ id: "watch" }];
+    watches.prepareSourceStops.mockResolvedValue(prepared);
+
+    await service.updateSource(OWNER_ID, "source", { selected: false });
+
+    expect(prisma.calendarSource.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          selected: false,
+          fullSyncRequired: false,
+          pendingSyncAt: null,
+          syncLeaseUntil: null,
+        },
+      })
+    );
+    expect(watches.prepareSourceStops).toHaveBeenCalledWith(OWNER_ID, "source");
+    expect(watches.transitionPreparedStops).toHaveBeenCalledWith(prepared);
+    expect(watches.stopPreparedBestEffort).toHaveBeenCalledWith(prepared);
   });
 });

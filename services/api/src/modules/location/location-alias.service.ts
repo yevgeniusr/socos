@@ -224,7 +224,13 @@ export class LocationAliasService {
         detailsIv: { not: null },
         detailsTag: { not: null },
         detailsKeyVersion: { not: null },
-        source: { is: { ownerId, selected: true } },
+        source: {
+          is: {
+            ownerId,
+            selected: true,
+            connection: { status: "active" },
+          },
+        },
       },
       orderBy: [{ startAt: "asc" }, { id: "asc" }],
       select: {

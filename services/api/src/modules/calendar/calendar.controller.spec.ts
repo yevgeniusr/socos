@@ -112,6 +112,12 @@ describe("calendar controller boundaries", () => {
         CalendarConnectionController.prototype.disconnect
       )
     ).toBe("/");
+    expect(
+      Reflect.getMetadata(
+        PATH_METADATA,
+        CalendarConnectionController.prototype.updateSource
+      )
+    ).toBe("calendars/:sourceId");
   });
 
   it("guards every human connection endpoint with AuthGuard", () => {

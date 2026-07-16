@@ -54,7 +54,7 @@ export class CalendarConnectionController {
     return this.connections.listSources(request.user.userId);
   }
 
-  @Patch("sources/:sourceId")
+  @Patch("calendars/:sourceId")
   @HttpCode(HttpStatus.NO_CONTENT)
   updateSource(
     @Request() request: AuthenticatedCalendarRequest,

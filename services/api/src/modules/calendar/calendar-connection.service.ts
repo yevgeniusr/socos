@@ -114,14 +114,15 @@ export class CalendarConnectionService {
       data: { status: "disconnected", calendarListLeaseUntil: null },
     });
     const prepared = (await this.watches?.prepareOwnerStops(ownerId)) ?? [];
-    await this.watches?.stopPreparedBestEffort(prepared);
-    await this.prisma.googleCalendarConnection.deleteMany({
-      where: {
-        ownerId,
-        status: "disconnected",
-        watches: { none: {} },
-      },
+    await this.watches?.transitionPreparedStops(prepared);
+    await this.prisma.calendarSource.updateMany({
+      where: { ownerId, connection: { status: "disconnected" } },
+      data: { syncLeaseUntil: null },
     });
+    await this.watches?.removeDisconnectedCalendarStays(ownerId);
+    await this.watches?.stopPreparedBestEffort(prepared);
+    await this.watches?.finalizeDisconnectedOwner(ownerId);
+    await this.aliases?.rebuildCalendarStays(ownerId);
   }
 
   async listSources(ownerId: string) {
@@ -167,6 +168,15 @@ export class CalendarConnectionService {
     input: UpdateCalendarSourceDto
   ): Promise<void> {
     this.config.requireEnabled("calendarSync");
+    const source = await this.prisma.calendarSource.findFirst({
+      where: {
+        id: sourceId,
+        ownerId,
+        connection: { status: "active" },
+      },
+      select: { id: true },
+    });
+    if (!source) throw calendarSourceNotFound();
     const updated = await this.prisma.calendarSource.updateMany({
       where: {
         id: sourceId,
@@ -181,11 +191,12 @@ export class CalendarConnectionService {
       },
     });
     if (updated.count !== 1) {
-      throw new NotFoundException({
-        statusCode: 404,
-        code: "calendar_source_not_found",
-        message: "Calendar source not found",
-      });
+      throw calendarSourceNotFound();
+    }
+    if (!input.selected && this.watches) {
+      const prepared = await this.watches.prepareSourceStops(ownerId, sourceId);
+      await this.watches.transitionPreparedStops(prepared);
+      await this.watches.stopPreparedBestEffort(prepared);
     }
     await this.aliases?.rebuildCalendarStays(ownerId);
   }
@@ -250,6 +261,7 @@ export class CalendarConnectionService {
         status: "active",
         errorCode: null,
         calendarListPendingAt: new Date(),
+        calendarListLeaseUntil: null,
       },
     });
     if (result.count === 1) {
@@ -274,7 +286,7 @@ export class CalendarConnectionService {
     attempt: ConsumedGoogleOAuthAttempt
   ): Promise<void> {
     const expected = attempt.expectedConnection!;
-    await this.prisma.googleCalendarConnection.updateMany({
+    const demoted = await this.prisma.googleCalendarConnection.updateMany({
       where: {
         id: expected.id,
         ownerId: attempt.ownerId,
@@ -287,6 +299,7 @@ export class CalendarConnectionService {
         calendarListLeaseUntil: null,
       },
     });
+    if (demoted.count !== 1) return;
     await this.prisma.calendarSource.updateMany({
       where: {
         ownerId: attempt.ownerId,
@@ -307,4 +320,12 @@ function refreshTokenColumns(encrypted: EncryptedValue) {
     refreshTokenTag: encrypted.tag as Uint8Array<ArrayBuffer>,
     refreshTokenKeyVersion: encrypted.keyVersion,
   };
+}
+
+function calendarSourceNotFound(): NotFoundException {
+  return new NotFoundException({
+    statusCode: 404,
+    code: "calendar_source_not_found",
+    message: "Calendar source not found",
+  });
 }
