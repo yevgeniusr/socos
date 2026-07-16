@@ -63,6 +63,10 @@ COPY --from=builder /app/services/api/prisma ./prisma
 COPY --from=builder /app/services/api/package.json ./
 COPY --from=builder /app/services/api/start.sh ./start.sh
 RUN test -f /app/dist/cli/rekey-personal-data.js
+RUN test -f /app/prisma/schema.prisma
+RUN test -f /app/prisma/migrations/20260716150000_calendar_location/migration.sql
+RUN test -f /app/prisma/migrations/20260716160000_event_discovery/migration.sql
+RUN test -f /app/prisma/migrations/20260716170000_event_brief_snapshots/migration.sql
 
 USER nestjs
 

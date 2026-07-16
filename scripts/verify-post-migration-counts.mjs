@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const databaseUrl = process.env.DATABASE_URL;
 const metadataPath = process.argv[2];
-const expectedMigrationCount = 7;
+const migrationsRoot = resolve('services/api/prisma/migrations');
+const expectedMigrationCount = readdirSync(migrationsRoot)
+  .filter((name) => existsSync(resolve(migrationsRoot, name, 'migration.sql')))
+  .length;
 const agentInterfaceTables = [
   'ActionOutbox',
   'ActionProposal',
@@ -15,8 +18,31 @@ const agentInterfaceTables = [
   'ApprovalGrant',
   'MutationAuditEvent',
 ];
+const calendarLocationTables = [
+  'CalendarEvent',
+  'CalendarSource',
+  'CalendarWatch',
+  'CityStay',
+  'DerivedVisit',
+  'GoogleCalendarConnection',
+  'GoogleOAuthAttempt',
+  'LocationAlias',
+  'LocationDevice',
+  'LocationSample',
+  'PersonalDataDeletionAudit',
+];
+const eventDiscoveryTables = [
+  'DiscoveredEvent',
+  'EventPreference',
+  'EventSource',
+];
+const introducedTableRollouts = [
+  { migrationCount: 7, label: 'agent-interface tables', tables: agentInterfaceTables },
+  { migrationCount: 8, label: 'calendar-location tables', tables: calendarLocationTables },
+  { migrationCount: 9, label: 'event-discovery tables', tables: eventDiscoveryTables },
+];
 const allowedNewTables = new Set([
-  ...agentInterfaceTables,
+  ...introducedTableRollouts.flatMap((rollout) => rollout.tables),
 ]);
 
 if (!databaseUrl || !metadataPath) {
@@ -50,13 +76,26 @@ try {
 }
 
 const beforeMigrationCount = before.get('_prisma_migrations');
-if (beforeMigrationCount !== 6 && beforeMigrationCount !== 7) {
-  console.error('Pre-migration aggregate metadata must include migration history count 6 or 7.');
+if (
+  !Number.isSafeInteger(beforeMigrationCount) ||
+  beforeMigrationCount < 6 ||
+  beforeMigrationCount > expectedMigrationCount
+) {
+  console.error(
+    `Pre-migration aggregate metadata must include migration history count 6 through ${expectedMigrationCount}.`,
+  );
   process.exit(65);
 }
-if (beforeMigrationCount === 7 && agentInterfaceTables.some((table) => !before.has(table))) {
-  console.error('Seven-migration metadata must include all agent-interface tables.');
-  process.exit(65);
+for (const rollout of introducedTableRollouts) {
+  if (
+    beforeMigrationCount >= rollout.migrationCount &&
+    rollout.tables.some((table) => !before.has(table))
+  ) {
+    console.error(
+      `${beforeMigrationCount}-migration metadata must include all ${rollout.label}.`,
+    );
+    process.exit(65);
+  }
 }
 
 const query = `
@@ -102,7 +141,10 @@ for (const [table, count] of before) {
   if (table !== '_prisma_migrations') valid &&= after.get(table) === count;
 }
 let introducedEmptyTables = 0;
-for (const table of allowedNewTables) {
+const expectedIntroducedTables = introducedTableRollouts
+  .filter((rollout) => beforeMigrationCount < rollout.migrationCount)
+  .flatMap((rollout) => rollout.tables);
+for (const table of expectedIntroducedTables) {
   if (before.has(table)) {
     valid &&= after.get(table) === before.get(table);
   } else {
@@ -111,8 +153,7 @@ for (const table of allowedNewTables) {
   }
 }
 valid &&= after.get('_prisma_migrations') === expectedMigrationCount;
-valid &&= beforeMigrationCount === expectedMigrationCount - 1
-  || beforeMigrationCount === expectedMigrationCount;
+valid &&= beforeMigrationCount <= expectedMigrationCount;
 for (const table of after.keys()) {
   valid &&= before.has(table) || allowedNewTables.has(table) || table === '_prisma_migrations';
 }

@@ -148,18 +148,33 @@ as the verifier. Then run:
 DATABASE_URL="$RESTORED_DATABASE_URL" pnpm --filter @socos/api exec prisma migrate deploy
 DATABASE_URL="$RESTORED_DATABASE_URL" pnpm --filter @socos/api exec prisma validate
 DATABASE_URL="$RESTORED_DATABASE_URL" node scripts/compare-schema.mjs
-EXPECTED_MIGRATION_COUNT=7 DATABASE_URL="$RESTORED_DATABASE_URL" \
+DATABASE_URL="$RESTORED_DATABASE_URL" \
   node scripts/verify-post-migration-counts.mjs "$PRE_MIGRATION_METADATA"
 ```
 
 Require `schema_status=match statements=0` and
 `migration_counts_status=preserved`. The count verifier requires every
-preexisting public table count to remain identical. For the current rollout it
-accepts either migration history `6 -> 7` or the idempotent `7 -> 7` no-op,
-requires newly introduced agent-interface tables to be empty, and requires
-exactly seven migration-history rows. Drop the disposable database before
-declaring the drill successful. If any command fails, stop the deployment and
-retain only redacted schema metadata logs.
+preexisting public table count to remain identical. It derives the expected
+migration count from checked-in migration directories, supports every baseline
+from the six-migration pre-agent state through current, requires tables already
+introduced at that baseline to be present with matching counts, and requires
+calendar, location, event discovery, and event-brief rollout tables newly
+introduced during the drill to be present at zero rows. Drop the disposable
+database before declaring the drill successful. If any command fails, stop the
+deployment and retain only redacted schema metadata logs.
+
+## Deleted Encrypted Data Recovery Window
+
+Application deletion removes live calendar, location, event, OAuth, and
+personal-context rows from PostgreSQL, but encrypted backups can still contain
+the deleted ciphertext until the off-host retention window expires. Treat
+deleted encrypted data as recoverable for 30 days after the last backup that
+could contain it leaves retention. During that rollback-plus-expiry interval,
+retain every old `PERSONAL_DATA_KEYS` entry needed to decrypt those backups and
+retain the stable `PERSONAL_DATA_INDEX_KEY`; do not prune old encryption keys
+immediately after an application rekey. A key can be removed only after all
+local and off-host generations that may contain ciphertext for that key have
+expired and a restore drill no longer requires it.
 
 ## Current Operational Gate
 

@@ -122,3 +122,58 @@ test('runtime images package the personal data rekey CLI', () => {
     /COPY --from=builder \/app\/services\/api\/dist \.\/services\/api\/dist/,
   );
 });
+
+test('all API runtime images assert Prisma schema, current personal-data migrations, and rekey CLI', () => {
+  const apiImagePaths = [
+    'services/api/Dockerfile',
+    'docker/Dockerfile.backend',
+    'Dockerfile',
+  ];
+  const requiredMigrationDirectories = [
+    '20260716150000_calendar_location',
+    '20260716160000_event_discovery',
+    '20260716170000_event_brief_snapshots',
+  ];
+
+  for (const path of apiImagePaths) {
+    const dockerfile = readFileSync(resolve(root, path), 'utf8');
+    const prismaRoot = path === 'Dockerfile' ? '/app/services/api/prisma' : '/app/prisma';
+    const rekeyPath =
+      path === 'Dockerfile'
+        ? '/app/services/api/dist/cli/rekey-personal-data.js'
+        : '/app/dist/cli/rekey-personal-data.js';
+
+    assert.match(dockerfile, new RegExp(`RUN test -f ${prismaRoot.replaceAll('/', '\\/')}\\/schema\\.prisma`));
+    for (const migrationDirectory of requiredMigrationDirectories) {
+      assert.match(
+        dockerfile,
+        new RegExp(
+          `RUN test -f ${prismaRoot.replaceAll('/', '\\/')}\\/migrations\\/${migrationDirectory}\\/migration\\.sql`,
+        ),
+      );
+    }
+    assert.match(dockerfile, new RegExp(`RUN test -f ${rekeyPath.replaceAll('/', '\\/')}`));
+  }
+});
+
+test('calendar location event secrets are runtime-only Compose inputs', () => {
+  const compose = readFileSync(resolve(root, 'docker-compose.prod.yml'), 'utf8');
+  for (const name of [
+    'GOOGLE_CALENDAR_CLIENT_SECRET',
+    'GOOGLE_CALENDAR_CALLBACK_SECRET',
+    'OWNTRACKS_WEBHOOK_SECRET',
+    'PERSONAL_DATA_KEYS',
+    'PERSONAL_DATA_INDEX_KEY',
+    'EVENT_SOURCE_ALLOWED_HOSTS',
+  ]) {
+    assert.match(compose, new RegExp(`- ${name}=\\$\\{${name}:\\?${name} is required\\}`));
+  }
+
+  for (const path of ['services/api/Dockerfile', 'docker/Dockerfile.backend', 'Dockerfile']) {
+    const dockerfile = readFileSync(resolve(root, path), 'utf8');
+    assert.doesNotMatch(
+      dockerfile,
+      /^\s*(?:ARG|ENV)\s+(?:GOOGLE_CALENDAR_CLIENT_SECRET|GOOGLE_CALENDAR_CALLBACK_SECRET|OWNTRACKS_WEBHOOK_SECRET|PERSONAL_DATA_KEYS|PERSONAL_DATA_INDEX_KEY|EVENT_SOURCE_ALLOWED_HOSTS)\b/m,
+    );
+  }
+});

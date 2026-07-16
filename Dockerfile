@@ -75,6 +75,10 @@ COPY --from=builder /app/services/api/package.json ./services/api/package.json
 COPY --from=builder /app/services/api/prisma ./services/api/prisma
 COPY --from=builder /app/services/api/start.sh ./services/api/start.sh
 RUN test -f /app/services/api/dist/cli/rekey-personal-data.js
+RUN test -f /app/services/api/prisma/schema.prisma
+RUN test -f /app/services/api/prisma/migrations/20260716150000_calendar_location/migration.sql
+RUN test -f /app/services/api/prisma/migrations/20260716160000_event_discovery/migration.sql
+RUN test -f /app/services/api/prisma/migrations/20260716170000_event_brief_snapshots/migration.sql
 
 # Remove "type":"module" so CommonJS dist runs as CommonJS (not ESM)
 RUN sed -i '/"type": "module",/d' /app/services/api/package.json

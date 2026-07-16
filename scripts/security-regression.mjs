@@ -59,6 +59,18 @@ const personalContextBodyPattern = /@Body\s*\(\s*\)\s*[A-Za-z_$][\w$]*/;
 const unsafePersonalContextAuthorityPattern =
   /@(?:Query|Param)\s*\(|\b(?:dto|body|query|params?|headers?)\s*(?:\?\.|\.)\s*(?:ownerId|userId)\b/;
 const unsafeRawSqlPattern = /\$(?:queryRawUnsafe|executeRawUnsafe)\b/;
+const personalDataSourcePattern =
+  /(?:^|\/)services\/api\/src\/modules\/(?:calendar|location|events|personal-data)\/.*\.ts$/;
+const humanPersonalDataControllerPattern =
+  /(?:^|\/)services\/api\/src\/modules\/(?:calendar|location|events)\/[^/]+\.controller\.ts$/;
+const calendarControllerPattern =
+  /(?:^|\/)services\/api\/src\/modules\/calendar\/[^/]+\.controller\.ts$/;
+const locationControllerPattern =
+  /(?:^|\/)services\/api\/src\/modules\/location\/[^/]+\.controller\.ts$/;
+const personalDataConfigPattern =
+  /(?:^|\/)services\/api\/src\/modules\/personal-data\/personal-data-config\.ts$/;
+const exceptionFilterPattern =
+  /(?:^|\/)services\/api\/src\/common\/filters\/http-exception\.filter\.ts$/;
 const humanAgentControllerPattern =
   /(?:^|\/)services\/api\/src\/modules\/(?:agent-auth|agent-security)\/[^/]+\.controller\.ts$/;
 const mcpControllerPattern =
@@ -101,10 +113,19 @@ const allowedAgentMutationRoutes = new Set([
 const loggingCallPattern =
   /\b(?:console|Logger|Sentry|(?:this\.)?logger)\.(?:log|info|warn|error|debug|verbose|fatal|captureMessage|captureException)\s*\(([\s\S]{0,1000}?)\)\s*;/g;
 const sensitiveLogValuePattern =
-  /\b(?:\w*(?:authorization|token|hash|body|coordinate|latitude|longitude)\w*|lat|lon|lng|location)\b/i;
+  /\b(?:\w*(?:authorization|token|hash|body|coordinate|latitude|longitude|header|ciphertext|provider|payload|exception|stack)\w*|lat|lon|lng|location)\b/i;
 const productionComposePattern = /(?:^|\/)docker-compose\.prod\.ya?ml$/;
 const failClosedMcpHostPattern =
   /^\s*-\s*MCP_ALLOWED_HOSTS=(?:\$\{MCP_ALLOWED_HOSTS:\?[^}]+\}|[A-Za-z0-9.-]+(?:,[A-Za-z0-9.-]+)*)\s*$/m;
+const task16SecretEnvNamePattern =
+  /\b(?:GOOGLE_CALENDAR_CLIENT_SECRET|GOOGLE_CALENDAR_CALLBACK_SECRET|OWNTRACKS_WEBHOOK_SECRET|PERSONAL_DATA_KEYS|PERSONAL_DATA_INDEX_KEY|PERSONAL_DATA_ACTIVE_KEY_VERSION|EVENT_SOURCE_ALLOWED_HOSTS|CALENDAR_SYNC_ENABLED|LOCATION_INGEST_ENABLED|EVENT_DISCOVERY_ENABLED|EVENT_BRIEF_ENABLED)\b/;
+const dockerBuildSecretSurfacePattern =
+  /^\s*(?:ARG|ENV)\s+.*(?:GOOGLE_CALENDAR_CLIENT_SECRET|GOOGLE_CALENDAR_CALLBACK_SECRET|OWNTRACKS_WEBHOOK_SECRET|PERSONAL_DATA_KEYS|PERSONAL_DATA_INDEX_KEY|PERSONAL_DATA_ACTIVE_KEY_VERSION|EVENT_SOURCE_ALLOWED_HOSTS|CALENDAR_SYNC_ENABLED|LOCATION_INGEST_ENABLED|EVENT_DISCOVERY_ENABLED|EVENT_BRIEF_ENABLED)/m;
+const publicFrontendSecretPattern =
+  /\b(?:NEXT_PUBLIC_|VITE_PUBLIC_|PUBLIC_)[A-Z0-9_]*(?:GOOGLE_CALENDAR|OWNTRACKS|PERSONAL_DATA|EVENT_SOURCE|CALENDAR_SYNC|LOCATION_INGEST|EVENT_DISCOVERY|EVENT_BRIEF)[A-Z0-9_]*\b/;
+const processEnvDynamicFeaturePattern = /\bprocess\.env\s*\[[^\]"'`]/;
+const configDynamicFeaturePattern =
+  /\bconfig(?:Service)?\.get\s*\(\s*(?!["'`][A-Z0-9_]+["'`]\s*\))/;
 
 const trackedFiles = execFileSync("git", ["ls-files", "-z"], {
   encoding: "utf8",
@@ -178,6 +199,209 @@ function staticDecoratorPath(argument, allowEmpty) {
 
 function stripQuotedStrings(content) {
   return content.replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g, "");
+}
+
+function collectControllerClasses(content) {
+  const lines = content.split(/\r?\n/);
+  const classes = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const classMatch = /^\s*export\s+class\s+([A-Za-z_$][\w$]*)/.exec(
+      lines[index],
+    );
+    if (!classMatch) continue;
+
+    const decorators = [];
+    let cursor = index - 1;
+    while (cursor >= 0) {
+      if (lines[cursor].trim() === "") {
+        cursor -= 1;
+        continue;
+      }
+
+      const decoratorLines = [];
+      let closingDepth = 0;
+      let foundStart = false;
+      while (cursor >= 0) {
+        const line = lines[cursor].trim();
+        decoratorLines.unshift(line);
+        closingDepth += (line.match(/\)/g) ?? []).length;
+        closingDepth -= (line.match(/\(/g) ?? []).length;
+        cursor -= 1;
+        if (line.startsWith("@") && closingDepth <= 0) {
+          foundStart = true;
+          break;
+        }
+      }
+      if (!foundStart) break;
+      decorators.unshift(
+        decoratorLines.reduce(
+          (text, line) => (text === "" ? line : `${text}\n${line}`),
+          "",
+        ),
+      );
+    }
+    if (!decorators.some((line) => /^@Controller\s*\(/.test(line))) continue;
+
+    let end = index + 1;
+    while (
+      end < lines.length &&
+      !/^\s*export\s+class\s+[A-Za-z_$][\w$]*/.test(lines[end])
+    ) {
+      end += 1;
+    }
+    classes.push({
+      name: classMatch[1],
+      decorators,
+      body: lines
+        .slice(index, end)
+        .reduce((text, line) => (text === "" ? line : `${text}\n${line}`), ""),
+    });
+  }
+  return classes;
+}
+
+function decoratorArgument(decorator, name) {
+  const match = new RegExp(`^@${name}\\s*\\(([\\s\\S]*)\\)$`).exec(
+    decorator.trim(),
+  );
+  return match?.[1];
+}
+
+function classControllerPath(controllerClass) {
+  const decorator = controllerClass.decorators.find((line) =>
+    /^@Controller\s*\(/.test(line),
+  );
+  const argument = decorator ? decoratorArgument(decorator, "Controller") : null;
+  return argument === undefined || argument === null
+    ? null
+    : staticDecoratorPath(argument, false);
+}
+
+function classHasGuard(controllerClass, guardName) {
+  return controllerClass.decorators.some((line) =>
+    new RegExp(`^@UseGuards\\s*\\(\\s*${guardName}\\s*\\)`).test(line),
+  );
+}
+
+function classRouteDecorators(controllerClass) {
+  return [...controllerClass.body.matchAll(agentRoutePattern)].filter(
+    (route) => route[1] !== "Controller",
+  );
+}
+
+function routeHasGuard(controllerClass, route, guardName) {
+  const routeStart = route.index ?? 0;
+  const afterRoute = controllerClass.body.slice(routeStart, routeStart + 500);
+  return new RegExp(`@UseGuards\\s*\\(\\s*${guardName}\\s*\\)`).test(
+    afterRoute,
+  );
+}
+
+function hasDynamicControllerPath(content) {
+  return collectControllerClasses(content).some(
+    (controllerClass) => classControllerPath(controllerClass) === null,
+  );
+}
+
+function hasUnsafeHumanPersonalDataRoute(content) {
+  for (const controllerClass of collectControllerClasses(content)) {
+    const path = classControllerPath(controllerClass);
+    if (path === null) continue;
+    if (isProviderCallbackClass(controllerClass) || isOwnTracksClass(controllerClass)) {
+      continue;
+    }
+    if (!classHasGuard(controllerClass, "AuthGuard")) {
+      return true;
+    }
+    if (hasCallerControlledControllerOwner(controllerClass.body)) {
+      return true;
+    }
+    for (const route of classRouteDecorators(controllerClass)) {
+      if (staticDecoratorPath(route[2], true) === null) return true;
+    }
+  }
+  return false;
+}
+
+function hasCallerControlledPersonalDataOwner(content) {
+  return collectControllerClasses(content).some(
+    (controllerClass) =>
+      !isProviderCallbackClass(controllerClass) &&
+      !isOwnTracksClass(controllerClass) &&
+      hasCallerControlledControllerOwner(controllerClass.body),
+  );
+}
+
+function isProviderCallbackClass(controllerClass) {
+  return /GoogleCalendar(?:Webhook|Callback)Controller/.test(
+    controllerClass.name,
+  );
+}
+
+function isOwnTracksClass(controllerClass) {
+  return controllerClass.name === "OwnTracksController";
+}
+
+function hasUnsafeProviderCallbackRoute(content) {
+  for (const controllerClass of collectControllerClasses(content)) {
+    if (!isProviderCallbackClass(controllerClass)) continue;
+    if (classControllerPath(controllerClass) !== "integrations/google-calendar") {
+      return true;
+    }
+    const routes = classRouteDecorators(controllerClass);
+    if (routes.length !== 1) return true;
+    const [route] = routes;
+    const routePath = staticDecoratorPath(route[2], true);
+    if (
+      controllerClass.name === "GoogleCalendarWebhookController" &&
+      !(
+        route[1] === "Post" &&
+        routePath === "webhook" &&
+        /requireEnabled\s*\(\s*["']calendarSync["']\s*\)/.test(
+          controllerClass.body,
+        ) &&
+        /\bparseWebhookHeaders\s*\(/.test(controllerClass.body) &&
+        /\.handleWebhook\s*\(/.test(controllerClass.body)
+      )
+    ) {
+      return true;
+    }
+    if (
+      controllerClass.name === "GoogleCalendarCallbackController" &&
+      !(
+        route[1] === "Get" &&
+        routePath === "callback" &&
+        /requireEnabled\s*\(\s*["']calendarSync["']\s*\)/.test(
+          controllerClass.body,
+        ) &&
+        /\bparseGoogleOAuthCallbackQuery\s*\(/.test(controllerClass.body) &&
+        /\.handleCallback\s*\(/.test(controllerClass.body)
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasUnsafeOwnTracksIngest(content) {
+  if (!/\bexport\s+class\s+OwnTracksController\b/.test(content)) return false;
+  return !/@Controller\s*\(\s*["']location["']\s*\)[\s\S]*?\bexport\s+class\s+OwnTracksController\b[\s\S]*?@Post\s*\(\s*["']owntracks["']\s*\)[\s\S]{0,200}?@UseGuards\s*\(\s*OwnTracksAuthGuard\s*\)/.test(
+    content,
+  );
+}
+
+function hasNonliteralFeatureParsing(file, content) {
+  if (personalDataConfigPattern.test(file)) return false;
+  return processEnvDynamicFeaturePattern.test(content) ||
+    configDynamicFeaturePattern.test(content);
+}
+
+function hasUnsafeExceptionFilterTelemetry(content) {
+  if (hasSensitiveAgentLogging(content)) return true;
+  return /captureException\s*\([\s\S]*?(?:exception|headers|body|stack|message|request\.headers|request\.body)/.test(
+    content,
+  );
 }
 
 function hasCallerControlledAgentAuthority(content) {
@@ -381,11 +605,47 @@ for (const file of trackedFiles) {
     }
   }
 
+  if (humanPersonalDataControllerPattern.test(file)) {
+    if (hasDynamicControllerPath(content)) {
+      rules.add("dynamic-controller-path");
+    }
+    if (hasUnsafeHumanPersonalDataRoute(content)) {
+      rules.add("unsafe-human-personal-data-route");
+    }
+    if (hasCallerControlledPersonalDataOwner(content)) {
+      rules.add("caller-controlled-personal-data-owner");
+    }
+  }
+
+  if (calendarControllerPattern.test(file) && hasUnsafeProviderCallbackRoute(content)) {
+    rules.add("unsafe-provider-callback-route");
+  }
+
+  if (locationControllerPattern.test(file) && hasUnsafeOwnTracksIngest(content)) {
+    rules.add("unsafe-owntracks-ingest");
+  }
+
   if (
     personalContextSourcePattern.test(file) &&
     (hasAnyLogging(content) || unsafeRawSqlPattern.test(content))
   ) {
     rules.add("unsafe-personal-context-deletion");
+  }
+
+  if (personalDataSourcePattern.test(file)) {
+    if (hasNonliteralFeatureParsing(file, content)) {
+      rules.add("nonliteral-personal-data-feature-parsing");
+    }
+    if (unsafeRawSqlPattern.test(content)) {
+      rules.add("unsafe-raw-sql");
+    }
+    if (hasSensitiveAgentLogging(content)) {
+      rules.add("sensitive-personal-data-logging");
+    }
+  }
+
+  if (exceptionFilterPattern.test(file) && hasUnsafeExceptionFilterTelemetry(content)) {
+    rules.add("unsafe-exception-filter-telemetry");
   }
 
   if (humanAgentControllerPattern.test(file)) {
@@ -437,6 +697,17 @@ for (const file of trackedFiles) {
     ) {
       rules.add("missing-production-mcp-host-policy");
     }
+  }
+
+  if (
+    !/\.test\.[cm]?[jt]s$/.test(file) &&
+    (dockerBuildSecretSurfacePattern.test(content) ||
+      publicFrontendSecretPattern.test(content) ||
+      (/(?:^|\/)(?:apps\/(?:web|platform)\/|docker\/|services\/api\/Dockerfile|Dockerfile)/.test(file) &&
+        /(?:NEXT_PUBLIC_|VITE_PUBLIC_|PUBLIC_)/.test(content) &&
+        task16SecretEnvNamePattern.test(content)))
+  ) {
+    rules.add("task16-secret-build-surface");
   }
 
   for (const rule of rules) {

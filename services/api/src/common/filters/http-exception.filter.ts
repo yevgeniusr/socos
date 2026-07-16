@@ -4,25 +4,19 @@ import {
   ArgumentsHost,
   HttpException,
   HttpStatus,
-  Logger,
 } from "@nestjs/common";
 import { Request, Response } from "express";
 import * as Sentry from "@sentry/node";
 import { SafeProviderError } from "../safe-provider-error.js";
 
-const REDACTED_HEADER_VALUE = "[REDACTED]";
-const CREDENTIAL_HEADER_NAME =
-  /(?:^|[-_])(?:auth|authorization|cookie|credential|secret|token|session|password|passwd|api[-_]?key|access[-_]?key|private[-_]?key)(?:$|[-_])/i;
-
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
-  private readonly logger = new Logger(AllExceptionsFilter.name);
-
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
     const requestPath = safeRequestPath(request);
+    const requestContext = safeRequestContext(request, requestPath);
 
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message: string | object = "Internal server error";
@@ -48,14 +42,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
         }
       }
     } else if (exception instanceof Error) {
-      this.logger.error(
-        `Unhandled exception: ${exception.message}`,
-        exception.stack
-      );
-      message =
-        process.env.NODE_ENV === "production"
-          ? "Internal server error"
-          : exception.message;
+      code = "internal_error";
+      message = "Internal server error";
     }
 
     if (exception instanceof SafeProviderError) {
@@ -65,29 +53,20 @@ export class AllExceptionsFilter implements ExceptionFilter {
           scope.clear();
           scope.addEventProcessor((event) => ({
             ...event,
-            request: {
-              method: request.method,
-              url: requestPath,
-            },
+            request: requestContext,
           }));
-          scope.setContext("request", {
-            method: request.method,
-            url: requestPath,
-          });
-          Sentry.captureException(exception);
+          scope.setContext("request", requestContext);
+          scope.setTag("safe_error_code", exception.code);
+          Sentry.captureMessage("safe_provider_error");
         });
       });
     } else if (
       !(exception instanceof HttpException) &&
       exception instanceof Error
     ) {
-      Sentry.captureException(exception, {
+      Sentry.captureMessage("internal_error", {
         contexts: {
-          request: {
-            method: request.method,
-            url: requestPath,
-            headers: redactCredentialHeaders(request.headers),
-          },
+          request: requestContext,
         },
       });
     }
@@ -103,6 +82,13 @@ export class AllExceptionsFilter implements ExceptionFilter {
   }
 }
 
+function safeRequestContext(request: Request, requestPath: string) {
+  return {
+    method: request.method,
+    url: requestPath,
+  };
+}
+
 function safeRequestPath(request: Request): string {
   if (typeof request.path === "string" && request.path.startsWith("/")) {
     return request.path.split(/[?#]/, 1)[0];
@@ -113,15 +99,4 @@ function safeRequestPath(request: Request): string {
   } catch {
     return raw.split(/[?#]/, 1)[0] || "/";
   }
-}
-
-function redactCredentialHeaders(
-  headers: Request["headers"]
-): Record<string, string | string[] | undefined> {
-  return Object.fromEntries(
-    Object.entries(headers).map(([name, value]) => [
-      name,
-      CREDENTIAL_HEADER_NAME.test(name) ? REDACTED_HEADER_VALUE : value,
-    ])
-  );
 }

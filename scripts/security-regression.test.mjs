@@ -721,3 +721,217 @@ test("rejects a production API service without a fail-closed MCP host allowlist"
     /docker-compose\.prod\.yml: missing-production-mcp-host-policy/,
   );
 });
+
+test("rejects unguarded human calendar, location, and event controllers", () => {
+  for (const [file, controllerPath, rule] of [
+    [
+      "services/api/src/modules/calendar/calendar.controller.ts",
+      "integrations/google-calendar",
+      "unsafe-human-personal-data-route",
+    ],
+    [
+      "services/api/src/modules/location/location.controller.ts",
+      "location-devices",
+      "unsafe-human-personal-data-route",
+    ],
+    [
+      "services/api/src/modules/events/events.controller.ts",
+      "event-sources",
+      "unsafe-human-personal-data-route",
+    ],
+  ]) {
+    const directory = createTrackedFixture(
+      file,
+      `@Controller("${controllerPath}")
+export class UnsafeController {
+  @Get() list(request) { return this.service.list(request.user.userId); }
+}
+`,
+    );
+
+    const result = runScanner(directory);
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, new RegExp(`${file.split("/").pop()}: ${rule}`));
+  }
+});
+
+test("rejects caller-controlled owner fields on human personal data routes", () => {
+  const directory = createTrackedFixture(
+    "services/api/src/modules/events/events.controller.ts",
+    `@Controller("event-sources")
+@UseGuards(AuthGuard)
+export class UnsafeController {
+  @Post() create(@Body() body) {
+    return this.service.create(body.ownerId, body);
+  }
+}
+`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /events\.controller\.ts: caller-controlled-personal-data-owner/,
+  );
+});
+
+test("requires the OwnTracks ingest route to use only the OwnTracks guard", () => {
+  const directory = createTrackedFixture(
+    "services/api/src/modules/location/location.controller.ts",
+    `@Controller("location")
+export class OwnTracksController {
+  @Post("owntracks")
+  @UseGuards(AuthGuard)
+  ingest(request, input) { return this.service.ingest(request.user.userId, input); }
+}
+`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /location\.controller\.ts: unsafe-owntracks-ingest/);
+});
+
+test("allows provider callbacks only on exact static routes with validation calls", () => {
+  for (const [name, source] of [
+    [
+      "dynamic",
+      `const CALLBACK = "callback";
+@Controller("integrations/google-calendar")
+export class GoogleCalendarCallbackController {
+  @Get(CALLBACK) callback(request) { return this.service.handleCallback(request.query); }
+}
+`,
+    ],
+    [
+      "missing validation",
+      `@Controller("integrations/google-calendar")
+export class GoogleCalendarCallbackController {
+  @Get("callback") callback(request) { return this.service.handleCallback(request.query); }
+}
+`,
+    ],
+    [
+      "wrong webhook",
+      `@Controller("integrations/google-calendar")
+export class GoogleCalendarWebhookController {
+  @Post("webhooks/:id") webhook(request) { return this.watches.handleWebhook(request.headers); }
+}
+`,
+    ],
+  ]) {
+    const directory = createTrackedFixture(
+      "services/api/src/modules/calendar/calendar.controller.ts",
+      source,
+    );
+
+    const result = runScanner(directory);
+
+    assert.notEqual(result.status, 0, name);
+    assert.match(
+      result.stderr,
+      /calendar\.controller\.ts: unsafe-provider-callback-route/,
+    );
+  }
+});
+
+test("rejects dynamic controller paths that cannot be audited", () => {
+  const directory = createTrackedFixture(
+    "services/api/src/modules/location/location.controller.ts",
+    `const PATH = "location-context";
+@Controller(PATH)
+@UseGuards(AuthGuard)
+export class LocationContextController {
+  @Get("current") current(request) { return this.service.current(request.user.userId); }
+}
+`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /location\.controller\.ts: dynamic-controller-path/);
+});
+
+test("rejects nonliteral feature parsing outside PersonalDataConfigService", () => {
+  const directory = createTrackedFixture(
+    "services/api/src/modules/events/event-source.service.ts",
+    `export class EventSourceService {
+  enabled(feature) {
+    return process.env[feature] === "true";
+  }
+}
+`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /event-source\.service\.ts: nonliteral-personal-data-feature-parsing/,
+  );
+});
+
+test("rejects unsafe raw SQL across calendar location event modules", () => {
+  const directory = createTrackedFixture(
+    "services/api/src/modules/calendar/calendar-sync.service.ts",
+    `export class CalendarSyncService {
+  run(ownerId) {
+    return prisma.$queryRawUnsafe("SELECT " + ownerId);
+  }
+}
+`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /calendar-sync\.service\.ts: unsafe-raw-sql/);
+});
+
+test("rejects exception filter logging or telemetry of raw exception/request data", () => {
+  const directory = createTrackedFixture(
+    "services/api/src/common/filters/http-exception.filter.ts",
+    `export class AllExceptionsFilter {
+  catch(exception, host) {
+    const request = host.switchToHttp().getRequest();
+    this.logger.error(exception.message, exception.stack);
+    Sentry.captureException(exception, { contexts: { request: { headers: request.headers, body: request.body } } });
+  }
+}
+`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /http-exception\.filter\.ts: unsafe-exception-filter-telemetry/,
+  );
+});
+
+test("rejects Task 16 secrets in Docker build args, Docker ENV, or public frontend variables", () => {
+  for (const [file, source] of [
+    [
+      "services/api/Dockerfile",
+      "ARG GOOGLE_CALENDAR_CLIENT_SECRET\nENV PERSONAL_DATA_KEYS=synthetic\n",
+    ],
+    [
+      "apps/web/src/env.ts",
+      "export const publicEnv = process.env.NEXT_PUBLIC_PERSONAL_DATA_INDEX_KEY;\n",
+    ],
+  ]) {
+    const directory = createTrackedFixture(file, source);
+
+    const result = runScanner(directory);
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /task16-secret-build-surface/);
+  }
+});

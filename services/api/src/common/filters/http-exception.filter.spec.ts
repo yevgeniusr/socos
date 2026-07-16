@@ -13,10 +13,12 @@ const sentryCurrentScope = {
   clear: jest.fn(),
   addEventProcessor: jest.fn(),
   setContext: jest.fn(),
+  setTag: jest.fn(),
 };
 
 jest.mock("@sentry/node", () => ({
   captureException: jest.fn(),
+  captureMessage: jest.fn(),
   withIsolationScope: jest.fn(
     (callback: (scope: typeof sentryIsolationScope) => void) =>
       callback(sentryIsolationScope)
@@ -77,7 +79,7 @@ describe("AllExceptionsFilter", () => {
     expect(json.mock.calls[0][0]).not.toHaveProperty("code");
   });
 
-  it("redacts credential-bearing headers when unexpected agent authentication fails", async () => {
+  it("reports unexpected agent authentication failures with fixed safe telemetry only", async () => {
     const secrets = {
       authorization: "Bearer socos_agent_credential.private-secret",
       cookie: "session=private-session",
@@ -121,7 +123,9 @@ describe("AllExceptionsFilter", () => {
     }
 
     const capture = jest.mocked(Sentry.captureException);
+    const captureMessage = jest.mocked(Sentry.captureMessage);
     capture.mockClear();
+    captureMessage.mockClear();
     const json = jest.fn();
     const host = {
       switchToHttp: () => ({
@@ -132,32 +136,24 @@ describe("AllExceptionsFilter", () => {
 
     new AllExceptionsFilter().catch(failure, host);
 
-    expect(capture).toHaveBeenCalledTimes(1);
-    const sentryContext = capture.mock.calls[0][1];
+    expect(capture).not.toHaveBeenCalled();
+    expect(captureMessage).toHaveBeenCalledWith("internal_error", {
+      contexts: { request: { method: "POST", url: "/api/mcp" } },
+    });
+    const sentryContext = captureMessage.mock.calls[0][1];
     const serialized = JSON.stringify(sentryContext);
     for (const secret of Object.values(secrets)) {
       expect(serialized).not.toContain(secret);
     }
-    expect(sentryContext).toEqual(
+    expect(serialized).not.toContain("Synthetic authentication storage failure");
+    expect(request.headers.authorization).toBe(secrets.authorization);
+    expect(json).toHaveBeenCalledWith(
       expect.objectContaining({
-        contexts: {
-          request: expect.objectContaining({
-            url: "/api/mcp",
-            headers: {
-              authorization: "[REDACTED]",
-              cookie: "[REDACTED]",
-              "set-cookie": "[REDACTED]",
-              "proxy-authorization": "[REDACTED]",
-              "x-api-key": "[REDACTED]",
-              "x-auth-token": "[REDACTED]",
-              "x-custom-secret": "[REDACTED]",
-              host: "mcp.example.com",
-            },
-          }),
-        },
+        statusCode: 500,
+        code: "internal_error",
+        message: "Internal server error",
       })
     );
-    expect(request.headers.authorization).toBe(secrets.authorization);
   });
 
   it("reports provider failures with an isolated sanitized request and no original exception", () => {
@@ -199,17 +195,19 @@ describe("AllExceptionsFilter", () => {
       }),
     } as unknown as ArgumentsHost;
     const capture = jest.mocked(Sentry.captureException);
+    const captureMessage = jest.mocked(Sentry.captureMessage);
     capture.mockClear();
+    captureMessage.mockClear();
     sentryIsolationScope.clear.mockClear();
     sentryCurrentScope.clear.mockClear();
     sentryCurrentScope.addEventProcessor.mockClear();
     sentryCurrentScope.setContext.mockClear();
+    sentryCurrentScope.setTag.mockClear();
 
     new AllExceptionsFilter().catch(safeFailure, host);
 
-    expect(capture).toHaveBeenCalledTimes(1);
-    expect(capture.mock.calls[0][0]).toBe(safeFailure);
-    expect(capture.mock.calls[0][0]).not.toBe(providerFailure);
+    expect(capture).not.toHaveBeenCalled();
+    expect(captureMessage).toHaveBeenCalledWith("safe_provider_error");
     expect(sentryIsolationScope.clear).toHaveBeenCalledTimes(1);
     expect(sentryCurrentScope.clear).toHaveBeenCalledTimes(1);
     expect(sentryCurrentScope.addEventProcessor).toHaveBeenCalledTimes(1);
@@ -230,10 +228,15 @@ describe("AllExceptionsFilter", () => {
       method: "POST",
       url: "/api/integrations/google-calendar/connect",
     });
+    expect(sentryCurrentScope.setTag).toHaveBeenCalledWith(
+      "safe_error_code",
+      "google_rate_limited"
+    );
     const sentryPayload = JSON.stringify({
-      exception: capture.mock.calls[0][0],
+      message: captureMessage.mock.calls[0][0],
       processedEvent,
       context: sentryCurrentScope.setContext.mock.calls[0][1],
+      tag: sentryCurrentScope.setTag.mock.calls[0],
     });
     for (const secret of [
       "synthetic-sensitive-provider-message",
