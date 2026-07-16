@@ -306,7 +306,11 @@ describe("PersonalContextDeletionService", () => {
       },
     });
     expect(tx.briefItem.deleteMany).toHaveBeenCalledWith({
-      where: { ownerId: "owner-1", kind: "event" },
+      where: {
+        ownerId: "owner-1",
+        kind: "event",
+        quests: { none: {} },
+      },
     });
     expect(tx.discoveredEvent.deleteMany).toHaveBeenCalledWith({
       where: { ownerId: "owner-1" },
@@ -320,6 +324,39 @@ describe("PersonalContextDeletionService", () => {
     expect(tx.quest.deleteMany).not.toHaveBeenCalled();
     expect(tx.xpTransaction.deleteMany).not.toHaveBeenCalled();
     expect(tx.agentClient.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("does not delete legacy event brief items that have quests or hide quest deletion in counts", async () => {
+    const { service, tx } = harness();
+    tx.briefFeedback.deleteMany.mockResolvedValueOnce({ count: 2 });
+    tx.briefItem.deleteMany.mockImplementationOnce(async (...args: any[]) => {
+      const input = args[0];
+      expect(input).toEqual({
+        where: {
+          ownerId: "owner-1",
+          kind: "event",
+          quests: { none: {} },
+        },
+      });
+      return { count: 1 };
+    });
+    tx.discoveredEvent.deleteMany.mockResolvedValueOnce({ count: 3 });
+    tx.eventSource.deleteMany.mockResolvedValueOnce({ count: 4 });
+    tx.eventPreference.deleteMany.mockResolvedValueOnce({ count: 5 });
+
+    const result = await service.deletePersonalContext(
+      "owner-1",
+      VALID_KEY,
+      VALID_BODY
+    );
+
+    expect(tx.quest.deleteMany).not.toHaveBeenCalled();
+    expect(tx.personalDataDeletionAudit.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        eventRowCount: 15,
+      }),
+    });
+    expect(result.rowCounts.event).toBe(15);
   });
 
   it("stores fixed categories with aggregate deleteMany counts including zero-count domains", async () => {
@@ -406,6 +443,24 @@ describe("PersonalContextDeletionService", () => {
     ).resolves.toMatchObject({
       rowCounts: { calendar: 6, location: 4, event: 5 },
     });
+  });
+
+  it("returns after a bounded deadline when post-commit provider stop never settles", async () => {
+    const { service, watches } = harness();
+    (
+      service as unknown as { postCommitStopDeadlineMs: number }
+    ).postCommitStopDeadlineMs = 1;
+    watches.stopPreparedBestEffort.mockReturnValueOnce(new Promise(() => {}));
+
+    await expect(
+      service.deletePersonalContext("owner-1", VALID_KEY, VALID_BODY)
+    ).resolves.toMatchObject({
+      rowCounts: { calendar: 6, location: 4, event: 5 },
+    });
+    expect(watches.stopPreparedBestEffort).toHaveBeenCalledWith(
+      [{ id: "watch-1" }],
+      NOW
+    );
   });
 
   it("uses serializable transactions", async () => {

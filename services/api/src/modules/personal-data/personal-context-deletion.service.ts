@@ -21,6 +21,7 @@ const REQUEST_PURPOSE = "deletion-audit-request";
 const OWNER_VALUE = "personal-context";
 const CATEGORIES = ["calendar", "location", "event"] as const;
 const SERIALIZATION_RETRY_LIMIT = 2;
+export const PERSONAL_CONTEXT_POST_COMMIT_STOP_DEADLINE_MS = 5_000;
 
 export const PERSONAL_CONTEXT_DELETION_CLOCK = Symbol(
   "PERSONAL_CONTEXT_DELETION_CLOCK"
@@ -48,6 +49,9 @@ type DeleteCount = { count: number };
 
 @Injectable()
 export class PersonalContextDeletionService {
+  private readonly postCommitStopDeadlineMs =
+    PERSONAL_CONTEXT_POST_COMMIT_STOP_DEADLINE_MS;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly index: PersonalDataIndexService,
@@ -196,7 +200,7 @@ export class PersonalContextDeletionService {
         },
       }),
       await tx.briefItem.deleteMany({
-        where: { ownerId, kind: "event" },
+        where: { ownerId, kind: "event", quests: { none: {} } },
       }),
       await tx.discoveredEvent.deleteMany({ where: { ownerId } }),
       await tx.eventSource.deleteMany({ where: { ownerId } }),
@@ -241,7 +245,10 @@ export class PersonalContextDeletionService {
     now: Date
   ): Promise<void> {
     try {
-      await this.watches.stopPreparedBestEffort(prepared, now);
+      await withDeadline(
+        this.watches.stopPreparedBestEffort(prepared, now),
+        this.postCommitStopDeadlineMs
+      );
     } catch {
       // Local deletion and audit have committed; remote channels expire if stop fails.
     }
@@ -250,6 +257,16 @@ export class PersonalContextDeletionService {
 
 function sumCounts(results: DeleteCount[]): number {
   return results.reduce((total, result) => total + result.count, 0);
+}
+
+function withDeadline<T>(promise: Promise<T>, timeoutMs: number): Promise<T | void> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<void>((resolve) => {
+    timeout = setTimeout(resolve, timeoutMs);
+  });
+  return Promise.race([promise, deadline]).finally(() => {
+    if (timeout) clearTimeout(timeout);
+  });
 }
 
 function assertIdempotencyKey(value: unknown): asserts value is string {
