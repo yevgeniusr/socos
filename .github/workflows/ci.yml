@@ -50,6 +50,11 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://postgres:test-only@127.0.0.1:5432/socos_migration_test_ci_test
 
+      - name: Human idempotency PostgreSQL integration
+        run: pnpm test:human-idempotency-integration
+        env:
+          HUMAN_IDEMPOTENCY_TEST_DATABASE_URL: postgresql://postgres:test-only@127.0.0.1:5432/socos_migration_test_ci_test
+
       - name: Daily brief PostgreSQL integration
         run: pnpm test:brief-integration
         env:

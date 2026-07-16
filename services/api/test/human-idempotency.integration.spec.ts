@@ -1,11 +1,10 @@
 import { PrismaClient } from "@prisma/client";
-import type { PrismaService } from "../modules/prisma/prisma.service.js";
-import { HumanIdempotencyService } from "./human-idempotency.service.js";
+import type { PrismaService } from "../src/modules/prisma/prisma.service.js";
+import { HumanIdempotencyService } from "../src/common/human-idempotency.service.js";
 
-const testDatabaseUrl = process.env.TEST_DATABASE_URL;
-const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
+const testDatabaseUrl = process.env.DATABASE_URL;
 
-describeWithDatabase("HumanIdempotencyService PostgreSQL concurrency", () => {
+describe("HumanIdempotencyService PostgreSQL concurrency", () => {
   jest.setTimeout(30_000);
   let prisma: PrismaClient;
   const ownerId = `human-idempotency-${process.pid}`;

@@ -86,7 +86,7 @@ describe('demo contact side effects', () => {
   });
 
   it('rejects a manual demo reminder without side effects', async () => {
-    const prisma = {
+    const transaction = {
       contact: {
         findFirst: jest.fn().mockResolvedValue({
           id: contactId,
@@ -95,6 +95,12 @@ describe('demo contact side effects', () => {
         }),
       },
       reminder: { create: jest.fn() },
+    };
+    const prisma = {
+      ...transaction,
+      $transaction: jest
+        .fn()
+        .mockImplementation((callback) => callback(transaction)),
     };
     const notifications = { sendReminderNotification: jest.fn() };
     const service = new RemindersService(
