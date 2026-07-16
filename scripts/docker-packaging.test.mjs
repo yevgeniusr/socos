@@ -158,6 +158,23 @@ test('all API runtime images assert Prisma schema, current personal-data migrati
 
 test('calendar location event secrets are runtime-only Compose inputs', () => {
   const compose = readFileSync(resolve(root, 'docker-compose.prod.yml'), 'utf8');
+  const localCompose = readFileSync(resolve(root, 'docker-compose.local.yml'), 'utf8');
+  const envExample = readFileSync(resolve(root, 'services/api/.env.example'), 'utf8');
+  const task16Names = [
+    'CALENDAR_SYNC_ENABLED',
+    'LOCATION_INGEST_ENABLED',
+    'EVENT_DISCOVERY_ENABLED',
+    'EVENT_BRIEF_ENABLED',
+    'GOOGLE_CALENDAR_CLIENT_ID',
+    'GOOGLE_CALENDAR_CLIENT_SECRET',
+    'GOOGLE_CALENDAR_REDIRECT_URI',
+    'GOOGLE_CALENDAR_WEBHOOK_URL',
+    'GOOGLE_CALENDAR_SETTINGS_RESULT_URL',
+    'PERSONAL_DATA_KEYS',
+    'PERSONAL_DATA_ACTIVE_KEY_VERSION',
+    'PERSONAL_DATA_INDEX_KEY',
+    'EVENT_SOURCE_ALLOWED_HOSTS',
+  ];
   for (const name of [
     'GOOGLE_CALENDAR_CLIENT_ID',
     'GOOGLE_CALENDAR_CLIENT_SECRET',
@@ -193,6 +210,33 @@ test('calendar location event secrets are runtime-only Compose inputs', () => {
 
   for (const forbidden of ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET']) {
     assert.doesNotMatch(compose, new RegExp(`\\b${forbidden}\\b`));
+    assert.doesNotMatch(envExample, new RegExp(`^${forbidden}=`, 'm'));
+  }
+
+  assert.match(envExample, /^CALENDAR_SYNC_ENABLED=false$/m);
+  assert.match(envExample, /^LOCATION_INGEST_ENABLED=false$/m);
+  assert.match(envExample, /^EVENT_DISCOVERY_ENABLED=false$/m);
+  assert.match(envExample, /^EVENT_BRIEF_ENABLED=false$/m);
+  assert.match(envExample, /^PERSONAL_DATA_ACTIVE_KEY_VERSION=1$/m);
+  assert.match(envExample, /^EVENT_SOURCE_ALLOWED_HOSTS=$/m);
+
+  const prodApi = serviceBlock(compose, 'api');
+  const localApi = serviceBlock(localCompose, 'api');
+  for (const name of task16Names) {
+    assert.match(prodApi, new RegExp(`- ${name}=`));
+    assert.match(localApi, new RegExp(`- ${name}=`));
+  }
+  for (const serviceName of ['web']) {
+    const block = serviceBlock(compose, serviceName);
+    for (const name of task16Names) {
+      assert.doesNotMatch(block, new RegExp(`\\b${name}\\b`));
+    }
+  }
+  for (const serviceName of ['web', 'platform', 'db']) {
+    const block = serviceBlock(localCompose, serviceName);
+    for (const name of task16Names) {
+      assert.doesNotMatch(block, new RegExp(`\\b${name}\\b`));
+    }
   }
 
   for (const label of [
@@ -219,4 +263,12 @@ test('calendar location event secrets are runtime-only Compose inputs', () => {
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function serviceBlock(compose, serviceName) {
+  const match = new RegExp(`\\n  ${serviceName}:\\n([\\s\\S]*?)(?=\\n  [A-Za-z0-9_-]+:\\n|\\n\\S|$)`).exec(
+    compose,
+  );
+  assert.ok(match, `missing compose service ${serviceName}`);
+  return match[1];
 }
