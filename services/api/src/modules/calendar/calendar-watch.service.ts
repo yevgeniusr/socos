@@ -554,16 +554,18 @@ export class CalendarWatchService {
 
   async maintain(now = new Date()): Promise<void> {
     let watchAfter: string | undefined;
+    const renewBefore = new Date(now.getTime() + 24 * 60 * 60 * 1000);
     while (true) {
       const stopping = await this.prisma.calendarWatch.findMany({
         where: {
           OR: [
             { status: "stopping" },
+            { expiresAt: { lte: renewBefore } },
             {
-              expiresAt: {
-                lte: new Date(now.getTime() + 24 * 60 * 60 * 1000),
-              },
+              status: "active",
+              connection: { status: "disconnected" },
             },
+            { status: "active", targetType: "events" },
           ],
           ...(watchAfter ? { id: { gt: watchAfter } } : {}),
         },
@@ -581,17 +583,50 @@ export class CalendarWatchService {
   }
 
   private async maintainWatch(watch: any, now: Date): Promise<void> {
-    if (watch.status === "active" && watch.expiresAt > now) {
-      try {
-        await this.createOrRenew(
-          watch.ownerId,
-          watch.connectionId,
-          watch.targetType as CalendarWatchTargetType,
-          watch.targetKey,
-          now
-        );
-      } catch {
-        // A later maintenance run retries without exposing provider details.
+    const connection = await this.prisma.googleCalendarConnection.findFirst({
+      where: {
+        id: watch.connectionId,
+        ownerId: watch.ownerId,
+        status: { in: ["active", "disconnected"] },
+      },
+    });
+    let eligible =
+      watch.status === "active" &&
+      connection?.status === "active" &&
+      watch.targetType === "calendar_list" &&
+      watch.targetKey === connection.id;
+    if (
+      watch.status === "active" &&
+      connection?.status === "active" &&
+      watch.targetType === "events"
+    ) {
+      eligible = Boolean(
+        await this.prisma.calendarSource.findFirst({
+          where: {
+            id: watch.targetKey,
+            ownerId: watch.ownerId,
+            connectionId: watch.connectionId,
+            selected: true,
+            connection: { status: "active" },
+          },
+          select: { id: true },
+        })
+      );
+    }
+    if (eligible && watch.expiresAt > now) {
+      const renewBefore = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+      if (watch.expiresAt <= renewBefore) {
+        try {
+          await this.createOrRenew(
+            watch.ownerId,
+            watch.connectionId,
+            watch.targetType as CalendarWatchTargetType,
+            watch.targetKey,
+            now
+          );
+        } catch {
+          // A later maintenance run retries without exposing provider details.
+        }
       }
       return;
     }
@@ -606,13 +641,6 @@ export class CalendarWatchService {
         data: { status: "stopping" },
       });
     }
-    const connection = await this.prisma.googleCalendarConnection.findFirst({
-      where: {
-        id: watch.connectionId,
-        ownerId: watch.ownerId,
-        status: { in: ["active", "disconnected"] },
-      },
-    });
     let accessToken: string | null = null;
     if (connection) {
       try {

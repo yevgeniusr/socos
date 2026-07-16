@@ -528,6 +528,153 @@ describe("CalendarWatchService", () => {
     );
   });
 
+  it("stops a far-future active watch after a crash following disconnect", async () => {
+    const { service, prisma, tx, provider } = harness();
+    const watch = {
+      id: "disconnected-watch",
+      ownerId: "owner",
+      connectionId: "connection",
+      targetType: "calendar_list",
+      targetKey: "connection",
+      channelId: "disconnected-channel",
+      status: "active",
+      expiresAt: new Date("2026-08-16T12:00:00Z"),
+      resourceIdCiphertext: Buffer.from("resource"),
+      resourceIdIv: envelope.iv,
+      resourceIdTag: envelope.tag,
+      resourceIdKeyVersion: 1,
+    };
+    prisma.calendarWatch.findMany.mockImplementation((args) => {
+      if (args.where?.OR) return Promise.resolve([watch]);
+      if (args.where?.targetKey === "connection") {
+        return Promise.resolve([watch]);
+      }
+      return Promise.resolve([]);
+    });
+    prisma.calendarWatch.updateMany.mockResolvedValue({ count: 1 });
+    prisma.calendarWatch.deleteMany.mockResolvedValue({ count: 1 });
+    prisma.googleCalendarConnection.findFirst.mockResolvedValue({
+      id: "connection",
+      ownerId: "owner",
+      status: "disconnected",
+      refreshTokenCiphertext: Buffer.from("r"),
+      refreshTokenIv: envelope.iv,
+      refreshTokenTag: envelope.tag,
+      refreshTokenKeyVersion: 1,
+    });
+    prisma.googleCalendarConnection.findMany.mockImplementation((args) =>
+      Promise.resolve(
+        args.where?.status === "disconnected"
+          ? [{ id: "connection", ownerId: "owner" }]
+          : []
+      )
+    );
+    prisma.calendarSource.findMany.mockResolvedValue([]);
+    tx.googleCalendarConnection.findFirst.mockResolvedValue({
+      id: "connection",
+    });
+    tx.calendarEvent.findMany.mockResolvedValue([]);
+    tx.calendarWatch.findFirst.mockResolvedValue(null);
+    tx.googleCalendarConnection.deleteMany.mockResolvedValue({ count: 1 });
+
+    await service.maintain(NOW);
+
+    expect(prisma.calendarWatch.findMany.mock.calls[0][0].where.OR).toEqual(
+      expect.arrayContaining([
+        {
+          status: "active",
+          connection: { status: "disconnected" },
+        },
+      ])
+    );
+    expect(prisma.calendarWatch.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: "disconnected-watch",
+          status: "active",
+        }),
+        data: { status: "stopping" },
+      })
+    );
+    expect(provider.stopChannel).toHaveBeenCalledWith("access", {
+      channelId: "disconnected-channel",
+      resourceId: "resource",
+    });
+    expect(prisma.calendarWatch.deleteMany).toHaveBeenCalledWith({
+      where: {
+        id: "disconnected-watch",
+        ownerId: "owner",
+        connectionId: "connection",
+        status: "stopping",
+      },
+    });
+    expect(tx.googleCalendarConnection.deleteMany).toHaveBeenCalledWith({
+      where: {
+        id: "connection",
+        ownerId: "owner",
+        status: "disconnected",
+        watches: { none: {} },
+      },
+    });
+  });
+
+  it("stops a far-future active event watch after a crash following deselection", async () => {
+    const { service, prisma, provider } = harness();
+    const watch = {
+      id: "deselected-watch",
+      ownerId: "owner",
+      connectionId: "connection",
+      targetType: "events",
+      targetKey: "deselected-source",
+      channelId: "deselected-channel",
+      status: "active",
+      expiresAt: new Date("2026-08-16T12:00:00Z"),
+      resourceIdCiphertext: Buffer.from("resource"),
+      resourceIdIv: envelope.iv,
+      resourceIdTag: envelope.tag,
+      resourceIdKeyVersion: 1,
+    };
+    prisma.calendarWatch.findMany.mockImplementation((args) => {
+      if (args.where?.OR) return Promise.resolve([watch]);
+      if (args.where?.targetKey === "deselected-source") {
+        return Promise.resolve([watch]);
+      }
+      return Promise.resolve([]);
+    });
+    prisma.calendarWatch.updateMany.mockResolvedValue({ count: 1 });
+    prisma.calendarWatch.deleteMany.mockResolvedValue({ count: 1 });
+    prisma.googleCalendarConnection.findFirst.mockResolvedValue({
+      id: "connection",
+      ownerId: "owner",
+      status: "active",
+      refreshTokenCiphertext: Buffer.from("r"),
+      refreshTokenIv: envelope.iv,
+      refreshTokenTag: envelope.tag,
+      refreshTokenKeyVersion: 1,
+    });
+    prisma.googleCalendarConnection.findMany.mockResolvedValue([]);
+    prisma.calendarSource.findFirst.mockResolvedValue(null);
+    prisma.calendarSource.findMany.mockResolvedValue([]);
+
+    await service.maintain(NOW);
+
+    expect(prisma.calendarWatch.findMany.mock.calls[0][0].where.OR).toEqual(
+      expect.arrayContaining([{ status: "active", targetType: "events" }])
+    );
+    expect(provider.stopChannel).toHaveBeenCalledWith("access", {
+      channelId: "deselected-channel",
+      resourceId: "resource",
+    });
+    expect(prisma.calendarWatch.deleteMany).toHaveBeenCalledWith({
+      where: {
+        id: "deselected-watch",
+        ownerId: "owner",
+        connectionId: "connection",
+        status: "stopping",
+      },
+    });
+  });
+
   it("accepts valid duplicate messages without enqueueing and rejects spoofed MACs generically", async () => {
     const { service, prisma, tx } = harness();
     prisma.calendarWatch.findUnique.mockResolvedValue({

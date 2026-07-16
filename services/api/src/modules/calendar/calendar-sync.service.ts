@@ -1,7 +1,7 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { Prisma } from "@prisma/client";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { google } from "googleapis";
 import { LocationAliasService } from "../location/location-alias.service.js";
 import type { EncryptedValue } from "../personal-data/personal-data-cipher.service.js";
@@ -9,6 +9,7 @@ import { PersonalDataCipherService } from "../personal-data/personal-data-cipher
 import { PersonalDataConfigService } from "../personal-data/personal-data-config.js";
 import { PersonalDataIndexService } from "../personal-data/personal-data-index.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { reconciliationSlot } from "./calendar-reconciliation.js";
 
 export const GOOGLE_CALENDAR_PROVIDER = Symbol("GOOGLE_CALENDAR_PROVIDER");
 export const CALENDAR_SYNC_ID_GENERATOR = Symbol("CALENDAR_SYNC_ID_GENERATOR");
@@ -488,7 +489,7 @@ export class CalendarSyncService {
     });
   }
 
-  async markDailyReconciliation(now: Date, _slot: number): Promise<void> {
+  async markDailyReconciliation(now: Date, slot: number): Promise<void> {
     let cursor: string | undefined;
     while (true) {
       const sources = await this.prisma.calendarSource.findMany({
@@ -508,7 +509,8 @@ export class CalendarSyncService {
           !reconciliationDue(
             source.lastFullReconciledAt,
             now,
-            sourceBucket(source.ownerId)
+            reconciliationSlot(source.id),
+            slot
           )
         ) {
           continue;
@@ -1538,25 +1540,22 @@ function advancePending(current: Date | null, now: Date): Date {
   return current && current >= now ? new Date(current.getTime() + 1) : now;
 }
 
-function sourceBucket(id: string): number {
-  return createHash("sha256").update(id, "utf8").digest().readUInt32BE(0) % 96;
-}
-
 function reconciliationDue(
   lastFullReconciledAt: Date | null,
   now: Date,
-  ownerSlot: number
+  sourceSlot: number,
+  currentSlot: number
 ): boolean {
   const today = Date.UTC(
     now.getUTCFullYear(),
     now.getUTCMonth(),
     now.getUTCDate()
   );
-  const scheduledToday = new Date(today + ownerSlot * 15 * 60 * 1000);
+  const scheduledToday = new Date(today + sourceSlot * 15 * 60 * 1000);
   const scheduledYesterday = new Date(scheduledToday.getTime() - DAY_MS);
-  if (!lastFullReconciledAt) return now >= scheduledToday;
+  if (!lastFullReconciledAt) return sourceSlot <= currentSlot;
   if (lastFullReconciledAt < scheduledYesterday) return true;
-  return now >= scheduledToday && lastFullReconciledAt < scheduledToday;
+  return sourceSlot <= currentSlot && lastFullReconciledAt < scheduledToday;
 }
 
 const eventSelect = {

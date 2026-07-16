@@ -1,10 +1,10 @@
-import { createHash } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
 import { PersonalDataConfigService } from "../personal-data/personal-data-config.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { CalendarSyncService } from "./calendar-sync.service.js";
 import { CalendarWatchService } from "./calendar-watch.service.js";
+export { reconciliationSlot } from "./calendar-reconciliation.js";
 
 const CLAIM_LIMIT = 25;
 const OAUTH_BATCH = 500;
@@ -88,9 +88,4 @@ export class CalendarSchedulerService {
       if (rows.length < OAUTH_BATCH) return deletedTotal;
     }
   }
-}
-
-export function reconciliationSlot(sourceId: string): number {
-  const digest = createHash("sha256").update(sourceId, "utf8").digest();
-  return digest.readUInt32BE(0) % 96;
 }

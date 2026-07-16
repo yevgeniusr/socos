@@ -9,6 +9,7 @@ import {
   normalizeProviderEvent,
   type GoogleCalendarProvider,
 } from "./calendar-sync.service.js";
+import { reconciliationSlot } from "./calendar-scheduler.service.js";
 
 const NOW = new Date("2026-07-16T12:00:00.000Z");
 const OWNER = "owner-synthetic";
@@ -453,31 +454,70 @@ describe("CalendarSyncService", () => {
     expect(transaction.calendarSource.updateMany).not.toHaveBeenCalled();
   });
 
-  it("marks daily full reconciliation without overwriting future backoff", async () => {
+  it("uses stable source slots for two sources owned by the same person", async () => {
     const { service, prisma } = harness();
-    const future = new Date("2026-07-16T12:10:00.000Z");
+    const first = { id: "source-1", slot: reconciliationSlot("source-1") };
+    const second = { id: "source-3", slot: reconciliationSlot("source-3") };
+    expect(first.slot).toBeLessThan(second.slot);
+    const now = new Date(Date.UTC(2026, 6, 16, 0, first.slot * 15, 0, 0));
+    const priorDay = Date.UTC(2026, 6, 15, 0, 0, 0, 0);
     prisma.calendarSource.findMany.mockResolvedValue([
       {
-        id: SOURCE,
+        id: first.id,
         ownerId: OWNER,
-        pendingSyncAt: future,
-        lastFullReconciledAt: new Date("2026-07-14T00:00:00.000Z"),
+        pendingSyncAt: null,
+        lastFullReconciledAt: new Date(priorDay + first.slot * 15 * 60 * 1000),
+      },
+      {
+        id: second.id,
+        ownerId: OWNER,
+        pendingSyncAt: null,
+        lastFullReconciledAt: new Date(priorDay + second.slot * 15 * 60 * 1000),
       },
     ]);
     prisma.calendarSource.updateMany.mockResolvedValue({ count: 1 });
-    const { createHash } = await import("node:crypto");
-    const slot =
-      createHash("sha256").update(OWNER).digest().readUInt32BE(0) % 96;
 
-    await service.markDailyReconciliation(NOW, slot);
+    await service.markDailyReconciliation(now, first.slot);
+
+    expect(prisma.calendarSource.updateMany).toHaveBeenCalledTimes(1);
+    expect(prisma.calendarSource.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: first.id, ownerId: OWNER }),
+      })
+    );
+  });
+
+  it("catches a missed source slot without overwriting future backoff", async () => {
+    const { service, prisma } = harness();
+    const source = Array.from({ length: 20 }, (_, index) => `missed-${index}`)
+      .map((id) => ({ id, slot: reconciliationSlot(id) }))
+      .find((candidate) => candidate.slot < 95)!;
+    const currentSlot = source.slot + 1;
+    const now = new Date(Date.UTC(2026, 6, 16, 0, currentSlot * 15, 0, 0));
+    const future = new Date(now.getTime() + 10 * 60 * 1000);
+    prisma.calendarSource.findMany.mockResolvedValue([
+      {
+        id: source.id,
+        ownerId: OWNER,
+        pendingSyncAt: future,
+        lastFullReconciledAt: new Date(
+          Date.UTC(2026, 6, 15, 0, source.slot * 15, 0, 0)
+        ),
+      },
+    ]);
+    prisma.calendarSource.updateMany.mockResolvedValue({ count: 1 });
+
+    await service.markDailyReconciliation(now, currentSlot);
 
     expect(prisma.calendarSource.updateMany).toHaveBeenCalledWith({
       where: {
-        id: SOURCE,
+        id: source.id,
         ownerId: OWNER,
         selected: true,
         pendingSyncAt: future,
-        lastFullReconciledAt: new Date("2026-07-14T00:00:00.000Z"),
+        lastFullReconciledAt: new Date(
+          Date.UTC(2026, 6, 15, 0, source.slot * 15, 0, 0)
+        ),
       },
       data: {
         fullSyncRequired: true,

@@ -16,10 +16,13 @@
 - Calendar-derived stays are removed on disconnect and no longer rebuilt from
   disconnected sources; local source selection remains authoritative across list
   refreshes.
+- Maintenance recovers far-future active watches stranded by a crash after
+  disconnect, deselection, or source removal. Daily reconciliation uses the
+  shared stable source-ID slot and catches earlier missed slots.
 
 ## Verification
 
-- `pnpm --filter @socos/api exec jest --runInBand src/modules/calendar`: 7 suites, 90 tests passed.
+- `pnpm --filter @socos/api exec jest --runInBand src/modules/calendar`: 7 suites, 93 tests passed.
 - `pnpm --filter @socos/api exec jest --runInBand src/modules/location/location-alias.service.spec.ts`: 1 suite, 6 tests passed.
 - `pnpm --filter @socos/api type:check`: passed.
 - `pnpm --filter @socos/api build`: passed.
