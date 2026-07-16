@@ -126,6 +126,7 @@ export class CalendarWatchService {
         if (activeConnection.count !== 1) {
           throw new Error("calendar_watch_target_stale");
         }
+        let targetPending: Date | null = null;
         if (targetType === "events") {
           const selectedSource = await tx.calendarSource.updateMany({
             where: {
@@ -139,6 +140,24 @@ export class CalendarWatchService {
           if (selectedSource.count !== 1) {
             throw new Error("calendar_watch_target_stale");
           }
+          const target = await tx.calendarSource.findFirst({
+            where: {
+              id: targetKey,
+              ownerId,
+              connectionId,
+              selected: true,
+            },
+            select: { pendingSyncAt: true },
+          });
+          if (!target) throw new Error("calendar_watch_target_stale");
+          targetPending = target.pendingSyncAt;
+        } else {
+          const target = await tx.googleCalendarConnection.findFirst({
+            where: { id: connectionId, ownerId, status: "active" },
+            select: { calendarListPendingAt: true },
+          });
+          if (!target) throw new Error("calendar_watch_target_stale");
+          targetPending = target.calendarListPendingAt;
         }
         await tx.calendarWatch.create({
           data: {
@@ -164,7 +183,9 @@ export class CalendarWatchService {
         if (targetType === "calendar_list") {
           await tx.googleCalendarConnection.updateMany({
             where: { id: connectionId, ownerId, status: "active" },
-            data: { calendarListPendingAt: advancePending(null, now) },
+            data: {
+              calendarListPendingAt: advancePending(targetPending, now),
+            },
           });
         } else {
           await tx.calendarSource.updateMany({
@@ -174,7 +195,7 @@ export class CalendarWatchService {
               connectionId,
               selected: true,
             },
-            data: { pendingSyncAt: advancePending(null, now) },
+            data: { pendingSyncAt: advancePending(targetPending, now) },
           });
         }
       });

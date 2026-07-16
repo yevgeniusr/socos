@@ -23,8 +23,14 @@ function harness() {
       updateMany: jest.fn(),
       findMany: jest.fn(),
     },
-    calendarSource: { findFirst: jest.fn(), updateMany: jest.fn() },
-    googleCalendarConnection: { findFirst: jest.fn(), updateMany: jest.fn() },
+    calendarSource: {
+      findFirst: jest.fn().mockResolvedValue({ pendingSyncAt: null }),
+      updateMany: jest.fn(),
+    },
+    googleCalendarConnection: {
+      findFirst: jest.fn().mockResolvedValue({ calendarListPendingAt: null }),
+      updateMany: jest.fn(),
+    },
   };
   const prisma = {
     calendarWatch: {
@@ -50,12 +56,10 @@ function harness() {
     authorize: jest.fn().mockResolvedValue({ accessToken: "access" }),
     listCalendars: jest.fn(),
     listEvents: jest.fn(),
-    watchCalendarList: jest
-      .fn()
-      .mockResolvedValue({
-        resourceId: "resource",
-        expiresAt: new Date("2026-07-23T12:00:00Z"),
-      }),
+    watchCalendarList: jest.fn().mockResolvedValue({
+      resourceId: "resource",
+      expiresAt: new Date("2026-07-23T12:00:00Z"),
+    }),
     watchEvents: jest.fn(),
     stopChannel: jest.fn(),
   };
@@ -121,6 +125,40 @@ describe("CalendarWatchService", () => {
     expect(enqueueOrder).toBeLessThan(stoppingOrder);
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(tx.calendarWatch.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("keeps a future target backoff monotonic when a new watch enqueues work", async () => {
+    const { service, prisma, tx } = harness();
+    const future = new Date("2026-07-16T12:10:00.000Z");
+    prisma.googleCalendarConnection.findFirst.mockResolvedValue({
+      id: "connection",
+      ownerId: "owner",
+      status: "active",
+      refreshTokenCiphertext: Buffer.from("r"),
+      refreshTokenIv: envelope.iv,
+      refreshTokenTag: envelope.tag,
+      refreshTokenKeyVersion: 1,
+    });
+    tx.googleCalendarConnection.updateMany.mockResolvedValue({ count: 1 });
+    tx.googleCalendarConnection.findFirst.mockResolvedValue({
+      calendarListPendingAt: future,
+    });
+    tx.calendarWatch.create.mockResolvedValue({ id: "watch-new" });
+    prisma.calendarWatch.updateMany.mockResolvedValue({ count: 0 });
+    prisma.calendarWatch.findMany.mockResolvedValue([]);
+
+    await service.createOrRenew(
+      "owner",
+      "connection",
+      "calendar_list",
+      "connection",
+      NOW
+    );
+
+    expect(tx.googleCalendarConnection.updateMany).toHaveBeenLastCalledWith({
+      where: { id: "connection", ownerId: "owner", status: "active" },
+      data: { calendarListPendingAt: new Date(future.getTime() + 1) },
+    });
   });
 
   it("stops a newly-created remote channel when durable persistence fails", async () => {

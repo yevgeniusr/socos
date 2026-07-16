@@ -12,9 +12,12 @@
 
 ## Verification
 
-- `pnpm --filter @socos/api exec jest --runInBand src/modules/calendar`: 7 suites, 75 tests passed.
+- `pnpm --filter @socos/api exec jest --runInBand src/modules/calendar`: 7 suites, 77 tests passed.
 - `pnpm --filter @socos/api type:check`: passed.
 - `pnpm --filter @socos/api build`: passed.
 - `git diff --check`: passed.
 
 All provider fixtures are synthetic. No production provider, token, calendar, location, or contact data was accessed or persisted locally.
+
+Post-commit race hardening preserves future retry generations during watch
+creation and releases sync leases without overwriting webhook-advanced work.

@@ -259,7 +259,7 @@ describe("CalendarSyncService", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           fullSyncRequired: true,
-          pendingSyncAt: NOW,
+          pendingSyncAt: new Date(NOW.getTime() + 1),
           syncLeaseUntil: null,
           syncTokenCiphertext: null,
           syncTokenIv: null,
@@ -302,6 +302,56 @@ describe("CalendarSyncService", () => {
     await service.runNextSource(NOW);
 
     expect(transaction.calendarEvent.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("releases a lease without overwriting a newer pending generation on failure", async () => {
+    const { service, prisma, google } = harness();
+    prisma.calendarSource.findFirst.mockResolvedValue({
+      id: SOURCE,
+      ownerId: OWNER,
+      connectionId: CONNECTION,
+      pendingSyncAt: NOW,
+      syncLeaseUntil: null,
+      fullSyncRequired: true,
+      syncTokenCiphertext: null,
+      externalIdCiphertext: Buffer.from("x"),
+      externalIdIv: envelope.iv,
+      externalIdTag: envelope.tag,
+      externalIdKeyVersion: 1,
+      connection: {
+        status: "active",
+        refreshTokenCiphertext: Buffer.from("r"),
+        refreshTokenIv: envelope.iv,
+        refreshTokenTag: envelope.tag,
+        refreshTokenKeyVersion: 1,
+      },
+    });
+    prisma.calendarSource.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 1 });
+    google.listEvents.mockRejectedValue({ code: 503 });
+
+    await service.runNextSource(NOW);
+
+    expect(prisma.calendarSource.updateMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: SOURCE,
+          ownerId: OWNER,
+          syncLeaseUntil: LEASE,
+          pendingSyncAt: NOW,
+        }),
+      })
+    );
+    expect(prisma.calendarSource.updateMany).toHaveBeenNthCalledWith(3, {
+      where: { id: SOURCE, ownerId: OWNER, syncLeaseUntil: LEASE },
+      data: {
+        syncLeaseUntil: null,
+        errorCode: "google_calendar_temporarily_unavailable",
+      },
+    });
   });
 
   it("marks daily full reconciliation without overwriting future backoff", async () => {

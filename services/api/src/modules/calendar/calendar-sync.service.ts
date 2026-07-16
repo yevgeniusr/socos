@@ -393,18 +393,7 @@ export class CalendarSyncService {
           });
         });
       } else {
-        await this.prisma.googleCalendarConnection.updateMany({
-          where: {
-            id: row.id,
-            ownerId: row.ownerId,
-            calendarListLeaseUntil: lease,
-          },
-          data: {
-            errorCode: TRANSIENT_ERROR,
-            calendarListLeaseUntil: null,
-            calendarListPendingAt: jittered(runNow),
-          },
-        });
+        await this.releaseCalendarListWithBackoff(row, lease, runNow);
       }
       return true;
     }
@@ -449,34 +438,9 @@ export class CalendarSyncService {
       if (!terminal) throw new Error("google_calendar_missing_terminal_token");
     } catch (error) {
       if (isGone(error)) {
-        await this.prisma.googleCalendarConnection.updateMany({
-          where: {
-            id: row.id,
-            ownerId: row.ownerId,
-            calendarListLeaseUntil: lease,
-          },
-          data: {
-            calendarListSyncTokenCiphertext: null,
-            calendarListSyncTokenIv: null,
-            calendarListSyncTokenTag: null,
-            calendarListSyncTokenKeyVersion: null,
-            calendarListPendingAt: runNow,
-            calendarListLeaseUntil: null,
-          },
-        });
+        await this.resetCalendarListGone(row, lease, runNow);
       } else {
-        await this.prisma.googleCalendarConnection.updateMany({
-          where: {
-            id: row.id,
-            ownerId: row.ownerId,
-            calendarListLeaseUntil: lease,
-          },
-          data: {
-            errorCode: TRANSIENT_ERROR,
-            calendarListPendingAt: jittered(runNow),
-            calendarListLeaseUntil: null,
-          },
-        });
+        await this.releaseCalendarListWithBackoff(row, lease, runNow);
       }
       return true;
     }
@@ -604,14 +568,15 @@ export class CalendarSyncService {
           runNow
         );
       else
-        await this.prisma.calendarSource.updateMany({
-          where: { id: row.id, ownerId: row.ownerId, syncLeaseUntil: lease },
-          data: {
-            syncLeaseUntil: null,
-            pendingSyncAt: jittered(runNow),
-            errorCode: TRANSIENT_ERROR,
+        await this.releaseSourceWithBackoff(
+          {
+            id: row.id,
+            ownerId: row.ownerId,
+            pendingSyncAt: row.pendingSyncAt,
+            lease,
           },
-        });
+          runNow
+        );
       return null;
     }
   }
@@ -844,6 +809,14 @@ export class CalendarSyncService {
         data: { syncLeaseUntil: claim.lease },
       });
       if (fenced.count !== 1) return;
+      const current = await tx.calendarSource.findFirst({
+        where: {
+          id: claim.id,
+          ownerId: claim.ownerId,
+          syncLeaseUntil: claim.lease,
+        },
+        select: { pendingSyncAt: true },
+      });
       const failedEvents = await tx.calendarEvent.findMany({
         where: { ownerId: claim.ownerId, sourceId: claim.id },
         select: { id: true },
@@ -872,7 +845,10 @@ export class CalendarSyncService {
           syncTokenTag: null,
           syncTokenKeyVersion: null,
           fullSyncRequired: true,
-          pendingSyncAt: now,
+          pendingSyncAt: advancePending(
+            current?.pendingSyncAt ?? claim.pendingSyncAt,
+            now
+          ),
           syncLeaseUntil: null,
           errorCode: null,
         },
@@ -905,20 +881,111 @@ export class CalendarSyncService {
   }
 
   private async releaseSourceWithBackoff(
-    claim: SourceClaim,
+    claim: Pick<SourceClaim, "id" | "ownerId" | "pendingSyncAt" | "lease">,
     now: Date
   ): Promise<void> {
-    await this.prisma.calendarSource.updateMany({
+    const released = await this.prisma.calendarSource.updateMany({
       where: {
         id: claim.id,
         ownerId: claim.ownerId,
         syncLeaseUntil: claim.lease,
+        pendingSyncAt: claim.pendingSyncAt,
       },
       data: {
         syncLeaseUntil: null,
         pendingSyncAt: jittered(now),
         errorCode: TRANSIENT_ERROR,
       },
+    });
+    if (released.count === 0) {
+      await this.prisma.calendarSource.updateMany({
+        where: {
+          id: claim.id,
+          ownerId: claim.ownerId,
+          syncLeaseUntil: claim.lease,
+        },
+        data: {
+          syncLeaseUntil: null,
+          errorCode: TRANSIENT_ERROR,
+        },
+      });
+    }
+  }
+
+  private async releaseCalendarListWithBackoff(
+    row: { id: string; ownerId: string; calendarListPendingAt: Date },
+    lease: Date,
+    now: Date
+  ): Promise<void> {
+    const released = await this.prisma.googleCalendarConnection.updateMany({
+      where: {
+        id: row.id,
+        ownerId: row.ownerId,
+        calendarListLeaseUntil: lease,
+        calendarListPendingAt: row.calendarListPendingAt,
+      },
+      data: {
+        errorCode: TRANSIENT_ERROR,
+        calendarListLeaseUntil: null,
+        calendarListPendingAt: jittered(now),
+      },
+    });
+    if (released.count === 0) {
+      await this.prisma.googleCalendarConnection.updateMany({
+        where: {
+          id: row.id,
+          ownerId: row.ownerId,
+          calendarListLeaseUntil: lease,
+        },
+        data: {
+          errorCode: TRANSIENT_ERROR,
+          calendarListLeaseUntil: null,
+        },
+      });
+    }
+  }
+
+  private async resetCalendarListGone(
+    row: { id: string; ownerId: string; calendarListPendingAt: Date },
+    lease: Date,
+    now: Date
+  ): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const fenced = await tx.googleCalendarConnection.updateMany({
+        where: {
+          id: row.id,
+          ownerId: row.ownerId,
+          calendarListLeaseUntil: lease,
+        },
+        data: { calendarListLeaseUntil: lease },
+      });
+      if (fenced.count !== 1) return;
+      const current = await tx.googleCalendarConnection.findFirst({
+        where: {
+          id: row.id,
+          ownerId: row.ownerId,
+          calendarListLeaseUntil: lease,
+        },
+        select: { calendarListPendingAt: true },
+      });
+      await tx.googleCalendarConnection.updateMany({
+        where: {
+          id: row.id,
+          ownerId: row.ownerId,
+          calendarListLeaseUntil: lease,
+        },
+        data: {
+          calendarListSyncTokenCiphertext: null,
+          calendarListSyncTokenIv: null,
+          calendarListSyncTokenTag: null,
+          calendarListSyncTokenKeyVersion: null,
+          calendarListPendingAt: advancePending(
+            current?.calendarListPendingAt ?? row.calendarListPendingAt,
+            now
+          ),
+          calendarListLeaseUntil: null,
+        },
+      });
     });
   }
 
@@ -1278,6 +1345,10 @@ function isInvalidGrant(error: unknown): boolean {
 
 function jittered(now: Date): Date {
   return new Date(now.getTime() + Math.floor(Math.random() * 15 * 60 * 1000));
+}
+
+function advancePending(current: Date | null, now: Date): Date {
+  return current && current >= now ? new Date(current.getTime() + 1) : now;
 }
 
 function sourceBucket(id: string): number {
