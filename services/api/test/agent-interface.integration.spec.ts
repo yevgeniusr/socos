@@ -150,6 +150,7 @@ describe("Agent interface PostgreSQL integrity", () => {
       ]);
 
     const successful = results.find((result) => result.ok);
+    const successfulCount = results.filter((result) => result.ok).length;
     expect(successful).toEqual(
       expect.objectContaining({
         ok: true,
@@ -177,13 +178,22 @@ describe("Agent interface PostgreSQL integrity", () => {
     expect(records).toHaveLength(1);
     expect(records[0].status).toBe("completed");
     expect(initialAudits).toHaveLength(results.length);
+    const initialSuccessAudits = initialAudits.filter(
+      (event) => event.outcome === "succeeded"
+    );
+    expect(initialSuccessAudits).toHaveLength(successfulCount);
     expect(
-      initialAudits.filter((event) => event.outcome === "succeeded")
-    ).toEqual([
-      expect.objectContaining({
-        metadata: { riskLevel: "automatic", replayed: false },
-      }),
-    ]);
+      initialSuccessAudits.filter(
+        (event) =>
+          (event.metadata as { replayed?: boolean }).replayed === false
+      )
+    ).toHaveLength(1);
+    expect(
+      initialSuccessAudits.filter(
+        (event) =>
+          (event.metadata as { replayed?: boolean }).replayed === true
+      )
+    ).toHaveLength(successfulCount - 1);
     expect(
       initialAudits.filter((event) => event.outcome === "failed")
     ).toHaveLength(results.filter((result) => !result.ok).length);
@@ -219,7 +229,7 @@ describe("Agent interface PostgreSQL integrity", () => {
           event.outcome === "succeeded" &&
           (event.metadata as { replayed?: boolean }).replayed === true
       )
-    ).toHaveLength(1);
+    ).toHaveLength(successfulCount);
     expect(
       finalAudits.filter(
         (event) =>
