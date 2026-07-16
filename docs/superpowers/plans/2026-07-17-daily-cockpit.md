@@ -432,8 +432,9 @@ Synthetic interception must prove:
 
 ```bash
 pnpm --filter @socos/web build
-pnpm --filter @socos/web start -- -p 3210
-SOCOS_E2E_BASE_URL=http://127.0.0.1:3210 \
+pnpm --filter @socos/web exec next start -p 3210
+E2E_BASE_URL=http://127.0.0.1:3210 \
+E2E_ALLOWED_HOSTS=127.0.0.1 \
   pnpm --filter @socos/web exec playwright test e2e/daily-cockpit.spec.ts
 ```
 
@@ -464,11 +465,11 @@ git commit -m "feat(web): make daily cockpit actionable"
 - Consumes: reviewed Tasks 1-4.
 - Produces: exact-SHA deployment and current handoff evidence.
 
-- [ ] **Step 1: Obtain independent task reviews**
+- [x] **Step 1: Obtain independent task reviews**
 
 After each task, give a fresh read-only reviewer the plan task, commit range, and relevant tests. Fix every Critical/Important finding test-first and require an explicit re-review verdict.
 
-- [ ] **Step 2: Run broad verification**
+- [x] **Step 2: Run broad verification**
 
 ```bash
 pnpm --filter @socos/api test -- --runInBand \
@@ -485,14 +486,20 @@ pnpm --filter @socos/web test
 pnpm --filter @socos/web type:check
 pnpm --filter @socos/web lint
 pnpm --filter @socos/web build
-node --test scripts/security-regression.test.mjs scripts/package-guards.test.mjs scripts/coolify-operations.test.mjs
+node --experimental-strip-types --test \
+  scripts/security-regression.test.mjs \
+  scripts/docker-packaging.test.mjs \
+  scripts/coolify-ops.test.mjs \
+  scripts/e2e-host-policy.test.mjs
 node scripts/security-regression.mjs
 git diff --check
 ```
 
-- [ ] **Step 3: Run the synthetic Betabots cohort**
+- [x] **Step 3: Run the synthetic Betabots cohort (gate failed; iteration required)**
 
 Use the Betabots skill with at least five research-weighted Yev-like personas covering low-energy day, professional networking, close-friend maintenance, important-date urgency, and approval skepticism. Bots use only the browser and synthetic intercepted or staging data. Fix repeated high-severity usability/trust defects, preserve unhappy stories, and rerun affected journeys.
+
+The valid real-backend run is `.betabots/runs/20260717-020626-daily-cockpit-real-postgres`: integrity verified with score cap 100, 5/5 sessions, 0 product/request/LLM failures, but median happiness 51, 1/5 journeys achieved, and 11/23 applicable signals observed. The release gate remains open pending the repeated context, action-semantics, reminder-prefill, and outcome-receipt fixes documented in `docs/ai-handoff-2026-07-17.md`, followed by a longer affected-journey rerun.
 
 - [ ] **Step 4: Push and deploy an exact reviewed SHA**
 

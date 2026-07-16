@@ -1,5 +1,7 @@
 # Socos Current-State Handoff - 2026-07-16
 
+> Historical deployment record. The current continuation source of truth is `docs/ai-handoff-2026-07-17.md`.
+
 This document is the source of truth for handing Socos to another AI. It records what is deployed, what exists only in the local checkout, what is actively being verified, and the order in which remaining work should be completed.
 
 ## Executive Summary
