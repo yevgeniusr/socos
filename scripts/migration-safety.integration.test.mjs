@@ -40,6 +40,10 @@ const eventBriefSnapshotsMigrationPath = resolve(
   root,
   "services/api/prisma/migrations/20260716170000_event_brief_snapshots/migration.sql",
 );
+const humanIdempotencyMigrationPath = resolve(
+  root,
+  "services/api/prisma/migrations/20260717190000_human_idempotency/migration.sql",
+);
 const expectedBriefTables = [
   "BriefBatch",
   "BriefItem",
@@ -1064,6 +1068,37 @@ test("event brief snapshot schema declares public event time and coarse city sna
   );
 });
 
+test("human idempotency schema declares its bounded owner-scoped persistence contract", () => {
+  const schema = readFileSync(
+    resolve(root, "services/api/prisma/schema.prisma"),
+    "utf8",
+  );
+  const migration = readFileSync(humanIdempotencyMigrationPath, "utf8");
+
+  assert.match(schema, /model HumanIdempotencyRecord \{/);
+  assert.match(migration, /CREATE TABLE "HumanIdempotencyRecord"/);
+  assert.match(
+    migration,
+    /CREATE UNIQUE INDEX "HumanIdempotencyRecord_ownerId_operation_idempotencyKey_key"/,
+  );
+  assert.match(
+    migration,
+    /CREATE INDEX "HumanIdempotencyRecord_expiresAt_idx"/,
+  );
+  assert.match(
+    migration,
+    /CONSTRAINT "HumanIdempotencyRecord_status_check" CHECK \("status" IN \('in_progress', 'completed'\)\)/,
+  );
+  assert.match(
+    migration,
+    /CONSTRAINT "HumanIdempotencyRecord_requestHash_check" CHECK \(char_length\("requestHash"\) = 64\)/,
+  );
+  assert.match(
+    migration,
+    /CONSTRAINT "HumanIdempotencyRecord_ownerId_fkey"[\s\S]*FOREIGN KEY \("ownerId"\) REFERENCES "User"\("id"\) ON DELETE CASCADE/,
+  );
+});
+
 if (!databaseUrl) {
   test(
     "migration safety integration requires TEST_DATABASE_URL",
@@ -1286,6 +1321,64 @@ if (!databaseUrl) {
         `missing or invalid constraint ${name}`,
       );
     }
+  }
+
+  async function assertHumanIdempotencySchema(client) {
+    assert.equal(
+      await tableExists(client, "HumanIdempotencyRecord"),
+      true,
+      "missing table HumanIdempotencyRecord",
+    );
+    const indexes = await client.query(
+      `SELECT indexname, indexdef FROM pg_indexes
+        WHERE schemaname = 'public' AND indexname = ANY($1::text[])`,
+      [[
+        "HumanIdempotencyRecord_ownerId_operation_idempotencyKey_key",
+        "HumanIdempotencyRecord_expiresAt_idx",
+      ]],
+    );
+    assert.deepEqual(
+      indexes.rows.map(({ indexname }) => indexname).sort(),
+      [
+        "HumanIdempotencyRecord_expiresAt_idx",
+        "HumanIdempotencyRecord_ownerId_operation_idempotencyKey_key",
+      ],
+    );
+    assert.match(
+      indexes.rows.find(({ indexname }) =>
+        indexname.endsWith("ownerId_operation_idempotencyKey_key"),
+      )?.indexdef ?? "",
+      /^CREATE UNIQUE INDEX /,
+    );
+
+    const constraints = await client.query(
+      `SELECT conname, pg_get_constraintdef(oid) AS definition
+         FROM pg_constraint
+        WHERE conname = ANY($1::text[])`,
+      [[
+        "HumanIdempotencyRecord_status_check",
+        "HumanIdempotencyRecord_requestHash_check",
+        "HumanIdempotencyRecord_ownerId_fkey",
+      ]],
+    );
+    const definitions = new Map(
+      constraints.rows.map(({ conname, definition }) => [
+        conname,
+        definition.replaceAll('"', ""),
+      ]),
+    );
+    assert.match(
+      definitions.get("HumanIdempotencyRecord_status_check") ?? "",
+      /status.*in_progress.*completed/,
+    );
+    assert.match(
+      definitions.get("HumanIdempotencyRecord_requestHash_check") ?? "",
+      /char_length\(requestHash\) = 64/,
+    );
+    assert.match(
+      definitions.get("HumanIdempotencyRecord_ownerId_fkey") ?? "",
+      /FOREIGN KEY \(ownerId\) REFERENCES User\(id\) ON UPDATE CASCADE ON DELETE CASCADE/,
+    );
   }
 
   async function assertCalendarLocationSchema(client) {
@@ -2635,6 +2728,8 @@ if (!databaseUrl) {
       await assertCalendarLocationSchema(client);
       await client.query(readFileSync(eventBriefSnapshotsMigrationPath, "utf8"));
       await assertEventBriefSnapshotSchema(client);
+      await client.query(readFileSync(humanIdempotencyMigrationPath, "utf8"));
+      await assertHumanIdempotencySchema(client);
 
       const after = await client.query(
         `SELECT
@@ -2717,6 +2812,7 @@ if (!databaseUrl) {
     await withClient(assertEventDiscoverySchema);
     await withClient(assertEventDiscoveryBehavior);
     await withClient(assertEventBriefSnapshotSchema);
+    await withClient(assertHumanIdempotencySchema);
 
     execFileSync(
       "pnpm",
@@ -2731,5 +2827,6 @@ if (!databaseUrl) {
     await withClient(assertCalendarLocationSchema);
     await withClient(assertEventDiscoverySchema);
     await withClient(assertEventBriefSnapshotSchema);
+    await withClient(assertHumanIdempotencySchema);
   });
 }

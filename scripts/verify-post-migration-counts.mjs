@@ -36,14 +36,15 @@ const eventDiscoveryTables = [
   'EventPreference',
   'EventSource',
 ];
+const humanIdempotencyTables = ['HumanIdempotencyRecord'];
 const introducedTableRollouts = [
   { migrationCount: 7, label: 'agent-interface tables', tables: agentInterfaceTables },
   { migrationCount: 8, label: 'calendar-location tables', tables: calendarLocationTables },
   { migrationCount: 9, label: 'event-discovery tables', tables: eventDiscoveryTables },
+  { migrationCount: 11, label: 'human-idempotency tables', tables: humanIdempotencyTables },
 ];
 const allowedNewTables = new Set([
   ...introducedTableRollouts.flatMap((rollout) => rollout.tables),
-  'HumanIdempotencyRecord',
 ]);
 
 if (!databaseUrl || !metadataPath) {
@@ -152,10 +153,6 @@ for (const table of expectedIntroducedTables) {
     valid &&= after.get(table) === 0;
     introducedEmptyTables++;
   }
-}
-if (!before.has('HumanIdempotencyRecord') && after.has('HumanIdempotencyRecord')) {
-  valid &&= after.get('HumanIdempotencyRecord') === 0;
-  introducedEmptyTables++;
 }
 valid &&= after.get('_prisma_migrations') === expectedMigrationCount;
 valid &&= beforeMigrationCount <= expectedMigrationCount;

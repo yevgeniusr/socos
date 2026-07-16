@@ -323,7 +323,7 @@ test('post-migration verifier supports a seven-migration upgrade and preserves c
   executable(
     bin,
     'psql',
-    `printf 'table_name\\trow_count\\nActionOutbox\\t1\\nActionProposal\\t2\\nAgentClient\\t3\\nAgentCredential\\t3\\nAgentIdempotencyRecord\\t4\\nApprovalGrant\\t1\\nCalendarEvent\\t0\\nCalendarSource\\t0\\nCalendarWatch\\t0\\nCityStay\\t0\\nContact\\t106\\nDMSceneResponse\\t2\\nDMSession\\t1\\nDerivedVisit\\t0\\nDiscoveredEvent\\t0\\nDungeonMasterScenario\\t3\\nEventPreference\\t0\\nEventSource\\t0\\nGoogleCalendarConnection\\t0\\nGoogleOAuthAttempt\\t0\\nLocationAlias\\t0\\nLocationDevice\\t0\\nLocationSample\\t0\\nMutationAuditEvent\\t8\\nPersonalDataDeletionAudit\\t0\\n_prisma_migrations\\t${expectedMigrationCount}\\n'`,
+    `printf 'table_name\\trow_count\\nActionOutbox\\t1\\nActionProposal\\t2\\nAgentClient\\t3\\nAgentCredential\\t3\\nAgentIdempotencyRecord\\t4\\nApprovalGrant\\t1\\nCalendarEvent\\t0\\nCalendarSource\\t0\\nCalendarWatch\\t0\\nCityStay\\t0\\nContact\\t106\\nDMSceneResponse\\t2\\nDMSession\\t1\\nDerivedVisit\\t0\\nDiscoveredEvent\\t0\\nDungeonMasterScenario\\t3\\nEventPreference\\t0\\nEventSource\\t0\\nGoogleCalendarConnection\\t0\\nGoogleOAuthAttempt\\t0\\nHumanIdempotencyRecord\\t0\\nLocationAlias\\t0\\nLocationDevice\\t0\\nLocationSample\\t0\\nMutationAuditEvent\\t8\\nPersonalDataDeletionAudit\\t0\\n_prisma_migrations\\t${expectedMigrationCount}\\n'`,
   );
 
   const result = run('scripts/verify-post-migration-counts.mjs', {
@@ -337,7 +337,7 @@ test('post-migration verifier supports a seven-migration upgrade and preserves c
   assert.equal(result.status, 0, result.stderr);
   assert.equal(
     result.stdout.trim(),
-    `migration_counts_status=preserved existing_tables=11 new_empty_tables=14 migrations=${expectedMigrationCount}`,
+    `migration_counts_status=preserved existing_tables=11 new_empty_tables=15 migrations=${expectedMigrationCount}`,
   );
 });
 
@@ -355,7 +355,7 @@ test('post-migration verifier supports an eight-migration upgrade with event tab
   executable(
     bin,
     'psql',
-    `printf 'table_name\\trow_count\\nActionOutbox\\t1\\nActionProposal\\t2\\nAgentClient\\t3\\nAgentCredential\\t3\\nAgentIdempotencyRecord\\t4\\nApprovalGrant\\t1\\nCalendarEvent\\t0\\nCalendarSource\\t0\\nCalendarWatch\\t0\\nCityStay\\t0\\nContact\\t106\\nDMSceneResponse\\t2\\nDMSession\\t1\\nDerivedVisit\\t0\\nDiscoveredEvent\\t0\\nDungeonMasterScenario\\t3\\nEventPreference\\t0\\nEventSource\\t0\\nGoogleCalendarConnection\\t0\\nGoogleOAuthAttempt\\t0\\nLocationAlias\\t0\\nLocationDevice\\t0\\nLocationSample\\t0\\nMutationAuditEvent\\t8\\nPersonalDataDeletionAudit\\t0\\n_prisma_migrations\\t${expectedMigrationCount}\\n'`,
+    `printf 'table_name\\trow_count\\nActionOutbox\\t1\\nActionProposal\\t2\\nAgentClient\\t3\\nAgentCredential\\t3\\nAgentIdempotencyRecord\\t4\\nApprovalGrant\\t1\\nCalendarEvent\\t0\\nCalendarSource\\t0\\nCalendarWatch\\t0\\nCityStay\\t0\\nContact\\t106\\nDMSceneResponse\\t2\\nDMSession\\t1\\nDerivedVisit\\t0\\nDiscoveredEvent\\t0\\nDungeonMasterScenario\\t3\\nEventPreference\\t0\\nEventSource\\t0\\nGoogleCalendarConnection\\t0\\nGoogleOAuthAttempt\\t0\\nHumanIdempotencyRecord\\t0\\nLocationAlias\\t0\\nLocationDevice\\t0\\nLocationSample\\t0\\nMutationAuditEvent\\t8\\nPersonalDataDeletionAudit\\t0\\n_prisma_migrations\\t${expectedMigrationCount}\\n'`,
   );
 
   const result = run('scripts/verify-post-migration-counts.mjs', {
@@ -369,7 +369,7 @@ test('post-migration verifier supports an eight-migration upgrade with event tab
   assert.equal(result.status, 0, result.stderr);
   assert.equal(
     result.stdout.trim(),
-    `migration_counts_status=preserved existing_tables=22 new_empty_tables=3 migrations=${expectedMigrationCount}`,
+    `migration_counts_status=preserved existing_tables=22 new_empty_tables=4 migrations=${expectedMigrationCount}`,
   );
 });
 
@@ -384,7 +384,7 @@ test('post-migration verifier supports a nine-migration upgrade before event-bri
   const metadata =
     'table_name\trow_count\nActionOutbox\t1\nActionProposal\t2\nAgentClient\t3\nAgentCredential\t3\nAgentIdempotencyRecord\t4\nApprovalGrant\t1\nCalendarEvent\t0\nCalendarSource\t0\nCalendarWatch\t0\nCityStay\t0\nContact\t106\nDMSceneResponse\t2\nDMSession\t1\nDerivedVisit\t0\nDiscoveredEvent\t0\nDungeonMasterScenario\t3\nEventPreference\t0\nEventSource\t0\nGoogleCalendarConnection\t0\nGoogleOAuthAttempt\t0\nLocationAlias\t0\nLocationDevice\t0\nLocationSample\t0\nMutationAuditEvent\t8\nPersonalDataDeletionAudit\t0\n_prisma_migrations\t9\n';
   const afterMetadata =
-    `table_name\trow_count\nActionOutbox\t1\nActionProposal\t2\nAgentClient\t3\nAgentCredential\t3\nAgentIdempotencyRecord\t4\nApprovalGrant\t1\nCalendarEvent\t0\nCalendarSource\t0\nCalendarWatch\t0\nCityStay\t0\nContact\t106\nDMSceneResponse\t2\nDMSession\t1\nDerivedVisit\t0\nDiscoveredEvent\t0\nDungeonMasterScenario\t3\nEventPreference\t0\nEventSource\t0\nGoogleCalendarConnection\t0\nGoogleOAuthAttempt\t0\nLocationAlias\t0\nLocationDevice\t0\nLocationSample\t0\nMutationAuditEvent\t8\nPersonalDataDeletionAudit\t0\n_prisma_migrations\t${expectedMigrationCount}\n`;
+    `table_name\trow_count\nActionOutbox\t1\nActionProposal\t2\nAgentClient\t3\nAgentCredential\t3\nAgentIdempotencyRecord\t4\nApprovalGrant\t1\nCalendarEvent\t0\nCalendarSource\t0\nCalendarWatch\t0\nCityStay\t0\nContact\t106\nDMSceneResponse\t2\nDMSession\t1\nDerivedVisit\t0\nDiscoveredEvent\t0\nDungeonMasterScenario\t3\nEventPreference\t0\nEventSource\t0\nGoogleCalendarConnection\t0\nGoogleOAuthAttempt\t0\nHumanIdempotencyRecord\t0\nLocationAlias\t0\nLocationDevice\t0\nLocationSample\t0\nMutationAuditEvent\t8\nPersonalDataDeletionAudit\t0\n_prisma_migrations\t${expectedMigrationCount}\n`;
   writeFileSync(before, metadata);
   executable(
     bin,
@@ -403,11 +403,11 @@ test('post-migration verifier supports a nine-migration upgrade before event-bri
   assert.equal(result.status, 0, result.stderr);
   assert.equal(
     result.stdout.trim(),
-    `migration_counts_status=preserved existing_tables=25 new_empty_tables=0 migrations=${expectedMigrationCount}`,
+    `migration_counts_status=preserved existing_tables=25 new_empty_tables=1 migrations=${expectedMigrationCount}`,
   );
 });
 
-test('post-migration verifier accepts current-to-current metadata without event-brief tables', () => {
+test('post-migration verifier preserves human idempotency rows current-to-current', () => {
   const dir = mkdtempSync(join(tmpdir(), 'socos-current-migration-test-'));
   const bin = join(dir, 'bin');
   execFileSync('mkdir', ['-p', bin]);
@@ -416,7 +416,7 @@ test('post-migration verifier accepts current-to-current metadata without event-
     .filter((name) => existsSync(resolve(root, 'services/api/prisma/migrations', name, 'migration.sql')))
     .length;
   const metadata =
-    `table_name\trow_count\nActionOutbox\t1\nActionProposal\t2\nAgentClient\t3\nAgentCredential\t3\nAgentIdempotencyRecord\t4\nApprovalGrant\t1\nCalendarEvent\t0\nCalendarSource\t0\nCalendarWatch\t0\nCityStay\t0\nContact\t106\nDMSceneResponse\t2\nDMSession\t1\nDerivedVisit\t0\nDiscoveredEvent\t0\nDungeonMasterScenario\t3\nEventPreference\t0\nEventSource\t0\nGoogleCalendarConnection\t0\nGoogleOAuthAttempt\t0\nLocationAlias\t0\nLocationDevice\t0\nLocationSample\t0\nMutationAuditEvent\t8\nPersonalDataDeletionAudit\t0\n_prisma_migrations\t${expectedMigrationCount}\n`;
+    `table_name\trow_count\nActionOutbox\t1\nActionProposal\t2\nAgentClient\t3\nAgentCredential\t3\nAgentIdempotencyRecord\t4\nApprovalGrant\t1\nCalendarEvent\t0\nCalendarSource\t0\nCalendarWatch\t0\nCityStay\t0\nContact\t106\nDMSceneResponse\t2\nDMSession\t1\nDerivedVisit\t0\nDiscoveredEvent\t0\nDungeonMasterScenario\t3\nEventPreference\t0\nEventSource\t0\nGoogleCalendarConnection\t0\nGoogleOAuthAttempt\t0\nHumanIdempotencyRecord\t3\nLocationAlias\t0\nLocationDevice\t0\nLocationSample\t0\nMutationAuditEvent\t8\nPersonalDataDeletionAudit\t0\n_prisma_migrations\t${expectedMigrationCount}\n`;
   writeFileSync(before, metadata);
   executable(bin, 'psql', `printf '${metadata.replaceAll('\n', '\\n')}'`);
 
@@ -431,8 +431,28 @@ test('post-migration verifier accepts current-to-current metadata without event-
   assert.equal(result.status, 0, result.stderr);
   assert.equal(
     result.stdout.trim(),
-    `migration_counts_status=preserved existing_tables=25 new_empty_tables=0 migrations=${expectedMigrationCount}`,
+    `migration_counts_status=preserved existing_tables=26 new_empty_tables=0 migrations=${expectedMigrationCount}`,
   );
+});
+
+test('post-migration verifier requires human idempotency metadata at the current baseline', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'socos-current-human-idempotency-test-'));
+  const before = join(dir, 'before.tsv');
+  const expectedMigrationCount = readdirSync(resolve(root, 'services/api/prisma/migrations'))
+    .filter((name) => existsSync(resolve(root, 'services/api/prisma/migrations', name, 'migration.sql')))
+    .length;
+  writeFileSync(
+    before,
+    `table_name\trow_count\nActionOutbox\t0\nActionProposal\t0\nAgentClient\t0\nAgentCredential\t0\nAgentIdempotencyRecord\t0\nApprovalGrant\t0\nCalendarEvent\t0\nCalendarSource\t0\nCalendarWatch\t0\nCityStay\t0\nContact\t1\nDerivedVisit\t0\nDiscoveredEvent\t0\nEventPreference\t0\nEventSource\t0\nGoogleCalendarConnection\t0\nGoogleOAuthAttempt\t0\nLocationAlias\t0\nLocationDevice\t0\nLocationSample\t0\nMutationAuditEvent\t0\nPersonalDataDeletionAudit\t0\n_prisma_migrations\t${expectedMigrationCount}\n`,
+  );
+
+  const result = run('scripts/verify-post-migration-counts.mjs', {
+    args: [before],
+    env: { DATABASE_URL: 'postgresql://example.invalid/socos' },
+  });
+
+  assert.equal(result.status, 65);
+  assert.match(result.stderr, /human-idempotency tables/);
 });
 
 test('post-migration verifier derives migration count and allows calendar location event tables', () => {
@@ -450,7 +470,7 @@ test('post-migration verifier derives migration count and allows calendar locati
   executable(
     bin,
     'psql',
-    `printf 'table_name\\trow_count\\nActionOutbox\\t1\\nActionProposal\\t2\\nAgentClient\\t3\\nAgentCredential\\t3\\nAgentIdempotencyRecord\\t4\\nApprovalGrant\\t1\\nCalendarEvent\\t0\\nCalendarSource\\t0\\nCalendarWatch\\t0\\nCityStay\\t0\\nContact\\t106\\nDMSceneResponse\\t2\\nDMSession\\t1\\nDerivedVisit\\t0\\nDiscoveredEvent\\t0\\nDungeonMasterScenario\\t3\\nEventPreference\\t0\\nEventSource\\t0\\nGoogleCalendarConnection\\t0\\nGoogleOAuthAttempt\\t0\\nLocationAlias\\t0\\nLocationDevice\\t0\\nLocationSample\\t0\\nMutationAuditEvent\\t8\\nPersonalDataDeletionAudit\\t0\\n_prisma_migrations\\t${expectedMigrationCount}\\n'`,
+    `printf 'table_name\\trow_count\\nActionOutbox\\t1\\nActionProposal\\t2\\nAgentClient\\t3\\nAgentCredential\\t3\\nAgentIdempotencyRecord\\t4\\nApprovalGrant\\t1\\nCalendarEvent\\t0\\nCalendarSource\\t0\\nCalendarWatch\\t0\\nCityStay\\t0\\nContact\\t106\\nDMSceneResponse\\t2\\nDMSession\\t1\\nDerivedVisit\\t0\\nDiscoveredEvent\\t0\\nDungeonMasterScenario\\t3\\nEventPreference\\t0\\nEventSource\\t0\\nGoogleCalendarConnection\\t0\\nGoogleOAuthAttempt\\t0\\nHumanIdempotencyRecord\\t0\\nLocationAlias\\t0\\nLocationDevice\\t0\\nLocationSample\\t0\\nMutationAuditEvent\\t8\\nPersonalDataDeletionAudit\\t0\\n_prisma_migrations\\t${expectedMigrationCount}\\n'`,
   );
 
   const result = run('scripts/verify-post-migration-counts.mjs', {
@@ -464,7 +484,7 @@ test('post-migration verifier derives migration count and allows calendar locati
   assert.equal(result.status, 0, result.stderr);
   assert.equal(
     result.stdout.trim(),
-    `migration_counts_status=preserved existing_tables=11 new_empty_tables=14 migrations=${expectedMigrationCount}`,
+    `migration_counts_status=preserved existing_tables=11 new_empty_tables=15 migrations=${expectedMigrationCount}`,
   );
 });
 

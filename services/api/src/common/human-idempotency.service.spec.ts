@@ -6,6 +6,7 @@ function harness() {
   let persisted: Record<string, unknown> | null = null;
   const tx = {
     $queryRaw: jest.fn().mockResolvedValue([{ acquired: 1 }]),
+    $executeRaw: jest.fn().mockResolvedValue(0),
     humanIdempotencyRecord: {
       findUnique: jest
         .fn()
@@ -24,6 +25,7 @@ function harness() {
     $transaction: jest.fn().mockImplementation((callback) => callback(tx)),
   };
   return {
+    prisma,
     service: new HumanIdempotencyService(prisma as unknown as PrismaService),
     tx,
   };
@@ -81,7 +83,7 @@ describe("HumanIdempotencyService", () => {
   });
 
   it("does not replay the same owner operation and key for a different request", async () => {
-    const { service } = harness();
+    const { prisma, service } = harness();
     await service.execute(
       "owner-synthetic",
       "reminder:create",
@@ -99,5 +101,70 @@ describe("HumanIdempotencyService", () => {
         async () => ({ id: "duplicate" })
       )
     ).rejects.toBeInstanceOf(ConflictException);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["P2002", "P2034"])(
+    "opens a fresh transaction after %s and replays the committed winner",
+    async (code) => {
+      const { prisma, service } = harness();
+      const execute = jest.fn().mockResolvedValue({ id: "winner-response" });
+      await service.execute(
+        "owner-synthetic",
+        "reminder:create",
+        "intent-key-retry-winner",
+        { title: "Same request" },
+        execute
+      );
+      prisma.$transaction.mockRejectedValueOnce({ code });
+
+      await expect(
+        service.execute(
+          "owner-synthetic",
+          "reminder:create",
+          "intent-key-retry-winner",
+          { title: "Same request" },
+          execute
+        )
+      ).resolves.toEqual({
+        value: { id: "winner-response" },
+        replayed: true,
+      });
+      expect(prisma.$transaction).toHaveBeenCalledTimes(3);
+      expect(execute).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it.each(["P2002", "P2034"])(
+    "stops after three fresh transactions when %s persists",
+    async (code) => {
+      const { prisma, service } = harness();
+      prisma.$transaction.mockRejectedValue({ code });
+
+      await expect(
+        service.execute(
+          "owner-synthetic",
+          "reminder:create",
+          "intent-key-retry-bound",
+          { title: "Same request" },
+          async () => ({ id: "never-created" })
+        )
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.$transaction).toHaveBeenCalledTimes(3);
+    }
+  );
+
+  it("runs bounded expired-record cleanup without targeting active records", async () => {
+    const { service, tx } = harness();
+
+    await service.execute(
+      "owner-synthetic",
+      "reminder:create",
+      "intent-key-cleanup-001",
+      { title: "Cleanup trigger" },
+      async () => ({ id: "reminder-synthetic" })
+    );
+
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
   });
 });
