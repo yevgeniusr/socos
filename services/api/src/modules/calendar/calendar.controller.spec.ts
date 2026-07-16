@@ -10,6 +10,7 @@ import type { PersonalDataIndexService } from "../personal-data/personal-data-in
 import {
   CalendarConnectionController,
   GoogleCalendarCallbackController,
+  GoogleCalendarWebhookController,
 } from "./calendar.controller.js";
 import {
   ConnectCalendarDto,
@@ -32,6 +33,8 @@ function harness(calendarFlag: unknown = "true") {
     }),
     summary: jest.fn(),
     disconnect: jest.fn(),
+    listSources: jest.fn(),
+    updateSource: jest.fn(),
     handleCallback: jest.fn().mockResolvedValue("connected"),
     callbackResultUrl: jest
       .fn()
@@ -59,6 +62,12 @@ function harness(calendarFlag: unknown = "true") {
       connections as unknown as CalendarConnectionService,
       config
     ),
+    webhook: new GoogleCalendarWebhookController(
+      {
+        handleWebhook: jest.fn().mockResolvedValue("accepted"),
+      } as never,
+      config
+    ),
   };
 }
 
@@ -76,6 +85,15 @@ describe("calendar controller boundaries", () => {
     expect(
       Reflect.getMetadata(PATH_METADATA, CalendarConnectionController)
     ).toBe("integrations/google-calendar");
+    expect(
+      Reflect.getMetadata(PATH_METADATA, GoogleCalendarWebhookController)
+    ).toBe("integrations/google-calendar");
+    expect(
+      Reflect.getMetadata(
+        PATH_METADATA,
+        GoogleCalendarWebhookController.prototype.webhook
+      )
+    ).toBe("webhook");
     expect(
       Reflect.getMetadata(
         PATH_METADATA,

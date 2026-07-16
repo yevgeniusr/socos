@@ -5,6 +5,7 @@ import { CalendarConnectionService } from "./calendar-connection.service.js";
 import {
   CalendarConnectionController,
   GoogleCalendarCallbackController,
+  GoogleCalendarWebhookController,
 } from "./calendar.controller.js";
 import { CalendarModule } from "./calendar.module.js";
 import {
@@ -24,6 +25,7 @@ describe("CalendarModule composition", () => {
     expect(controllers).toEqual([
       CalendarConnectionController,
       GoogleCalendarCallbackController,
+      GoogleCalendarWebhookController,
     ]);
   });
 

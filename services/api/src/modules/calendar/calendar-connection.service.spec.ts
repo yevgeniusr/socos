@@ -10,6 +10,7 @@ import {
   GoogleOAuthExchangeError,
   type GoogleOAuthService,
 } from "./google-oauth.service.js";
+import type { CalendarWatchService } from "./calendar-watch.service.js";
 
 const OWNER_ID = "owner-synthetic";
 const OTHER_OWNER_ID = "owner-other";
@@ -29,7 +30,10 @@ function harness() {
       findUnique: jest.fn(),
       create: jest.fn(),
       updateMany: jest.fn(),
+      deleteMany: jest.fn(),
     },
+    calendarSource: { findMany: jest.fn(), updateMany: jest.fn() },
+    calendarWatch: { count: jest.fn() },
   };
   const cipher = { encrypt: jest.fn().mockReturnValue(REFRESH_ENVELOPE) };
   const config = { requireEnabled: jest.fn() };
@@ -52,14 +56,19 @@ function harness() {
       .mockReturnValue("https://socos.example.test/settings"),
   };
   const idGenerator = jest.fn().mockReturnValue(CONNECTION_ID);
+  const watches = {
+    prepareOwnerStops: jest.fn().mockResolvedValue([]),
+    stopPreparedBestEffort: jest.fn().mockResolvedValue(undefined),
+  };
   const service = new CalendarConnectionService(
     prisma as unknown as PrismaService,
     cipher as unknown as PersonalDataCipherService,
     config as unknown as PersonalDataConfigService,
     oauth as unknown as GoogleOAuthService,
-    idGenerator as CalendarIdGenerator
+    idGenerator as CalendarIdGenerator,
+    watches as unknown as CalendarWatchService
   );
-  return { service, prisma, cipher, config, oauth, idGenerator };
+  return { service, prisma, cipher, config, oauth, idGenerator, watches };
 }
 
 describe("CalendarConnectionService", () => {
@@ -104,6 +113,7 @@ describe("CalendarConnectionService", () => {
         grantedScopes: GOOGLE_CALENDAR_SCOPES,
         status: "active",
         errorCode: null,
+        calendarListPendingAt: expect.any(Date),
       },
       select: { id: true },
     });
@@ -166,6 +176,7 @@ describe("CalendarConnectionService", () => {
         grantedScopes: GOOGLE_CALENDAR_SCOPES,
         status: "active",
         errorCode: null,
+        calendarListPendingAt: expect.any(Date),
       },
     });
   });
@@ -238,7 +249,15 @@ describe("CalendarConnectionService", () => {
         updatedAt: EXPECTED_UPDATED_AT,
         status: "active",
       },
-      data: { status: "needs_reauth", errorCode: "google_invalid_grant" },
+      data: {
+        status: "needs_reauth",
+        errorCode: "google_invalid_grant",
+        calendarListLeaseUntil: null,
+      },
+    });
+    expect(prisma.calendarSource.updateMany).toHaveBeenCalledWith({
+      where: { ownerId: OWNER_ID, connectionId: CONNECTION_ID },
+      data: { syncLeaseUntil: null, errorCode: "google_invalid_grant" },
     });
   });
 
@@ -286,15 +305,25 @@ describe("CalendarConnectionService", () => {
     expect(summary).not.toHaveProperty("refreshTokenCiphertext");
   });
 
-  it("disconnects by owner only and is idempotent without deleting children or tokens", async () => {
-    const { service, prisma } = harness();
-    prisma.googleCalendarConnection.updateMany.mockResolvedValue({ count: 0 });
+  it("disconnects, stops prepared watches, and deletes only after no watch remains", async () => {
+    const { service, prisma, watches } = harness();
+    prisma.googleCalendarConnection.updateMany.mockResolvedValue({ count: 1 });
+    prisma.calendarWatch.count.mockResolvedValue(0);
 
     await expect(service.disconnect(OWNER_ID)).resolves.toBeUndefined();
 
     expect(prisma.googleCalendarConnection.updateMany).toHaveBeenCalledWith({
       where: { ownerId: OWNER_ID, status: { not: "disconnected" } },
-      data: { status: "disconnected" },
+      data: { status: "disconnected", calendarListLeaseUntil: null },
+    });
+    expect(watches.prepareOwnerStops).toHaveBeenCalledWith(OWNER_ID);
+    expect(watches.stopPreparedBestEffort).toHaveBeenCalledWith([]);
+    expect(prisma.googleCalendarConnection.deleteMany).toHaveBeenCalledWith({
+      where: {
+        ownerId: OWNER_ID,
+        status: "disconnected",
+        watches: { none: {} },
+      },
     });
     expect(
       JSON.stringify(prisma.googleCalendarConnection.updateMany.mock.calls)

@@ -1,8 +1,13 @@
-import { Equals } from "class-validator";
+import { Equals, IsBoolean } from "class-validator";
 
 export class ConnectCalendarDto {
   @Equals(undefined)
   readonly _requestContract?: never;
+}
+
+export class UpdateCalendarSourceDto {
+  @IsBoolean()
+  readonly selected!: boolean;
 }
 
 export type AuthenticatedCalendarRequest = { user: { userId: string } };

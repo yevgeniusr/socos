@@ -5,6 +5,8 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Param,
+  Patch,
   Post,
   Request,
   Req,
@@ -19,8 +21,13 @@ import { CalendarConnectionService } from "./calendar-connection.service.js";
 import {
   type AuthenticatedCalendarRequest,
   ConnectCalendarDto,
+  UpdateCalendarSourceDto,
   parseGoogleOAuthCallbackQuery,
 } from "./calendar.dto.js";
+import {
+  CalendarWatchService,
+  parseWebhookHeaders,
+} from "./calendar-watch.service.js";
 
 @ApiTags("calendar-connection")
 @ApiBearerAuth()
@@ -42,10 +49,46 @@ export class CalendarConnectionController {
     return this.connections.summary(request.user.userId);
   }
 
+  @Get("sources")
+  sources(@Request() request: AuthenticatedCalendarRequest) {
+    return this.connections.listSources(request.user.userId);
+  }
+
+  @Patch("sources/:sourceId")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  updateSource(
+    @Request() request: AuthenticatedCalendarRequest,
+    @Param("sourceId") sourceId: string,
+    @Body() input: UpdateCalendarSourceDto
+  ): Promise<void> {
+    return this.connections.updateSource(request.user.userId, sourceId, input);
+  }
+
   @Delete()
   @HttpCode(HttpStatus.NO_CONTENT)
   disconnect(@Request() request: AuthenticatedCalendarRequest): Promise<void> {
     return this.connections.disconnect(request.user.userId);
+  }
+}
+
+@ApiTags("calendar-webhook")
+@Controller("integrations/google-calendar")
+export class GoogleCalendarWebhookController {
+  constructor(
+    private readonly watches: CalendarWatchService,
+    private readonly config: PersonalDataConfigService
+  ) {}
+
+  @Post("webhook")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async webhook(
+    @Req() request: Pick<ExpressRequest, "headers">
+  ): Promise<void> {
+    this.config.requireEnabled("calendarSync");
+    const input = parseWebhookHeaders(
+      request.headers as Record<string, string | string[] | undefined>
+    );
+    await this.watches.handleWebhook(input);
   }
 }
 
