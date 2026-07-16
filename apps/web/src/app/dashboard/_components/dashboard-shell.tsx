@@ -71,21 +71,15 @@ function SymbolIcon({
   );
 }
 
-function XpBar({
-  user,
-  stats,
-}: {
-  user: StoredUser | null;
-  stats: Stats | null;
-}) {
-  const progress = stats?.xpProgress ?? 0;
-  const needed = stats?.xpNeeded ?? 100;
+function XpBar({ user, stats }: { user: StoredUser; stats: Stats }) {
+  const progress = stats.xpProgress;
+  const needed = stats.xpNeeded;
   const percent = needed > 0 ? Math.min((progress / needed) * 100, 100) : 0;
 
   return (
     <div className="space-y-1.5">
       <div className="flex justify-between text-[10px] font-bold uppercase text-on-surface-variant">
-        <span className="text-secondary">Level {user?.level ?? 1}</span>
+        <span className="text-secondary">Level {user.level}</span>
         <span>
           {progress} / {needed} XP
         </span>
@@ -136,7 +130,9 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
   const [authenticated, setAuthenticated] = useState(false);
   const [user, setUser] = useState<StoredUser | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
-  const [statsStatus, setStatsStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [statsStatus, setStatsStatus] = useState<"loading" | "ready" | "error">(
+    "loading"
+  );
   const [upcomingCount, setUpcomingCount] = useState(0);
   const [toast, setToast] = useState<{
     message: string;
@@ -235,6 +231,7 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
     { label: "Gamification", icon: "military_tech", disabled: true },
     { label: "Settings", icon: "settings", disabled: true },
   ];
+  const statsReady = statsStatus === "ready" && user !== null && stats !== null;
 
   return (
     <DashboardContext.Provider value={contextValue}>
@@ -286,15 +283,22 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
                   {user?.name ?? "Account"}
                 </p>
                 <p className="text-[10px] text-on-surface-variant">
-                  {stats?.levelName ?? "Social Novice"} / {upcomingCount}{" "}
-                  reminders
+                  {statsStatus === "loading"
+                    ? "Momentum loading..."
+                    : statsReady
+                      ? `${stats.levelName} / ${upcomingCount} reminders`
+                      : "Momentum unavailable."}
                 </p>
               </div>
             </div>
-            <XpBar user={user} stats={stats} />
-            <p className="mt-2 text-center text-[10px] text-on-surface-variant">
-              {stats?.totalContacts ?? 0} contacts / {user?.xp ?? 0} XP
-            </p>
+            {statsReady ? (
+              <>
+                <XpBar user={user} stats={stats} />
+                <p className="mt-2 text-center text-[10px] text-on-surface-variant">
+                  {stats.totalContacts} contacts / {user.xp} XP
+                </p>
+              </>
+            ) : null}
             <button
               type="button"
               onClick={() => void handleLogout()}
@@ -308,15 +312,16 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
 
         <div className="min-w-0 flex-1">
           <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-outline-variant/20 bg-surface/95 px-4 backdrop-blur lg:hidden">
-            <Link
-              href="/dashboard/today"
-              className="font-black text-primary"
-            >
+            <Link href="/dashboard/today" className="font-black text-primary">
               SOCOS
             </Link>
             <div className="flex items-center gap-1">
               <span className="mr-1 text-xs text-on-surface-variant">
-                Lv {user?.level ?? 1}
+                {statsStatus === "loading"
+                  ? "Stats loading"
+                  : statsReady
+                    ? `Lv ${user.level}`
+                    : "Stats unavailable"}
               </span>
               <button
                 type="button"

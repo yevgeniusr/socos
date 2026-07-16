@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
+
 import { apiJson } from "@/lib/api-client";
 import type { DailyBrief, QuestAction } from "@/lib/cockpit-contracts";
+import { getFocusLoopTarget } from "../../contacts/_components/dialog-focus";
 import { IntentRegistry } from "../intent-registry";
 
 type Quest = DailyBrief["quests"][number];
@@ -36,6 +38,7 @@ export default function QuestCompletionDialog({
   const [occurredAt, setOccurredAt] = useState(localNow());
   const [evidenceId, setEvidenceId] = useState<string | null>(null);
   const registry = useRef(new IntentRegistry());
+  const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -62,8 +65,31 @@ export default function QuestCompletionDialog({
 
   useEffect(() => {
     closeRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !busy) onClose();
+      if (event.key === "Escape") {
+        if (!busy) {
+          event.preventDefault();
+          onClose();
+        }
+        return;
+      }
+      if (event.key !== "Tab" || !dialogRef.current) return;
+      const controls = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      );
+      const target = getFocusLoopTarget(
+        controls,
+        document.activeElement,
+        event.shiftKey
+      );
+      if (!target) return;
+      event.preventDefault();
+      target.focus();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -130,12 +156,19 @@ export default function QuestCompletionDialog({
     try {
       let id = evidenceId;
       if (!id) {
-        if (action.reminder.status === "pending")
+        const latest = await apiJson<QuestAction>(
+          `/api/briefs/quests/${encodeURIComponent(quest.questId)}/action`
+        );
+        if (latest.completionType !== "reminder") {
+          throw new Error("Quest reminder target is unavailable.");
+        }
+        setAction(latest);
+        if (latest.reminder.status === "pending")
           await apiJson(
-            `/api/reminders/${encodeURIComponent(action.reminder.id)}/complete`,
+            `/api/reminders/${encodeURIComponent(latest.reminder.id)}/complete`,
             { method: "PUT" }
           );
-        id = action.reminder.id;
+        id = latest.reminder.id;
         setEvidenceId(id);
       }
       await completeQuest(id);
@@ -161,6 +194,7 @@ export default function QuestCompletionDialog({
       className="fixed inset-0 z-[70] flex items-end justify-center bg-black/70 p-3 sm:items-center"
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="quest-dialog-title"

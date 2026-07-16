@@ -95,7 +95,19 @@ export default function DailyCockpit() {
   const [selectedQuest, setSelectedQuest] = useState<
     DailyBrief["quests"][number] | null
   >(null);
+  const reminderTriggerRef = useRef<HTMLButtonElement>(null);
+  const questTriggerRef = useRef<HTMLButtonElement>(null);
   const intents = useRef(new IntentRegistry());
+
+  const closeReminderDialog = useCallback(() => {
+    setReminderContact(null);
+    window.requestAnimationFrame(() => reminderTriggerRef.current?.focus());
+  }, []);
+
+  const closeQuestDialog = useCallback(() => {
+    setSelectedQuest(null);
+    window.requestAnimationFrame(() => questTriggerRef.current?.focus());
+  }, []);
 
   const loadBrief = useCallback((signal?: AbortSignal, preserve = false) => {
     if (!preserve) setBrief({ status: "loading" });
@@ -232,7 +244,7 @@ export default function DailyCockpit() {
         method: "PUT",
       });
       loadReminders(undefined, true);
-      await refreshUpcomingReminders();
+      void refreshUpcomingReminders().catch(() => undefined);
     } catch (reason) {
       setReminderErrors((current) => ({
         ...current,
@@ -333,12 +345,10 @@ export default function DailyCockpit() {
               busyItemId={busyItemId}
               itemErrors={itemErrors}
               onKeep={(itemId) => submitFeedback(itemId, { action: "accept" })}
-              onSnooze={(itemId, hours) =>
+              onSnooze={(itemId, snoozedUntil) =>
                 submitFeedback(itemId, {
                   action: "snooze",
-                  snoozedUntil: new Date(
-                    Date.now() + hours * 60 * 60 * 1000
-                  ).toISOString(),
+                  snoozedUntil,
                 })
               }
               onDismiss={(itemId, reason) =>
@@ -347,7 +357,10 @@ export default function DailyCockpit() {
                   reason ? { action: "dismiss", reason } : { action: "dismiss" }
                 )
               }
-              onReminder={setReminderContact}
+              onReminder={(contact, trigger) => {
+                reminderTriggerRef.current = trigger;
+                setReminderContact(contact);
+              }}
             />
           ) : null}
         </div>
@@ -381,7 +394,13 @@ export default function DailyCockpit() {
             />
           ) : null}
           {brief.status === "ready" ? (
-            <QuestList quests={brief.data.quests} onOpen={setSelectedQuest} />
+            <QuestList
+              quests={brief.data.quests}
+              onOpen={(quest, trigger) => {
+                questTriggerRef.current = trigger;
+                setSelectedQuest(quest);
+              }}
+            />
           ) : null}
           {reminders.status === "loading" ? (
             <LoadingLines label="Loading reminders" />
@@ -441,7 +460,7 @@ export default function DailyCockpit() {
       {reminderContact ? (
         <ReminderDialog
           contact={reminderContact}
-          onClose={() => setReminderContact(null)}
+          onClose={closeReminderDialog}
           onSuccess={async () => {
             loadReminders();
             await refreshUpcomingReminders();
@@ -451,7 +470,7 @@ export default function DailyCockpit() {
       {selectedQuest ? (
         <QuestCompletionDialog
           quest={selectedQuest}
-          onClose={() => setSelectedQuest(null)}
+          onClose={closeQuestDialog}
           onSuccess={refreshQuestData}
         />
       ) : null}

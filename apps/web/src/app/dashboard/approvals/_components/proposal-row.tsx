@@ -70,6 +70,10 @@ export default function ProposalRow({
   onApprove: (id: string) => Promise<void>;
   onReject: (id: string) => Promise<void>;
 }) {
+  const reviewable =
+    proposal.status === "pending" &&
+    proposal.actionType !== "unavailable" &&
+    proposal.preview.type !== "unavailable";
   return (
     <li className="rounded-lg border border-outline-variant/30 bg-surface-container-low p-4">
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
@@ -128,7 +132,7 @@ export default function ProposalRow({
           </>
         ) : null}
       </div>
-      {proposal.status === "pending" ? (
+      {reviewable ? (
         <div className="mt-4 flex flex-wrap gap-2">
           <button
             type="button"
@@ -147,6 +151,11 @@ export default function ProposalRow({
             Reject
           </button>
         </div>
+      ) : null}
+      {proposal.status === "pending" && !reviewable ? (
+        <p className="mt-4 text-sm font-bold text-error">
+          This proposal cannot be reviewed or approved.
+        </p>
       ) : null}
       {error ? (
         <p role="alert" className="mt-3 text-sm text-error">

@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
+
 import { apiJson } from "@/lib/api-client";
+import { getFocusLoopTarget } from "../../contacts/_components/dialog-focus";
 
 function tomorrowLocal() {
   const date = new Date();
@@ -25,11 +27,36 @@ export default function ReminderDialog({
   const [scheduledAt, setScheduledAt] = useState(tomorrowLocal());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const dialogRef = useRef<HTMLFormElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+
   useEffect(() => {
     closeRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !busy) onClose();
+      if (event.key === "Escape") {
+        if (!busy) {
+          event.preventDefault();
+          onClose();
+        }
+        return;
+      }
+      if (event.key !== "Tab" || !dialogRef.current) return;
+      const controls = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      );
+      const target = getFocusLoopTarget(
+        controls,
+        document.activeElement,
+        event.shiftKey
+      );
+      if (!target) return;
+      event.preventDefault();
+      target.focus();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -48,8 +75,8 @@ export default function ReminderDialog({
           scheduledAt: new Date(scheduledAt).toISOString(),
         }),
       });
-      await onSuccess();
       onClose();
+      void onSuccess().catch(() => undefined);
     } catch (reason) {
       setError(
         reason instanceof Error ? reason.message : "Could not create reminder."
@@ -67,6 +94,7 @@ export default function ReminderDialog({
       className="fixed inset-0 z-[70] flex items-end justify-center bg-black/70 p-3 sm:items-center"
     >
       <form
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="reminder-title"

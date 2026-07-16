@@ -98,27 +98,64 @@ interface ApiState {
   interactionBodies: Array<Record<string, unknown>>;
   questBodies: Array<Record<string, unknown>>;
   completedReminders: string[];
+  reminderQuestCompletionCalls: number;
   decisions: string[];
   failFirstKeep: boolean;
+  failFirstSnooze: boolean;
   reminderBodies: Array<Record<string, unknown>>;
   generateCalls: number;
+  releaseFeedback: () => void;
+  releaseQuestComplete: () => void;
+  releaseReminderCreate: () => void;
+  releaseStats: () => void;
 }
 
 async function installApi(
   page: Page,
-  options: { briefReady?: boolean; failApprovals?: boolean } = {}
+  options: {
+    briefReady?: boolean;
+    failApprovals?: boolean;
+    holdFeedback?: boolean;
+    holdQuestComplete?: boolean;
+    holdReminderCreate?: boolean;
+    loseFirstReminderQuestResponse?: boolean;
+    statsMode?: "ready" | "deferred-error";
+  } = {}
 ): Promise<ApiState> {
+  let releaseFeedback: () => void = () => undefined;
+  const feedbackGate = new Promise<void>((resolve) => {
+    releaseFeedback = resolve;
+  });
+  let releaseQuestComplete: () => void = () => undefined;
+  const questCompleteGate = new Promise<void>((resolve) => {
+    releaseQuestComplete = resolve;
+  });
+  let releaseReminderCreate: () => void = () => undefined;
+  const reminderCreateGate = new Promise<void>((resolve) => {
+    releaseReminderCreate = resolve;
+  });
+  let releaseStats: () => void = () => undefined;
+  const statsGate = new Promise<void>((resolve) => {
+    releaseStats = resolve;
+  });
   const state: ApiState = {
     feedback: [],
     interactionBodies: [],
     questBodies: [],
     completedReminders: [],
+    reminderQuestCompletionCalls: 0,
     decisions: [],
     failFirstKeep: true,
+    failFirstSnooze: true,
     reminderBodies: [],
     generateCalls: 0,
+    releaseFeedback,
+    releaseQuestComplete,
+    releaseReminderCreate,
+    releaseStats,
   };
   let briefReady = options.briefReady ?? true;
+  let reminderQuestCompleted = false;
   let proposals: ProposalHistoryResponse["proposals"] = [
     {
       id: "proposal-approve",
@@ -170,7 +207,11 @@ async function installApi(
     const request = route.request();
     const url = new URL(request.url());
     const method = request.method();
-    if (url.pathname === "/api/gamification/stats")
+    if (url.pathname === "/api/gamification/stats") {
+      if (options.statsMode === "deferred-error") {
+        await statsGate;
+        return json(route, { message: "Synthetic stats failure" }, 503);
+      }
       return json(route, {
         user: {
           id: "owner-synthetic",
@@ -187,6 +228,7 @@ async function installApi(
           levelName: "Connector",
         },
       });
+    }
     if (url.pathname === "/api/gamification/streak")
       return json(route, {
         streakDays: 4,
@@ -250,6 +292,7 @@ async function installApi(
       state.reminderBodies.push(
         request.postDataJSON() as Record<string, unknown>
       );
+      if (options.holdReminderCreate) await reminderCreateGate;
       return json(route, { id: "created-reminder" });
     }
     const feedback = url.pathname.match(
@@ -261,9 +304,16 @@ async function installApi(
         key: request.headers()["idempotency-key"] ?? "",
       };
       state.feedback.push(entry);
+      if (options.holdFeedback && entry.body.action === "dismiss") {
+        await feedbackGate;
+      }
       if (entry.body.action === "accept" && state.failFirstKeep) {
         state.failFirstKeep = false;
         return json(route, { message: "Synthetic retry" }, 503);
+      }
+      if (entry.body.action === "snooze" && state.failFirstSnooze) {
+        state.failFirstSnooze = false;
+        return json(route, { message: "Synthetic snooze retry" }, 503);
       }
       return json(route, {
         feedbackId: "feedback-synthetic",
@@ -287,7 +337,7 @@ async function installApi(
           id: "quest-reminder-target",
           title: "Synthetic target reminder",
           scheduledAt: "2026-07-18T10:00:00.000Z",
-          status: "pending",
+          status: reminderQuestCompleted ? "completed" : "pending",
         },
       });
     if (
@@ -304,6 +354,7 @@ async function installApi(
     );
     if (questComplete && method === "POST") {
       state.questBodies.push(request.postDataJSON() as Record<string, unknown>);
+      if (options.holdQuestComplete) await questCompleteGate;
       return json(route, {
         feedbackId: "quest-feedback",
         questId: questComplete[1],
@@ -316,6 +367,18 @@ async function installApi(
       /^\/api\/reminders\/([^/]+)\/complete$/
     );
     if (reminderComplete && method === "PUT") {
+      if (reminderComplete[1] === "quest-reminder-target") {
+        state.reminderQuestCompletionCalls += 1;
+        if (reminderQuestCompleted) {
+          return json(route, { message: "Reminder is already completed" }, 409);
+        }
+        reminderQuestCompleted = true;
+        state.completedReminders.push(reminderComplete[1]);
+        if (options.loseFirstReminderQuestResponse) {
+          return route.abort("failed");
+        }
+        return json(route, { id: reminderComplete[1], status: "completed" });
+      }
       state.completedReminders.push(reminderComplete[1]);
       return json(route, { id: reminderComplete[1], status: "completed" });
     }
@@ -380,7 +443,18 @@ test("performs durable cockpit actions with exact contracts", async ({
     .getByRole("dialog", { name: "Snooze suggestion" })
     .getByRole("button", { name: "Snooze" })
     .click();
-  expect(api.feedback.at(-1)?.body).toMatchObject({
+  const snoozeDialog = page.getByRole("dialog", { name: "Snooze suggestion" });
+  await expect(snoozeDialog.getByRole("alert")).toContainText(
+    "Synthetic snooze retry"
+  );
+  await snoozeDialog.getByRole("button", { name: "Snooze" }).click();
+  const snoozes = api.feedback.filter(
+    (entry) => entry.body.action === "snooze"
+  );
+  expect(snoozes).toHaveLength(2);
+  expect(snoozes[0].key).toBe(snoozes[1].key);
+  expect(snoozes[0].body).toEqual(snoozes[1].body);
+  expect(snoozes[1].body).toMatchObject({
     action: "snooze",
     snoozedUntil: expect.any(String),
   });
@@ -488,7 +562,215 @@ test("generates only after explicit command and isolates panel failures", async 
   await expect(page.getByText("Synthetic approval failure")).toBeVisible();
   await generate.click();
   await expect.poll(() => api.generateCalls).toBe(1);
-  await expect(page.getByRole("link", { name: "Synthetic Person" })).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Synthetic Person" })
+  ).toBeVisible();
+});
+
+test("contains dialog focus and restores each action trigger", async ({
+  page,
+}) => {
+  await installApi(page);
+  await page.goto("/dashboard/today");
+
+  const person = page
+    .locator("li")
+    .filter({ hasText: "Synthetic Person" })
+    .first();
+  const snoozeTrigger = person.getByRole("button", { name: "Snooze" });
+  await snoozeTrigger.click();
+  const snoozeDialog = page.getByRole("dialog", {
+    name: "Snooze suggestion",
+  });
+  const closeSnooze = snoozeDialog.getByRole("button", { name: "Close" });
+  const submitSnooze = snoozeDialog.getByRole("button", { name: "Snooze" });
+  await closeSnooze.focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect(submitSnooze).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(closeSnooze).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(snoozeDialog).toBeHidden();
+  await expect(snoozeTrigger).toBeFocused();
+
+  const event = page
+    .locator("li")
+    .filter({ hasText: "Synthetic learning meetup" });
+  const dismissTrigger = event.getByRole("button", { name: "Dismiss" });
+  await dismissTrigger.click();
+  const dismissDialog = page.getByRole("dialog", {
+    name: "Dismiss suggestion",
+  });
+  const closeDismiss = dismissDialog.getByRole("button", { name: "Close" });
+  const submitDismiss = dismissDialog.getByRole("button", { name: "Dismiss" });
+  await closeDismiss.focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect(submitDismiss).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(closeDismiss).toBeFocused();
+  await dismissDialog.locator("..").click({ position: { x: 1, y: 1 } });
+  await expect(dismissDialog).toBeHidden();
+  await expect(dismissTrigger).toBeFocused();
+
+  const reminderTrigger = person.getByRole("button", {
+    name: "Create reminder",
+  });
+  await reminderTrigger.click();
+  const reminderDialog = page.getByRole("dialog", { name: "Create reminder" });
+  const closeReminder = reminderDialog.getByRole("button", { name: "Close" });
+  const submitReminder = reminderDialog.getByRole("button", {
+    name: "Create reminder",
+  });
+  await closeReminder.focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect(submitReminder).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(closeReminder).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(reminderDialog).toBeHidden();
+  await expect(reminderTrigger).toBeFocused();
+
+  const quest = page
+    .locator("li")
+    .filter({ hasText: "Complete the synthetic reminder" });
+  const questTrigger = quest.getByRole("button", { name: "Complete quest" });
+  await questTrigger.click();
+  const questDialog = page.getByRole("dialog", {
+    name: "Complete the synthetic reminder",
+  });
+  const completeQuest = questDialog.getByRole("button", {
+    name: "Complete and verify",
+  });
+  await expect(completeQuest).toBeVisible();
+  const closeQuest = questDialog.getByRole("button", { name: "Close" });
+  await closeQuest.focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect(completeQuest).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(closeQuest).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(questDialog).toBeHidden();
+  await expect(questTrigger).toBeFocused();
+});
+
+test("does not fabricate desktop momentum while stats load or fail", async ({
+  page,
+}) => {
+  const api = await installApi(page, { statsMode: "deferred-error" });
+  await page.goto("/dashboard/today");
+  const sidebar = page.locator("aside").first();
+
+  await expect(
+    sidebar.getByText("Momentum loading...", { exact: true })
+  ).toBeVisible();
+  await expect(sidebar.getByText("Social Novice")).toHaveCount(0);
+  await expect(
+    sidebar.getByText(/Level 3|0 \/ 100 XP|0 contacts|120 XP/)
+  ).toHaveCount(0);
+
+  api.releaseStats();
+  await expect(
+    sidebar.getByText("Momentum unavailable.", { exact: true })
+  ).toBeVisible();
+  await expect(sidebar.getByText("Social Novice")).toHaveCount(0);
+  await expect(
+    sidebar.getByText(/Level 3|0 \/ 100 XP|0 contacts|120 XP/)
+  ).toHaveCount(0);
+});
+
+test("recovers a reminder quest after its committed PUT response is lost", async ({
+  page,
+}) => {
+  const api = await installApi(page, {
+    loseFirstReminderQuestResponse: true,
+  });
+  await page.goto("/dashboard/today");
+
+  const reminderQuest = page
+    .locator("li")
+    .filter({ hasText: "Complete the synthetic reminder" });
+  await reminderQuest.getByRole("button", { name: "Complete quest" }).click();
+  const dialog = page.getByRole("dialog", {
+    name: "Complete the synthetic reminder",
+  });
+  await dialog.getByRole("button", { name: "Complete and verify" }).click();
+  await expect(dialog.getByRole("alert")).toBeVisible();
+  expect(api.reminderQuestCompletionCalls).toBe(1);
+  expect(api.questBodies).toHaveLength(0);
+
+  await dialog.getByRole("button", { name: "Complete and verify" }).click();
+  await expect.poll(() => api.reminderQuestCompletionCalls).toBe(1);
+  await expect
+    .poll(() => api.questBodies)
+    .toContainEqual({ reminderId: "quest-reminder-target" });
+});
+
+test("keeps each cockpit dialog open for Escape and backdrop while busy", async ({
+  page,
+}) => {
+  const api = await installApi(page, {
+    holdFeedback: true,
+    holdQuestComplete: true,
+    holdReminderCreate: true,
+  });
+  await page.goto("/dashboard/today");
+
+  const event = page
+    .locator("li")
+    .filter({ hasText: "Synthetic learning meetup" });
+  const dismissTrigger = event.getByRole("button", { name: "Dismiss" });
+  await dismissTrigger.click();
+  const dismissDialog = page.getByRole("dialog", {
+    name: "Dismiss suggestion",
+  });
+  await dismissDialog.getByRole("button", { name: "Dismiss" }).click();
+  await expect(
+    dismissDialog.getByRole("button", { name: "Saving..." })
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await dismissDialog.locator("..").click({ position: { x: 1, y: 1 } });
+  await expect(dismissDialog).toBeVisible();
+  api.releaseFeedback();
+  await expect(dismissDialog).toBeHidden();
+
+  const person = page
+    .locator("li")
+    .filter({ hasText: "Synthetic Person" })
+    .first();
+  const reminderTrigger = person.getByRole("button", {
+    name: "Create reminder",
+  });
+  await reminderTrigger.click();
+  const reminderDialog = page.getByRole("dialog", { name: "Create reminder" });
+  await reminderDialog.getByRole("button", { name: "Create reminder" }).click();
+  await expect(
+    reminderDialog.getByRole("button", { name: "Saving..." })
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await reminderDialog.locator("..").click({ position: { x: 1, y: 1 } });
+  await expect(reminderDialog).toBeVisible();
+  api.releaseReminderCreate();
+  await expect(reminderDialog).toBeHidden();
+
+  const quest = page
+    .locator("li")
+    .filter({ hasText: "Complete the synthetic reminder" });
+  const questTrigger = quest.getByRole("button", { name: "Complete quest" });
+  await questTrigger.click();
+  const questDialog = page.getByRole("dialog", {
+    name: "Complete the synthetic reminder",
+  });
+  await questDialog
+    .getByRole("button", { name: "Complete and verify" })
+    .click();
+  await expect(
+    questDialog.getByRole("button", { name: "Verifying..." })
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await questDialog.locator("..").click({ position: { x: 1, y: 1 } });
+  await expect(questDialog).toBeVisible();
+  api.releaseQuestComplete();
+  await expect(questDialog).toBeHidden();
 });
 
 test("fits and navigates at Pixel 412x915", async ({ page }, testInfo) => {
