@@ -46,6 +46,19 @@ const unsafeBriefOwnerPattern =
   /\b(?:dto|body|query|params?|headers?)\s*(?:\?\.|\.)\s*(?:ownerId|userId)\b/;
 const briefIdempotencyHeaderPattern =
   /@Headers\s*\(\s*["']idempotency-key["']\s*\)/i;
+const personalContextControllerPattern =
+  /(?:^|\/)services\/api\/src\/modules\/personal-data\/personal-context\.controller\.ts$/;
+const personalContextSourcePattern =
+  /(?:^|\/)services\/api\/src\/modules\/personal-data\/personal-context(?:\.controller|-deletion\.service)\.ts$/;
+const personalContextRoutePattern =
+  /@(Controller|Get|Post|Put|Patch|Delete|All)\s*\(([^)]*)\)/g;
+const authenticatedPersonalContextOwnerPattern = /\brequest\.user\.userId\b/;
+const personalContextIdempotencyHeaderPattern =
+  /@Headers\s*\(\s*["']idempotency-key["']\s*\)/i;
+const personalContextBodyPattern = /@Body\s*\(\s*\)\s*[A-Za-z_$][\w$]*/;
+const unsafePersonalContextAuthorityPattern =
+  /@(?:Query|Param)\s*\(|\b(?:dto|body|query|params?|headers?)\s*(?:\?\.|\.)\s*(?:ownerId|userId)\b/;
+const unsafeRawSqlPattern = /\$(?:queryRawUnsafe|executeRawUnsafe)\b/;
 const humanAgentControllerPattern =
   /(?:^|\/)services\/api\/src\/modules\/(?:agent-auth|agent-security)\/[^/]+\.controller\.ts$/;
 const mcpControllerPattern =
@@ -246,6 +259,35 @@ function hasSensitiveAgentLogging(content) {
   return false;
 }
 
+function hasAnyLogging(content) {
+  return [...content.matchAll(loggingCallPattern)].length > 0;
+}
+
+function hasUnsafePersonalContextController(content) {
+  if (hasUnguardedController(content, "AuthGuard")) return true;
+  const routes = [...content.matchAll(personalContextRoutePattern)];
+  const controller = routes.find((route) => route[1] === "Controller");
+  const controllerPath = controller
+    ? staticDecoratorPath(controller[2], false)
+    : null;
+  if (controllerPath !== "personal-context") return true;
+
+  const handlers = routes.filter((route) => route[1] !== "Controller");
+  if (handlers.length !== 1) return true;
+  const [route] = handlers;
+  const path = staticDecoratorPath(route[2], true);
+  if (route[1] !== "Delete" || path === null || path !== "") return true;
+
+  const start = route.index ?? 0;
+  const handler = content.slice(start);
+  return (
+    !authenticatedPersonalContextOwnerPattern.test(handler) ||
+    !personalContextIdempotencyHeaderPattern.test(handler) ||
+    !personalContextBodyPattern.test(handler) ||
+    unsafePersonalContextAuthorityPattern.test(handler)
+  );
+}
+
 function composeServiceBlock(content, serviceName) {
   const lines = content.split(/\r?\n/);
   for (let index = 0; index < lines.length; index += 1) {
@@ -331,6 +373,19 @@ for (const file of trackedFiles) {
         rules.add("missing-brief-idempotency-keys");
       }
     }
+  }
+
+  if (personalContextControllerPattern.test(file)) {
+    if (hasUnsafePersonalContextController(content)) {
+      rules.add("unsafe-personal-context-deletion");
+    }
+  }
+
+  if (
+    personalContextSourcePattern.test(file) &&
+    (hasAnyLogging(content) || unsafeRawSqlPattern.test(content))
+  ) {
+    rules.add("unsafe-personal-context-deletion");
   }
 
   if (humanAgentControllerPattern.test(file)) {

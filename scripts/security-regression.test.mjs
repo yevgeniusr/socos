@@ -341,6 +341,125 @@ export class BriefsController {
   );
 });
 
+test("rejects an unguarded personal context deletion controller", () => {
+  const directory = createTrackedFixture(
+    "services/api/src/modules/personal-data/personal-context.controller.ts",
+    `@Controller("personal-context")
+export class PersonalContextController {
+  @Delete() deletePersonalContext(request) {
+    return this.service.deletePersonalContext(request.user.userId);
+  }
+}
+`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /personal-context\.controller\.ts: unsafe-personal-context-deletion/,
+  );
+});
+
+test("rejects caller-controlled owner or confirmation fields on personal context deletion", () => {
+  const directory = createTrackedFixture(
+    "services/api/src/modules/personal-data/personal-context.controller.ts",
+    `@Controller("personal-context")
+@UseGuards(AuthGuard)
+export class PersonalContextController {
+  @Delete() deletePersonalContext(@Body() body, @Headers("idempotency-key") key) {
+    return this.service.deletePersonalContext(body.ownerId, key, body);
+  }
+}
+`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /personal-context\.controller\.ts: unsafe-personal-context-deletion/,
+  );
+});
+
+test("rejects personal context deletion routes with dynamic, nested, or non-DELETE handlers", () => {
+  const directory = createTrackedFixture(
+    "services/api/src/modules/personal-data/personal-context.controller.ts",
+    `const PATH = "personal-context";
+@Controller(PATH)
+@UseGuards(AuthGuard)
+export class PersonalContextController {
+  @Post("preview") preview() {}
+  @Delete(":ownerId") deleteForOwner() {}
+}
+`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /personal-context\.controller\.ts: unsafe-personal-context-deletion/,
+  );
+});
+
+test("rejects logging and unsafe raw SQL in personal context deletion", () => {
+  const directory = createTrackedFixture(
+    "services/api/src/modules/personal-data/personal-context-deletion.service.ts",
+    `export class PersonalContextDeletionService {
+  async deletePersonalContext(ownerId, idempotencyKey) {
+    console.log(ownerId, idempotencyKey);
+    return prisma.$queryRawUnsafe("SELECT " + ownerId);
+  }
+}
+`,
+  );
+
+  const result = runScanner(directory);
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /personal-context-deletion\.service\.ts: unsafe-personal-context-deletion/,
+  );
+});
+
+test("accepts the authenticated static personal context deletion controller and quiet service", () => {
+  const controller = readFileSync(
+    resolve(
+      repoRoot,
+      "services/api/src/modules/personal-data/personal-context.controller.ts",
+    ),
+    "utf8",
+  );
+  const service = readFileSync(
+    resolve(
+      repoRoot,
+      "services/api/src/modules/personal-data/personal-context-deletion.service.ts",
+    ),
+    "utf8",
+  );
+  const directory = createTrackedFixture(
+    "services/api/src/modules/personal-data/personal-context.controller.ts",
+    controller,
+  );
+  writeFileSync(
+    resolve(
+      directory,
+      "services/api/src/modules/personal-data/personal-context-deletion.service.ts",
+    ),
+    service,
+  );
+  execFileSync("git", ["add", "."], { cwd: directory });
+
+  const result = runScanner(directory);
+
+  assert.equal(result.status, 0, result.stderr);
+});
+
 test("rejects dynamic or forbidden daily brief controller prefixes", () => {
   const directory = createTrackedFixture(
     "services/api/src/modules/briefs/briefs.controller.ts",

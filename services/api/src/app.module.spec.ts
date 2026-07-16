@@ -9,6 +9,8 @@ import { CalendarModule } from './modules/calendar/calendar.module.js';
 import { EventsModule } from './modules/events/events.module.js';
 import { LocationDeviceController } from './modules/location/location.controller.js';
 import { LocationModule } from './modules/location/location.module.js';
+import { PersonalContextController } from './modules/personal-data/personal-context.controller.js';
+import { PersonalContextModule } from './modules/personal-data/personal-context.module.js';
 import { PersonalDataConfigService } from './modules/personal-data/personal-data-config.js';
 import { PersonalDataModule } from './modules/personal-data/personal-data.module.js';
 import { PrismaService } from './modules/prisma/prisma.service.js';
@@ -143,6 +145,14 @@ describe('AppModule composition', () => {
     ) as unknown[];
 
     expect(imports).toContain(PersonalDataModule);
+  });
+
+  it('delegates personal context deletion ownership to PersonalContextModule', () => {
+    const imports = Reflect.getMetadata(MODULE_METADATA.IMPORTS, AppModule) as unknown[];
+    const controllers = Reflect.getMetadata(MODULE_METADATA.CONTROLLERS, AppModule) as unknown[];
+
+    expect(imports).toContain(PersonalContextModule);
+    expect(controllers).not.toContain(PersonalContextController);
   });
 
   it('delegates location endpoint ownership to LocationModule', () => {

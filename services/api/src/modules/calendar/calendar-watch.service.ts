@@ -305,7 +305,12 @@ export class CalendarWatchService {
       accessToken = null;
     }
     const watches = await this.prisma.calendarWatch.findMany({
-      where: { ownerId, connectionId: connection.id },
+      where: {
+        ownerId,
+        connectionId: connection.id,
+        status: "active",
+        expiresAt: { gt: now },
+      },
       orderBy: { id: "asc" },
     });
     return watches.map((watch) => ({
