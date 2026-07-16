@@ -93,6 +93,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@socos/agent-core':
+        specifier: workspace:*
+        version: link:../../packages/agent-core
       '@socos/shared':
         specifier: workspace:*
         version: link:../../packages/shared

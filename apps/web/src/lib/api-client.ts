@@ -3,11 +3,18 @@ import { authFetch } from "@/lib/auth";
 export class ApiError extends Error {
   constructor(
     message: string,
-    public readonly status: number
+    public readonly status: number,
+    public readonly code?: string
   ) {
     super(message);
     this.name = "ApiError";
   }
+}
+
+function errorCode(body: unknown): string | undefined {
+  if (!body || typeof body !== "object") return undefined;
+  const code = (body as { code?: unknown }).code;
+  return typeof code === "string" && code.trim() ? code.trim() : undefined;
 }
 
 function errorMessage(body: unknown, fallback: string): string {
@@ -37,7 +44,8 @@ export async function apiJson<T>(
   if (!response.ok) {
     throw new ApiError(
       errorMessage(body, `Request failed with status ${response.status}`),
-      response.status
+      response.status,
+      errorCode(body)
     );
   }
 

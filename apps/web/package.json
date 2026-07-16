@@ -15,6 +15,7 @@
   },
   "type": "module",
   "dependencies": {
+    "@socos/agent-core": "workspace:*",
     "@socos/shared": "workspace:*",
     "next": "^15.5.12",
     "pg": "^8.20.0",

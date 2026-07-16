@@ -39,6 +39,9 @@ interface DashboardContextValue {
   showToast: (message: string, type?: ToastType) => void;
   refreshDashboardStats: () => Promise<void>;
   refreshUpcomingReminders: () => Promise<void>;
+  user: StoredUser | null;
+  stats: Stats | null;
+  upcomingCount: number;
 }
 
 const DashboardContext = createContext<DashboardContextValue | null>(null);
@@ -177,8 +180,22 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
   }, [authenticated, refreshUpcomingReminders]);
 
   const contextValue = useMemo(
-    () => ({ showToast, refreshDashboardStats, refreshUpcomingReminders }),
-    [refreshDashboardStats, refreshUpcomingReminders, showToast]
+    () => ({
+      showToast,
+      refreshDashboardStats,
+      refreshUpcomingReminders,
+      user,
+      stats,
+      upcomingCount,
+    }),
+    [
+      refreshDashboardStats,
+      refreshUpcomingReminders,
+      showToast,
+      stats,
+      upcomingCount,
+      user,
+    ]
   );
 
   async function handleLogout() {
@@ -196,8 +213,13 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
   }
 
   const navItems = [
+    { label: "Today", icon: "today", href: "/dashboard/today" },
     { label: "Contacts", icon: "contacts", href: "/dashboard/contacts" },
-    { label: "Daily brief", icon: "today", disabled: true },
+    {
+      label: "Approvals",
+      icon: "approval",
+      href: "/dashboard/approvals",
+    },
     { label: "Calendar", icon: "calendar_month", disabled: true },
     { label: "Gamification", icon: "military_tech", disabled: true },
     { label: "Settings", icon: "settings", disabled: true },
@@ -208,7 +230,7 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
       <div className="flex min-h-[100dvh] bg-surface text-on-surface">
         <aside className="sticky top-0 hidden h-[100dvh] w-64 shrink-0 flex-col border-r border-outline-variant/20 bg-surface px-3 py-6 lg:flex">
           <Link
-            href="/dashboard/contacts"
+            href="/dashboard/today"
             className="mb-8 px-3 text-xl font-black text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
           >
             SOCOS
@@ -277,7 +299,7 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
         <div className="min-w-0 flex-1">
           <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-outline-variant/20 bg-surface/95 px-4 backdrop-blur lg:hidden">
             <Link
-              href="/dashboard/contacts"
+              href="/dashboard/today"
               className="font-black text-primary"
             >
               SOCOS
@@ -297,7 +319,28 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
               </button>
             </div>
           </header>
-          {children}
+          <div className="pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-0">
+            {children}
+          </div>
+          <nav
+            aria-label="Mobile dashboard"
+            className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-3 border-t border-outline-variant/30 bg-surface/98 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
+          >
+            {navItems.slice(0, 3).map((item) => {
+              const active = item.href ? pathname.startsWith(item.href) : false;
+              return (
+                <Link
+                  key={item.label}
+                  href={item.href ?? "/dashboard/today"}
+                  aria-current={active ? "page" : undefined}
+                  className={`flex min-h-14 flex-col items-center justify-center gap-0.5 text-[11px] font-bold focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${active ? "text-primary" : "text-on-surface-variant"}`}
+                >
+                  <SymbolIcon name={item.icon} className="text-[21px]" />
+                  {item.label}
+                </Link>
+              );
+            })}
+          </nav>
         </div>
       </div>
       {toast ? <Toast {...toast} onClose={() => setToast(null)} /> : null}
