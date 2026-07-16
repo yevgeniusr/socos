@@ -1108,7 +1108,8 @@ if (!databaseUrl) {
     assert.equal(forbiddenWatchUnique.rows[0].count, 0);
 
     const checks = await client.query(
-      `SELECT c.conname AS name, pg_get_expr(c.conbin, c.conrelid, false) AS predicate
+      `SELECT c.conname AS name, t.relname AS table,
+              pg_get_expr(c.conbin, c.conrelid, false) AS predicate
          FROM pg_constraint c
          JOIN pg_class t ON t.oid = c.conrelid
          JOIN pg_namespace n ON n.oid = t.relnamespace
@@ -1120,7 +1121,11 @@ if (!databaseUrl) {
     const expectedChecks = Object.entries(
       expectedCalendarLocationCheckPredicates,
     )
-      .map(([name, predicate]) => ({ name, predicate }))
+      .map(([name, predicate]) => ({
+        name,
+        table: name.slice(0, name.indexOf("_")),
+        predicate,
+      }))
       .sort((left, right) => left.name.localeCompare(right.name));
     assert.deepEqual(
       checks.rows,
