@@ -41,6 +41,12 @@ export class ContactsController {
     return this.contactsService.getTags(req.user.userId);
   }
 
+  @Get('groups')
+  @ApiOperation({ summary: 'Get all unique groups' })
+  async getGroups(@Request() req: { user: { userId: string } }) {
+    return this.contactsService.getGroups(req.user.userId);
+  }
+
   @Get('due')
   @ApiOperation({ summary: 'Get contacts needing follow-up (stale contacts)' })
   async getDueContacts(

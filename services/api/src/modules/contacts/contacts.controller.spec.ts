@@ -46,4 +46,43 @@ describe("ContactsController route ordering", () => {
       await app.close();
     }
   });
+
+  it("dispatches GET /contacts/groups to getGroups", async () => {
+    const contactsService = {
+      getGroups: jest.fn().mockResolvedValue(["Synthetic Group"]),
+      findOne: jest.fn().mockResolvedValue({ id: "groups" }),
+    };
+    const moduleRef = await Test.createTestingModule({
+      controllers: [ContactsController],
+      providers: [{ provide: ContactsService, useValue: contactsService }],
+    })
+      .overrideGuard(AuthGuard)
+      .useValue({
+        canActivate(context: {
+          switchToHttp(): { getRequest(): { user?: { userId: string } } };
+        }) {
+          context.switchToHttp().getRequest().user = {
+            userId: "synthetic-owner",
+          };
+          return true;
+        },
+      })
+      .compile();
+    const app: INestApplication = moduleRef.createNestApplication();
+    await app.listen(0, "127.0.0.1");
+
+    try {
+      const address = app.getHttpServer().address() as { port: number };
+      const response = await fetch(
+        `http://127.0.0.1:${address.port}/contacts/groups`
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(["Synthetic Group"]);
+      expect(contactsService.getGroups).toHaveBeenCalledWith("synthetic-owner");
+      expect(contactsService.findOne).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
 });

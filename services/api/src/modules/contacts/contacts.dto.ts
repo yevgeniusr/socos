@@ -1,22 +1,108 @@
+import { Type } from 'class-transformer';
 import {
-  IsString,
-  IsOptional,
+  ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsDateString,
-  IsNumber,
-  IsObject,
+  IsEnum,
+  IsIn,
   IsInt,
-  Min,
+  IsObject,
+  IsOptional,
+  IsString,
+  IsUrl,
+  Matches,
   Max,
+  MaxLength,
+  Min,
+  ValidateIf,
+  ValidateNested,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
+export const CONTACT_FIELD_TYPES = ['email', 'phone', 'address', 'website', 'other'] as const;
+
+export enum ContactSortBy {
+  CREATED_AT = 'createdAt',
+  FIRST_NAME = 'firstName',
+  LAST_CONTACTED_AT = 'lastContactedAt',
+  RELATIONSHIP_SCORE = 'relationshipScore',
+  NEXT_REMINDER_AT = 'nextReminderAt',
+}
+
+export enum SortOrder {
+  ASC = 'asc',
+  DESC = 'desc',
+}
+
+const SOCIAL_LINK_OPTIONS = {
+  protocols: ['http', 'https'],
+  require_protocol: true,
+  require_valid_protocol: true,
+};
+
+export class SocialLinksDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUrl(SOCIAL_LINK_OPTIONS)
+  linkedin?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUrl(SOCIAL_LINK_OPTIONS)
+  twitter?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUrl(SOCIAL_LINK_OPTIONS)
+  instagram?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUrl(SOCIAL_LINK_OPTIONS)
+  facebook?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUrl(SOCIAL_LINK_OPTIONS)
+  github?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUrl(SOCIAL_LINK_OPTIONS)
+  website?: string;
+}
+
+export class ContactFieldDto {
+  @ApiProperty({ example: 'email', enum: CONTACT_FIELD_TYPES })
+  @IsString()
+  @IsIn(CONTACT_FIELD_TYPES)
+  type: string;
+
+  @ApiProperty({ example: 'person@example.test', maxLength: 2048 })
+  @IsString()
+  @Matches(/\S/)
+  @MaxLength(2048)
+  value: string;
+
+  @ApiPropertyOptional({ example: 'work', maxLength: 100 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  label?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  isPrimary?: boolean;
+}
+
 export class CreateContactDto {
-  @ApiProperty({ example: 'John' })
+  @ApiProperty({ example: 'Synthetic' })
   @IsString()
   firstName: string;
 
-  @ApiPropertyOptional({ example: 'Doe' })
+  @ApiPropertyOptional({ example: 'Person' })
   @IsOptional()
   @IsString()
   lastName?: string;
@@ -68,13 +154,21 @@ export class CreateContactDto {
   @IsString({ each: true })
   tags?: string[];
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: ['Mentors'] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  groups?: string[];
+
+  @ApiPropertyOptional({ type: SocialLinksDto })
   @IsOptional()
   @IsObject()
-  socialLinks?: Record<string, string>;
+  @ValidateNested()
+  @Type(() => SocialLinksDto)
+  socialLinks?: SocialLinksDto;
 
   @ApiPropertyOptional()
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
   @IsDateString()
   firstMetDate?: string;
 
@@ -101,6 +195,14 @@ export class CreateContactDto {
   @Min(7)
   @Max(365)
   preferredCadenceDays?: number;
+
+  @ApiPropertyOptional({ type: [ContactFieldDto], maxItems: 20 })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => ContactFieldDto)
+  contactFields?: ContactFieldDto[];
 }
 
 export class UpdateContactDto {
@@ -139,15 +241,15 @@ export class UpdateContactDto {
   @IsString()
   jobTitle?: string;
 
-  @ApiPropertyOptional()
-  @IsOptional()
+  @ApiPropertyOptional({ nullable: true })
+  @ValidateIf((_object, value) => value !== undefined && value !== null)
   @IsDateString()
-  birthday?: string;
+  birthday?: string | null;
 
-  @ApiPropertyOptional()
-  @IsOptional()
+  @ApiPropertyOptional({ nullable: true })
+  @ValidateIf((_object, value) => value !== undefined && value !== null)
   @IsDateString()
-  anniversary?: string;
+  anniversary?: string | null;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -163,15 +265,26 @@ export class UpdateContactDto {
 
   @ApiPropertyOptional()
   @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  groups?: string[];
+
+  @ApiPropertyOptional({ type: SocialLinksDto })
+  @IsOptional()
   @IsObject()
-  socialLinks?: Record<string, string>;
+  @ValidateNested()
+  @Type(() => SocialLinksDto)
+  socialLinks?: SocialLinksDto;
+
+  @ApiPropertyOptional({ nullable: true })
+  @ValidateIf((_object, value) => value !== undefined && value !== null)
+  @IsDateString()
+  firstMetDate?: string | null;
 
   @ApiPropertyOptional()
   @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @Max(100)
-  relationshipScore?: number;
+  @IsString()
+  firstMetContext?: string;
 
   @ApiPropertyOptional({ minimum: 1, maximum: 5 })
   @IsOptional()
@@ -186,25 +299,14 @@ export class UpdateContactDto {
   @Min(7)
   @Max(365)
   preferredCadenceDays?: number;
-}
 
-export class ContactFieldDto {
-  @ApiProperty({ example: 'email' })
-  @IsString()
-  type: string;
-
-  @ApiProperty({ example: 'john@example.com' })
-  @IsString()
-  value: string;
-
-  @ApiPropertyOptional({ example: 'work' })
+  @ApiPropertyOptional({ type: [ContactFieldDto], maxItems: 20 })
   @IsOptional()
-  @IsString()
-  label?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  isPrimary?: boolean;
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => ContactFieldDto)
+  contactFields?: ContactFieldDto[];
 }
 
 export class ContactQueryDto {
@@ -223,28 +325,38 @@ export class ContactQueryDto {
   @IsString()
   tag?: string;
 
+  @ApiPropertyOptional({ example: 'Mentors' })
+  @IsOptional()
+  @IsString()
+  group?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   vaultId?: string;
 
-  @ApiPropertyOptional({ default: 10 })
+  @ApiPropertyOptional({ default: 25, minimum: 1, maximum: 100 })
   @IsOptional()
-  @IsNumber()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
   limit?: number;
 
-  @ApiPropertyOptional({ default: 0 })
+  @ApiPropertyOptional({ default: 0, minimum: 0 })
   @IsOptional()
-  @IsNumber()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
   offset?: number;
 
-  @ApiPropertyOptional({ example: 'lastContactedAt' })
+  @ApiPropertyOptional({ enum: ContactSortBy })
   @IsOptional()
-  @IsString()
-  sortBy?: string;
+  @IsEnum(ContactSortBy)
+  sortBy?: ContactSortBy;
 
-  @ApiPropertyOptional({ example: 'desc' })
+  @ApiPropertyOptional({ enum: SortOrder })
   @IsOptional()
-  @IsString()
-  sortOrder?: 'asc' | 'desc';
+  @IsEnum(SortOrder)
+  sortOrder?: SortOrder;
 }
