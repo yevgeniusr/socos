@@ -55,3 +55,76 @@ describe("GamificationService demo exclusion", () => {
     });
   });
 });
+
+describe("GamificationService interaction reward notifications", () => {
+  it("sends persisted achievement metadata and the committed level name", async () => {
+    const notifications = {
+      sendGamificationAchievement: jest.fn().mockResolvedValue({ results: [] }),
+      sendGamificationLevelUp: jest.fn().mockResolvedValue({ results: [] }),
+    };
+    const service = new GamificationService(
+      {} as PrismaService,
+      notifications as unknown as NotificationsService
+    );
+
+    await service.notifyInteractionRewards("synthetic-owner", {
+      achievements: [
+        {
+          name: "First Interaction",
+          description: "Persisted first interaction description",
+          xpReward: 50,
+        },
+      ],
+      previousLevel: 4,
+      newLevel: 5,
+    });
+
+    expect(notifications.sendGamificationAchievement).toHaveBeenCalledWith(
+      "synthetic-owner",
+      {
+        name: "First Interaction",
+        description: "Persisted first interaction description",
+        xpReward: 50,
+      }
+    );
+    expect(notifications.sendGamificationLevelUp).toHaveBeenCalledWith(
+      "synthetic-owner",
+      5,
+      "Connector"
+    );
+  });
+
+  it("isolates achievement and level notification failures", async () => {
+    const consoleError = jest
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const notifications = {
+      sendGamificationAchievement: jest
+        .fn()
+        .mockRejectedValue(new Error("achievement notification failed")),
+      sendGamificationLevelUp: jest
+        .fn()
+        .mockRejectedValue(new Error("level notification failed")),
+    };
+    const service = new GamificationService(
+      {} as PrismaService,
+      notifications as unknown as NotificationsService
+    );
+
+    await expect(
+      service.notifyInteractionRewards("synthetic-owner", {
+        achievements: [
+          {
+            name: "Prolific",
+            description: "Persisted prolific description",
+            xpReward: 5000,
+          },
+        ],
+        previousLevel: 7,
+        newLevel: 8,
+      })
+    ).resolves.toBeUndefined();
+    expect(consoleError).toHaveBeenCalledTimes(2);
+    consoleError.mockRestore();
+  });
+});

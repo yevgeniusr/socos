@@ -3,6 +3,16 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { InteractionType } from '../interactions/interactions.dto.js';
 
+export interface InteractionRewardNotifications {
+  achievements: Array<{
+    name: string;
+    description: string;
+    xpReward: number;
+  }>;
+  previousLevel: number;
+  newLevel: number;
+}
+
 @Injectable()
 export class GamificationService {
   constructor(
@@ -232,6 +242,40 @@ export class GamificationService {
 
   async calculateInteractionXp(type: string): Promise<number> {
     return this.XP_REWARDS[type] || 10;
+  }
+
+  async notifyInteractionRewards(
+    userId: string,
+    rewards: InteractionRewardNotifications,
+  ): Promise<void> {
+    const notifications = rewards.achievements.map(async (achievement) => {
+      try {
+        await this.notifications.sendGamificationAchievement(
+          userId,
+          achievement,
+        );
+      } catch (err) {
+        console.error('Failed to send achievement notification:', err);
+      }
+    });
+
+    if (rewards.newLevel > rewards.previousLevel) {
+      notifications.push(
+        (async () => {
+          try {
+            await this.notifications.sendGamificationLevelUp(
+              userId,
+              rewards.newLevel,
+              this.getLevelName(rewards.newLevel),
+            );
+          } catch (err) {
+            console.error('Failed to send level-up notification:', err);
+          }
+        })(),
+      );
+    }
+
+    await Promise.all(notifications);
   }
 
   async checkLevelUp(userId: string, totalXp: number): Promise<{ newLevel: number; xpForNextLevel: number; leveledUp: boolean; previousLevel: number }> {

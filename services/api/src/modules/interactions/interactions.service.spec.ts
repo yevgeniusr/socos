@@ -68,6 +68,7 @@ function harness(
     calculateInteractionXp: jest.fn().mockResolvedValue(10),
     checkLevelUp: jest.fn(),
     checkAchievements: jest.fn(),
+    notifyInteractionRewards: jest.fn().mockResolvedValue(undefined),
   };
   const service = new InteractionsService(
     prisma as unknown as PrismaService,
@@ -148,6 +149,7 @@ describe("InteractionsService agent commands", () => {
     });
     expect(gamification.checkLevelUp).not.toHaveBeenCalled();
     expect(gamification.checkAchievements).not.toHaveBeenCalled();
+    expect(gamification.notifyInteractionRewards).not.toHaveBeenCalled();
   });
 
   it("unlocks first_interaction and awards its XP with distinct evidence", async () => {
@@ -186,7 +188,12 @@ describe("InteractionsService agent commands", () => {
           object: "interactions",
         }),
       },
-      select: { id: true, xpReward: true },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        xpReward: true,
+      },
     });
     expect(tx.userAchievement.createMany).toHaveBeenCalledWith({
       data: [{ userId: ownerId, achievementId: "achievement-first" }],
@@ -547,6 +554,91 @@ describe("InteractionsService human commands", () => {
     expect(tx.user.update).toHaveBeenCalledTimes(1);
     expect(gamification.checkLevelUp).not.toHaveBeenCalled();
     expect(gamification.checkAchievements).not.toHaveBeenCalled();
+  });
+
+  it("notifies from committed achievement metadata and the actual level transition", async () => {
+    const { gamification, prisma, service, tx } = harness();
+    tx.interaction.count.mockResolvedValue(1);
+    tx.achievement.upsert.mockResolvedValue({
+      id: "achievement-first",
+      name: "First Interaction",
+      description: "Persisted first interaction description",
+      xpReward: 50,
+    });
+    tx.userAchievement.createMany.mockResolvedValue({ count: 1 });
+    tx.user.update
+      .mockResolvedValueOnce({ xp: 400, level: 2 })
+      .mockResolvedValueOnce({ xp: 400, level: 3 });
+
+    await expect(service.create(ownerId, input)).resolves.toEqual({
+      interaction: {
+        id: "interaction-synthetic",
+        type: InteractionType.CALL,
+        title: "Catch up",
+        occurredAt: now,
+        xpEarned: 10,
+      },
+      user: {
+        xp: 400,
+        level: 3,
+        xpToNextLevel: 900,
+      },
+      newAchievements: ["First Interaction"],
+    });
+
+    expect(gamification.notifyInteractionRewards).toHaveBeenCalledWith(
+      ownerId,
+      {
+        achievements: [
+          {
+            name: "First Interaction",
+            description: "Persisted first interaction description",
+            xpReward: 50,
+          },
+        ],
+        previousLevel: 2,
+        newLevel: 3,
+      }
+    );
+    expect(
+      prisma.$transaction.mock.invocationCallOrder[0]
+    ).toBeLessThan(
+      gamification.notifyInteractionRewards.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("does not notify when the human transaction rolls back", async () => {
+    const { gamification, service, tx } = harness();
+    tx.user.update.mockRejectedValue(new Error("user update failed"));
+
+    await expect(service.create(ownerId, input)).rejects.toThrow(
+      "user update failed"
+    );
+
+    expect(gamification.notifyInteractionRewards).not.toHaveBeenCalled();
+  });
+
+  it("keeps notification failures out of the human interaction response", async () => {
+    const { gamification, service } = harness();
+    const consoleError = jest
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    gamification.notifyInteractionRewards.mockRejectedValue(
+      new Error("notification failed")
+    );
+
+    await expect(service.create(ownerId, input)).resolves.toEqual(
+      expect.objectContaining({
+        interaction: expect.objectContaining({
+          id: "interaction-synthetic",
+        }),
+      })
+    );
+    expect(consoleError).toHaveBeenCalledWith(
+      "Failed to send interaction reward notifications:",
+      expect.any(Error)
+    );
+    consoleError.mockRestore();
   });
 
   it.each([

@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { GamificationService } from '../gamification/gamification.service.js';
+import type { InteractionRewardNotifications } from '../gamification/gamification.service.js';
 import {
   CreateInteractionDto,
   InteractionQueryDto,
@@ -32,6 +33,7 @@ export interface AgentInteractionResult {
 interface InteractionWriteResult extends AgentInteractionResult {
   title: string | null;
   newAchievements: string[];
+  rewardNotifications: InteractionRewardNotifications;
 }
 
 function levelForXp(totalXp: number): number {
@@ -79,6 +81,12 @@ export class InteractionsService {
       (tx) => this.createForAgentInTransaction(tx, userId, dto),
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
     );
+
+    void this.gamificationService
+      .notifyInteractionRewards(userId, result.rewardNotifications)
+      .catch((err) =>
+        console.error('Failed to send interaction reward notifications:', err)
+      );
 
     return {
       interaction: {
@@ -264,6 +272,8 @@ export class InteractionsService {
     });
     let achievementXpAwarded = 0;
     const newAchievements: string[] = [];
+    const achievementNotifications:
+      InteractionRewardNotifications['achievements'] = [];
     for (const definition of AGENT_INTERACTION_ACHIEVEMENTS) {
       if (interactionCount < definition.target) continue;
 
@@ -281,7 +291,12 @@ export class InteractionsService {
             object: "interactions",
           }),
         },
-        select: { id: true, xpReward: true },
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          xpReward: true,
+        },
       });
       const unlock = await transaction.userAchievement.createMany({
         data: [{ userId: ownerId, achievementId: achievement.id }],
@@ -298,7 +313,12 @@ export class InteractionsService {
         },
       });
       achievementXpAwarded += achievement.xpReward;
-      newAchievements.push(definition.name);
+      newAchievements.push(achievement.name);
+      achievementNotifications.push({
+        name: achievement.name,
+        description: achievement.description,
+        xpReward: achievement.xpReward,
+      });
     }
 
     let user = await transaction.user.update({
@@ -309,6 +329,7 @@ export class InteractionsService {
       },
       select: { xp: true, level: true },
     });
+    const previousLevel = user.level;
     const level = levelForXp(user.xp);
     if (user.level !== level) {
       user = await transaction.user.update({
@@ -328,6 +349,11 @@ export class InteractionsService {
       totalXp: user.xp,
       level: user.level,
       newAchievements,
+      rewardNotifications: {
+        achievements: achievementNotifications,
+        previousLevel,
+        newLevel: user.level,
+      },
     };
   }
 
