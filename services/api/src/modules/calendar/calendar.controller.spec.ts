@@ -1,8 +1,12 @@
+import { ServiceUnavailableException } from "@nestjs/common";
 import { GUARDS_METADATA, PATH_METADATA } from "@nestjs/common/constants";
+import type { ConfigService } from "@nestjs/config";
 import type { Response } from "express";
 import { createApplicationValidationPipe } from "../../common/application-validation.pipe.js";
 import { AuthGuard } from "../auth/auth.guard.js";
-import type { PersonalDataConfigService } from "../personal-data/personal-data-config.js";
+import type { PersonalDataCipherService } from "../personal-data/personal-data-cipher.service.js";
+import { PersonalDataConfigService } from "../personal-data/personal-data-config.js";
+import type { PersonalDataIndexService } from "../personal-data/personal-data-index.service.js";
 import {
   CalendarConnectionController,
   GoogleCalendarCallbackController,
@@ -21,7 +25,7 @@ function response() {
   return value;
 }
 
-function harness() {
+function harness(calendarFlag: unknown = "true") {
   const connections = {
     connect: jest.fn().mockResolvedValue({
       authorizationUrl: "https://accounts.google.test/auth",
@@ -35,7 +39,16 @@ function harness() {
         "https://socos.example.test/settings?calendar=old&keep=1"
       ),
   };
-  const config = { requireEnabled: jest.fn() };
+  const config = new PersonalDataConfigService(
+    {
+      get: jest.fn((name: string) =>
+        name === "CALENDAR_SYNC_ENABLED" ? calendarFlag : undefined
+      ),
+    } as unknown as ConfigService,
+    {} as PersonalDataCipherService,
+    {} as PersonalDataIndexService
+  );
+  jest.spyOn(config, "requireEnabled");
   return {
     connections,
     config,
@@ -44,7 +57,7 @@ function harness() {
     ),
     callback: new GoogleCalendarCallbackController(
       connections as unknown as CalendarConnectionService,
-      config as unknown as PersonalDataConfigService
+      config
     ),
   };
 }
@@ -227,18 +240,50 @@ describe("calendar controller boundaries", () => {
   it("returns sanitized 503 when no configured redirect boundary exists", async () => {
     const { callback, connections } = harness();
     connections.callbackResultUrl.mockImplementation(() => {
-      throw Object.assign(new Error("Integration is not configured"), {
-        status: 503,
+      throw new ServiceUnavailableException({
+        statusCode: 503,
+        code: "integration_not_configured",
+        message: "Integration is not configured",
       });
     });
+    const res = response();
 
-    await expect(
-      callback.callback(
-        {
-          query: { state: "synthetic-sensitive-state", code: "synthetic-code" },
-        },
-        response() as unknown as Response
-      )
-    ).rejects.toMatchObject({ status: 503 });
+    const pending = callback.callback(
+      {
+        query: { state: "synthetic-sensitive-state", code: "synthetic-code" },
+      },
+      res as unknown as Response
+    );
+
+    await expect(pending).rejects.toMatchObject({ status: 503 });
+    await expect(pending).rejects.toMatchObject({
+      response: {
+        statusCode: 503,
+        code: "integration_not_configured",
+        message: "Integration is not configured",
+      },
+    });
+    expect(res.setHeader).toHaveBeenCalledWith("Cache-Control", "no-store");
+    expect(res.redirect).not.toHaveBeenCalled();
+    expect(connections.handleCallback).not.toHaveBeenCalled();
   });
+
+  it.each(["false", "TRUE", "1", "yes", " true "])(
+    "returns sanitized 503 without callback work for calendar flag %p",
+    async (calendarFlag) => {
+      const { callback, connections } = harness(calendarFlag);
+      const res = response();
+
+      const pending = callback.callback(
+        { query: { state: "synthetic-state", code: "synthetic-code" } },
+        res as unknown as Response
+      );
+
+      await expect(pending).rejects.toBeInstanceOf(ServiceUnavailableException);
+      expect(res.setHeader).toHaveBeenCalledWith("Cache-Control", "no-store");
+      expect(res.redirect).not.toHaveBeenCalled();
+      expect(connections.callbackResultUrl).not.toHaveBeenCalled();
+      expect(connections.handleCallback).not.toHaveBeenCalled();
+    }
+  );
 });

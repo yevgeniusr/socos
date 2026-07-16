@@ -24,7 +24,7 @@ const ENVELOPE = {
   keyVersion: 1,
 };
 
-function configuration(): ConfigService {
+function configuration(overrides: Record<string, string> = {}): ConfigService {
   const values: Record<string, string> = {
     GOOGLE_CALENDAR_CLIENT_ID: "synthetic-client-id",
     GOOGLE_CALENDAR_CLIENT_SECRET: "synthetic-client-secret",
@@ -32,13 +32,14 @@ function configuration(): ConfigService {
       "https://socos.example.test/api/integrations/google-calendar/callback",
     GOOGLE_CALENDAR_SETTINGS_RESULT_URL:
       "https://socos.example.test/settings/integrations?keep=1",
+    ...overrides,
   };
   return {
     get: jest.fn((name: string) => values[name]),
   } as unknown as ConfigService;
 }
 
-function harness() {
+function harness(configurationOverrides: Record<string, string> = {}) {
   const prisma = {
     googleCalendarConnection: { findUnique: jest.fn() },
     googleOAuthAttempt: {
@@ -73,7 +74,7 @@ function harness() {
     prisma as unknown as PrismaService,
     cipher as unknown as PersonalDataCipherService,
     index as unknown as PersonalDataIndexService,
-    configuration(),
+    configuration(configurationOverrides),
     clientFactory as GoogleOAuthClientFactory,
     idGenerator as CalendarIdGenerator
   );
@@ -333,6 +334,42 @@ describe("GoogleOAuthService", () => {
     expect(grant).toEqual({
       refreshToken: "synthetic-refresh-token",
       grantedScopes: GOOGLE_CALENDAR_SCOPES,
+    });
+  });
+
+  it("validates but preserves the exact configured redirect string", async () => {
+    const exactRedirect =
+      "https://SOCOS.example.test:443/api/integrations/google-calendar/callback";
+    const { service, prisma, client, clientFactory } = harness({
+      GOOGLE_CALENDAR_REDIRECT_URI: exactRedirect,
+    });
+    prisma.googleCalendarConnection.findUnique.mockResolvedValue(null);
+    prisma.googleOAuthAttempt.create.mockResolvedValue({ id: ATTEMPT_ID });
+    client.getToken.mockResolvedValue({
+      tokens: {
+        access_token: "synthetic-access-token",
+        refresh_token: "synthetic-refresh-token",
+      },
+    });
+    client.getTokenInfo.mockResolvedValue({ scopes: GOOGLE_CALENDAR_SCOPES });
+
+    await service.createAuthorizationUrl(OWNER_ID);
+    await service.exchangeCode("synthetic-code", "v".repeat(43));
+
+    expect(clientFactory).toHaveBeenNthCalledWith(1, {
+      clientId: "synthetic-client-id",
+      clientSecret: "synthetic-client-secret",
+      redirectUri: exactRedirect,
+    });
+    expect(clientFactory).toHaveBeenNthCalledWith(2, {
+      clientId: "synthetic-client-id",
+      clientSecret: "synthetic-client-secret",
+      redirectUri: exactRedirect,
+    });
+    expect(client.getToken).toHaveBeenCalledWith({
+      code: "synthetic-code",
+      codeVerifier: "v".repeat(43),
+      redirect_uri: exactRedirect,
     });
   });
 

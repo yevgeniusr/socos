@@ -62,10 +62,12 @@ export class GoogleCalendarCallbackController {
     @Req() request: Pick<ExpressRequest, "query">,
     @Res() response: Response
   ): Promise<void> {
+    response.setHeader("Cache-Control", "no-store");
+    response.setHeader("Pragma", "no-cache");
+    this.config.requireEnabled("calendarSync");
     const resultUrl = this.connections.callbackResultUrl();
     let result: "connected" | "error" = "error";
     try {
-      this.config.requireEnabled("calendarSync");
       const input = parseGoogleOAuthCallbackQuery(request.query);
       result = await this.connections.handleCallback(input);
     } catch {
@@ -74,8 +76,6 @@ export class GoogleCalendarCallbackController {
 
     const redirect = new URL(resultUrl);
     redirect.searchParams.set("calendar", result);
-    response.setHeader("Cache-Control", "no-store");
-    response.setHeader("Pragma", "no-cache");
     response.redirect(HttpStatus.SEE_OTHER, redirect.toString());
   }
 }

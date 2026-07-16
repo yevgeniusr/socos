@@ -359,7 +359,8 @@ function configuredString(value: unknown): string {
 function configuredUrl(value: unknown): string {
   const configured = configuredString(value);
   try {
-    return new URL(configured).toString();
+    new URL(configured);
+    return configured;
   } catch {
     throw integrationUnavailable();
   }
