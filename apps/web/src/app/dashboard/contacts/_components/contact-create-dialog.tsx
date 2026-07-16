@@ -7,6 +7,7 @@ import type {
   ContactDetail,
   CreateContactPayload,
 } from "@/lib/contact-contracts";
+import { getFocusLoopTarget } from "./dialog-focus";
 
 const inputClass =
   "mt-1 min-h-11 w-full rounded-lg border border-outline-variant/30 bg-surface-container-high px-3 text-sm text-on-surface focus:border-primary focus:outline-none";
@@ -33,13 +34,31 @@ export default function ContactCreateDialog({
   const [draft, setDraft] = useState(emptyDraft);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const dialogRef = useRef<HTMLElement>(null);
   const firstInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
     firstInputRef.current?.focus();
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab" || !dialogRef.current) return;
+      const controls = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      );
+      const target = getFocusLoopTarget(
+        controls,
+        document.activeElement,
+        event.shiftKey
+      );
+      if (!target) return;
+      event.preventDefault();
+      target.focus();
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -125,6 +144,7 @@ export default function ContactCreateDialog({
         aria-hidden="true"
       />
       <section
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="create-contact-title"
