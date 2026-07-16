@@ -32,6 +32,10 @@ const calendarLocationMigrationPath = resolve(
   root,
   "services/api/prisma/migrations/20260716150000_calendar_location/migration.sql",
 );
+const eventDiscoveryMigrationPath = resolve(
+  root,
+  "services/api/prisma/migrations/20260716160000_event_discovery/migration.sql",
+);
 const expectedBriefTables = [
   "BriefBatch",
   "BriefItem",
@@ -709,6 +713,189 @@ const expectedCalendarLocationChecks = Object.keys(
   expectedCalendarLocationCheckPredicates,
 );
 
+const expectedEventDiscoveryColumns = {
+  EventPreference: [
+    ["id", "text", "NO"],
+    ["ownerId", "text", "NO"],
+    ["interestTagsCiphertext", "bytea", "NO"],
+    ["interestTagsIv", "bytea", "NO"],
+    ["interestTagsTag", "bytea", "NO"],
+    ["interestTagsKeyVersion", "integer", "NO"],
+    ["maxDistanceKm", "numeric", "NO", /50(?:\.00)?/, 6, 2],
+    ["travelSpeedKph", "integer", "NO", /30/],
+    ["travelBufferMinutes", "integer", "NO", /15/],
+    ["createdAt", "timestamp without time zone", "NO", /CURRENT_TIMESTAMP/],
+    ["updatedAt", "timestamp without time zone", "NO"],
+  ],
+  EventSource: [
+    ["id", "text", "NO"],
+    ["ownerId", "text", "NO"],
+    ["provider", "text", "NO", /'ics'::text/],
+    ["externalSourceId", "text", "NO"],
+    ["name", "text", "NO"],
+    ["feedUrlMac", "text", "NO"],
+    ["feedUrlCiphertext", "bytea", "NO"],
+    ["feedUrlIv", "bytea", "NO"],
+    ["feedUrlTag", "bytea", "NO"],
+    ["feedUrlKeyVersion", "integer", "NO"],
+    ["allowedHost", "text", "NO"],
+    ["city", "text", "YES"],
+    ["countryCode", "text", "YES"],
+    ["socialWeight", "integer", "NO", /5/],
+    ["status", "text", "NO", /'active'::text/],
+    ["pollIntervalMinutes", "integer", "NO", /60/],
+    ["nextPollAt", "timestamp without time zone", "NO"],
+    ["leaseUntil", "timestamp without time zone", "YES"],
+    ["lastPolledAt", "timestamp without time zone", "YES"],
+    ["errorCode", "text", "YES"],
+    ["createdAt", "timestamp without time zone", "NO", /CURRENT_TIMESTAMP/],
+    ["updatedAt", "timestamp without time zone", "NO"],
+  ],
+  DiscoveredEvent: [
+    ["id", "text", "NO"],
+    ["ownerId", "text", "NO"],
+    ["sourceId", "text", "NO"],
+    ["providerEventIdMac", "text", "NO"],
+    ["providerEventIdCiphertext", "bytea", "NO"],
+    ["providerEventIdIv", "bytea", "NO"],
+    ["providerEventIdTag", "bytea", "NO"],
+    ["providerEventIdKeyVersion", "integer", "NO"],
+    ["canonicalMac", "text", "NO"],
+    ["title", "text", "NO"],
+    ["descriptionExcerpt", "text", "YES"],
+    ["url", "text", "YES"],
+    ["startAt", "timestamp without time zone", "NO"],
+    ["endAt", "timestamp without time zone", "NO"],
+    ["timeZone", "text", "YES"],
+    ["venueName", "text", "YES"],
+    ["address", "text", "YES"],
+    ["city", "text", "YES"],
+    ["countryCode", "text", "YES"],
+    ["latitude", "numeric", "YES", undefined, 9, 6],
+    ["longitude", "numeric", "YES", undefined, 9, 6],
+    ["category", "text", "YES"],
+    ["tags", "ARRAY", "NO", /ARRAY\[\]::text\[\]/],
+    ["status", "text", "NO", /'scheduled'::text/],
+    ["sourceUpdatedAt", "timestamp without time zone", "YES"],
+    ["discoveredAt", "timestamp without time zone", "NO", /CURRENT_TIMESTAMP/],
+    ["expiresAt", "timestamp without time zone", "NO"],
+    ["createdAt", "timestamp without time zone", "NO", /CURRENT_TIMESTAMP/],
+    ["updatedAt", "timestamp without time zone", "NO"],
+  ],
+};
+
+const expectedEventDiscoveryIndexes = [
+  ["EventPreference_ownerId_key", "EventPreference", true, ["ownerId"]],
+  [
+    "EventPreference_id_ownerId_key",
+    "EventPreference",
+    true,
+    ["id", "ownerId"],
+  ],
+  [
+    "EventSource_ownerId_provider_externalSourceId_key",
+    "EventSource",
+    true,
+    ["ownerId", "provider", "externalSourceId"],
+  ],
+  [
+    "EventSource_ownerId_feedUrlMac_key",
+    "EventSource",
+    true,
+    ["ownerId", "feedUrlMac"],
+  ],
+  ["EventSource_id_ownerId_key", "EventSource", true, ["id", "ownerId"]],
+  [
+    "EventSource_status_nextPollAt_leaseUntil_idx",
+    "EventSource",
+    false,
+    ["status", "nextPollAt", "leaseUntil"],
+  ],
+  [
+    "DiscoveredEvent_sourceId_providerEventIdMac_key",
+    "DiscoveredEvent",
+    true,
+    ["sourceId", "providerEventIdMac"],
+  ],
+  [
+    "DiscoveredEvent_id_ownerId_key",
+    "DiscoveredEvent",
+    true,
+    ["id", "ownerId"],
+  ],
+  [
+    "DiscoveredEvent_ownerId_startAt_status_city_idx",
+    "DiscoveredEvent",
+    false,
+    ["ownerId", "startAt", "status", "city"],
+  ],
+  [
+    "DiscoveredEvent_sourceId_canonicalMac_idx",
+    "DiscoveredEvent",
+    false,
+    ["sourceId", "canonicalMac"],
+  ],
+];
+
+const expectedEventDiscoveryForeignKeys = [
+  [
+    "EventPreference_ownerId_fkey",
+    "EventPreference",
+    ["ownerId"],
+    "User",
+    ["id"],
+  ],
+  ["EventSource_ownerId_fkey", "EventSource", ["ownerId"], "User", ["id"]],
+  [
+    "DiscoveredEvent_ownerId_fkey",
+    "DiscoveredEvent",
+    ["ownerId"],
+    "User",
+    ["id"],
+  ],
+  [
+    "DiscoveredEvent_sourceId_ownerId_fkey",
+    "DiscoveredEvent",
+    ["sourceId", "ownerId"],
+    "EventSource",
+    ["id", "ownerId"],
+  ],
+];
+
+const expectedEventDiscoveryCheckPredicates = {
+  EventPreference_interestTagsEnvelope_check:
+    requiredEnvelopePredicate("interestTags"),
+  EventPreference_maxDistanceKm_check: `(("maxDistanceKm" >= (1)::numeric) AND ("maxDistanceKm" <= (500)::numeric))`,
+  EventPreference_travelSpeedKph_check: `(("travelSpeedKph" >= 1) AND ("travelSpeedKph" <= 300))`,
+  EventPreference_travelBufferMinutes_check: `(("travelBufferMinutes" >= 0) AND ("travelBufferMinutes" <= 240))`,
+  EventSource_provider_check: `(provider = 'ics'::text)`,
+  EventSource_feedUrlMac_check: macPredicate("feedUrlMac"),
+  EventSource_feedUrlEnvelope_check: requiredEnvelopePredicate("feedUrl"),
+  EventSource_countryCode_check: `(("countryCode" IS NULL) OR ("countryCode" ~ '^[A-Z]{2}$'::text))`,
+  EventSource_socialWeight_check: `(("socialWeight" >= 0) AND ("socialWeight" <= 10))`,
+  EventSource_status_check: enumPredicate("status", [
+    "active",
+    "disabled",
+    "error",
+  ]),
+  EventSource_pollIntervalMinutes_check: `(("pollIntervalMinutes" >= 15) AND ("pollIntervalMinutes" <= 1440))`,
+  DiscoveredEvent_providerEventIdMac_check: macPredicate("providerEventIdMac"),
+  DiscoveredEvent_providerEventIdEnvelope_check:
+    requiredEnvelopePredicate("providerEventId"),
+  DiscoveredEvent_canonicalMac_check: macPredicate("canonicalMac"),
+  DiscoveredEvent_countryCode_check: `(("countryCode" IS NULL) OR ("countryCode" ~ '^[A-Z]{2}$'::text))`,
+  DiscoveredEvent_status_check: enumPredicate("status", [
+    "scheduled",
+    "cancelled",
+    "expired",
+  ]),
+  DiscoveredEvent_timeRange_check: `("endAt" > "startAt")`,
+  DiscoveredEvent_coordinates_check: `(((latitude IS NULL) AND (longitude IS NULL)) OR ((latitude IS NOT NULL) AND (longitude IS NOT NULL) AND ((latitude >= ('-90'::integer)::numeric) AND (latitude <= (90)::numeric)) AND ((longitude >= ('-180'::integer)::numeric) AND (longitude <= (180)::numeric))))`,
+};
+const expectedEventDiscoveryChecks = Object.keys(
+  expectedEventDiscoveryCheckPredicates,
+);
+
 test("approval persistence derives executable data only from the proposal", () => {
   const schema = readFileSync(
     resolve(root, "services/api/prisma/schema.prisma"),
@@ -783,6 +970,38 @@ test("calendar and location schema declares the exact encrypted persistence boun
     migration,
     /CREATE UNIQUE INDEX "CalendarWatch_connectionId_targetType_targetKey(?:_status)?_key"/,
   );
+});
+
+test("event discovery schema declares the exact public and encrypted persistence boundary", () => {
+  const schema = readFileSync(
+    resolve(root, "services/api/prisma/schema.prisma"),
+    "utf8",
+  );
+  assert.equal(
+    existsSync(eventDiscoveryMigrationPath),
+    true,
+    "event discovery migration file is missing",
+  );
+  const migration = existsSync(eventDiscoveryMigrationPath)
+    ? readFileSync(eventDiscoveryMigrationPath, "utf8")
+    : "";
+
+  for (const table of Object.keys(expectedEventDiscoveryColumns)) {
+    assert.match(schema, new RegExp(`model ${table} \\{`));
+    assert.match(migration, new RegExp(`CREATE TABLE "${table}"`));
+  }
+  for (const check of expectedEventDiscoveryChecks) {
+    assert.match(
+      migration,
+      new RegExp(`CONSTRAINT "${check}" CHECK`),
+      `missing named check ${check}`,
+    );
+  }
+  assert.doesNotMatch(
+    migration,
+    /"(?:interestTags|feedUrl|providerEventId)Ciphertext"\s+BYTEA\s+(?:DEFAULT|NULL)/,
+  );
+  assert.doesNotMatch(migration, /"(?:id|updatedAt)"[^,\n]+DEFAULT/);
 });
 
 if (!databaseUrl) {
@@ -1192,6 +1411,381 @@ if (!databaseUrl) {
     assert.match(
       trigger.rows[0].definition,
       /BEFORE (?:UPDATE OR DELETE|DELETE OR UPDATE)/,
+    );
+  }
+
+  async function assertEventDiscoverySchema(client) {
+    const tables = Object.keys(expectedEventDiscoveryColumns);
+    for (const table of tables) {
+      assert.equal(
+        await tableExists(client, table),
+        true,
+        `missing table ${table}`,
+      );
+      const result = await client.query(
+        `SELECT column_name, data_type, udt_name, is_nullable, column_default,
+                datetime_precision, numeric_precision, numeric_scale
+           FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = $1
+          ORDER BY ordinal_position`,
+        [table],
+      );
+      const expected = expectedEventDiscoveryColumns[table];
+      assert.deepEqual(
+        result.rows.map(({ column_name }) => column_name),
+        expected.map(([name]) => name),
+        `${table} columns differ from the contract`,
+      );
+      for (const [
+        name,
+        type,
+        nullable,
+        defaultPattern,
+        numericPrecision,
+        numericScale,
+      ] of expected) {
+        const column = result.rows.find((row) => row.column_name === name);
+        assert.equal(
+          column?.data_type,
+          type,
+          `${table}.${name} has the wrong type`,
+        );
+        assert.equal(
+          column?.is_nullable,
+          nullable,
+          `${table}.${name} has the wrong nullability`,
+        );
+        if (type === "timestamp without time zone") {
+          assert.equal(
+            column?.datetime_precision,
+            3,
+            `${table}.${name} must use TIMESTAMP(3)`,
+          );
+        }
+        if (type === "ARRAY") {
+          assert.equal(
+            column?.udt_name,
+            "_text",
+            `${table}.${name} must use PostgreSQL TEXT[]`,
+          );
+        }
+        if (type === "numeric") {
+          assert.equal(
+            column?.numeric_precision,
+            numericPrecision,
+            `${table}.${name} has the wrong numeric precision`,
+          );
+          assert.equal(
+            column?.numeric_scale,
+            numericScale,
+            `${table}.${name} has the wrong numeric scale`,
+          );
+        }
+        if (defaultPattern) {
+          assert.match(
+            column?.column_default ?? "",
+            defaultPattern,
+            `${table}.${name} has the wrong default`,
+          );
+        } else {
+          assert.equal(
+            column?.column_default,
+            null,
+            `${table}.${name} must not have a SQL default`,
+          );
+        }
+      }
+    }
+
+    const expectedPrimaryKeys = tables
+      .map((table) => ({ name: `${table}_pkey`, table, columns: ["id"] }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+    const primaryKeys = await client.query(
+      `SELECT c.conname AS name, t.relname AS table,
+              ARRAY(
+                SELECT a.attname
+                  FROM unnest(c.conkey) WITH ORDINALITY AS key(attnum, position)
+                  JOIN pg_attribute a
+                    ON a.attrelid = c.conrelid AND a.attnum = key.attnum
+                 ORDER BY key.position
+              )::text[] AS columns
+         FROM pg_constraint c
+         JOIN pg_class t ON t.oid = c.conrelid
+         JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE n.nspname = 'public' AND c.contype = 'p'
+          AND t.relname = ANY($1::text[])
+        ORDER BY c.conname`,
+      [tables],
+    );
+    assert.deepEqual(primaryKeys.rows, expectedPrimaryKeys);
+
+    const expectedIndexes = [
+      ...expectedPrimaryKeys.map(({ name, table, columns }) => ({
+        name,
+        table,
+        unique: true,
+        primary: true,
+        columns,
+      })),
+      ...expectedEventDiscoveryIndexes.map(
+        ([name, table, unique, columns]) => ({
+          name,
+          table,
+          unique,
+          primary: false,
+          columns,
+        }),
+      ),
+    ].sort((left, right) => left.name.localeCompare(right.name));
+    const indexes = await client.query(
+      `SELECT idx.relname AS name, t.relname AS table,
+              i.indisunique AS unique, i.indisprimary AS primary,
+              ARRAY(
+                SELECT a.attname
+                  FROM unnest(i.indkey) WITH ORDINALITY AS key(attnum, position)
+                  JOIN pg_attribute a
+                    ON a.attrelid = i.indrelid AND a.attnum = key.attnum
+                 WHERE key.position <= i.indnkeyatts
+                 ORDER BY key.position
+              )::text[] AS columns
+         FROM pg_index i
+         JOIN pg_class idx ON idx.oid = i.indexrelid
+         JOIN pg_class t ON t.oid = i.indrelid
+         JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE n.nspname = 'public' AND t.relname = ANY($1::text[])
+        ORDER BY idx.relname`,
+      [tables],
+    );
+    assert.deepEqual(
+      indexes.rows,
+      expectedIndexes,
+      "event discovery index catalog differs from the contract",
+    );
+
+    const checks = await client.query(
+      `SELECT c.conname AS name, t.relname AS table,
+              pg_get_expr(c.conbin, c.conrelid, false) AS predicate
+         FROM pg_constraint c
+         JOIN pg_class t ON t.oid = c.conrelid
+         JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE n.nspname = 'public' AND c.contype = 'c'
+          AND t.relname = ANY($1::text[])
+        ORDER BY c.conname`,
+      [tables],
+    );
+    const expectedChecks = Object.entries(expectedEventDiscoveryCheckPredicates)
+      .map(([name, predicate]) => ({
+        name,
+        table: name.slice(0, name.indexOf("_")),
+        predicate,
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+    assert.deepEqual(
+      checks.rows,
+      expectedChecks,
+      "event discovery check catalog differs from the exact canonical predicates",
+    );
+
+    const foreignKeys = await client.query(
+      `SELECT c.conname AS name, t.relname AS table,
+              ARRAY(
+                SELECT a.attname
+                  FROM unnest(c.conkey) WITH ORDINALITY AS key(attnum, position)
+                  JOIN pg_attribute a
+                    ON a.attrelid = c.conrelid AND a.attnum = key.attnum
+                 ORDER BY key.position
+              )::text[] AS columns,
+              rt.relname AS "referencedTable",
+              ARRAY(
+                SELECT a.attname
+                  FROM unnest(c.confkey) WITH ORDINALITY AS key(attnum, position)
+                  JOIN pg_attribute a
+                    ON a.attrelid = c.confrelid AND a.attnum = key.attnum
+                 ORDER BY key.position
+              )::text[] AS "referencedColumns",
+              CASE c.confdeltype WHEN 'c' THEN 'CASCADE' ELSE c.confdeltype::text END AS "deleteAction",
+              CASE c.confupdtype WHEN 'c' THEN 'CASCADE' ELSE c.confupdtype::text END AS "updateAction"
+         FROM pg_constraint c
+         JOIN pg_class t ON t.oid = c.conrelid
+         JOIN pg_class rt ON rt.oid = c.confrelid
+         JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE n.nspname = 'public' AND c.contype = 'f'
+          AND t.relname = ANY($1::text[])
+        ORDER BY c.conname`,
+      [tables],
+    );
+    const expectedForeignKeys = expectedEventDiscoveryForeignKeys
+      .map(([name, table, columns, referencedTable, referencedColumns]) => ({
+        name,
+        table,
+        columns,
+        referencedTable,
+        referencedColumns,
+        deleteAction: "CASCADE",
+        updateAction: "CASCADE",
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+    assert.deepEqual(
+      foreignKeys.rows,
+      expectedForeignKeys,
+      "event discovery foreign-key catalog differs from the contract",
+    );
+  }
+
+  async function assertEventDiscoveryBehavior(client) {
+    const iv = "decode(repeat('00', 12), 'hex')";
+    const tag = "decode(repeat('00', 16), 'hex')";
+    const ciphertext = "decode('01', 'hex')";
+    const expectConstraint = async (sql, name) => {
+      await assert.rejects(
+        client.query(sql),
+        new RegExp(`constraint "${name}"`, "i"),
+      );
+    };
+
+    await client.query(
+      `INSERT INTO "User" ("id", "email", "updatedAt") VALUES
+         ('event-owner', 'event-owner@example.invalid', CURRENT_TIMESTAMP),
+         ('event-other-owner', 'event-other-owner@example.invalid', CURRENT_TIMESTAMP);
+       INSERT INTO "EventPreference" (
+         "id", "ownerId", "interestTagsCiphertext", "interestTagsIv",
+         "interestTagsTag", "interestTagsKeyVersion", "maxDistanceKm", "updatedAt"
+       ) VALUES (
+         'preference-valid', 'event-owner', ${ciphertext}, ${iv}, ${tag}, 1, 1,
+         CURRENT_TIMESTAMP
+       );
+       INSERT INTO "EventSource" (
+         "id", "ownerId", "externalSourceId", "name", "feedUrlMac",
+         "feedUrlCiphertext", "feedUrlIv", "feedUrlTag", "feedUrlKeyVersion",
+         "allowedHost", "countryCode", "socialWeight", "pollIntervalMinutes",
+         "nextPollAt", "updatedAt"
+       ) VALUES (
+         'event-source-valid', 'event-owner', 'source-uuid', 'Synthetic events',
+         repeat('a', 64), ${ciphertext}, ${iv}, ${tag}, 1, 'events.example.invalid',
+         'AE', 0, 15, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+       );
+       INSERT INTO "DiscoveredEvent" (
+         "id", "ownerId", "sourceId", "providerEventIdMac",
+         "providerEventIdCiphertext", "providerEventIdIv", "providerEventIdTag",
+         "providerEventIdKeyVersion", "canonicalMac", "title", "startAt", "endAt",
+         "countryCode", "latitude", "longitude", "expiresAt", "updatedAt"
+       ) VALUES (
+         'discovered-event-valid', 'event-owner', 'event-source-valid', repeat('b', 64),
+         ${ciphertext}, ${iv}, ${tag}, 1, repeat('c', 64), 'Synthetic event',
+         CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '1 hour', 'US', 90, -180,
+         CURRENT_TIMESTAMP + INTERVAL '14 days', CURRENT_TIMESTAMP
+       );`,
+    );
+
+    const defaults = await client.query(
+      `SELECT
+         (SELECT json_build_object(
+           'speed', "travelSpeedKph", 'buffer', "travelBufferMinutes"
+         ) FROM "EventPreference" WHERE "id" = 'preference-valid') AS preference,
+         (SELECT json_build_object(
+           'provider', "provider", 'status', "status"
+         ) FROM "EventSource" WHERE "id" = 'event-source-valid') AS source,
+         (SELECT json_build_object(
+           'status', "status", 'tags', "tags"
+         ) FROM "DiscoveredEvent" WHERE "id" = 'discovered-event-valid') AS event`,
+    );
+    assert.deepEqual(defaults.rows[0], {
+      preference: { speed: 30, buffer: 15 },
+      source: { provider: "ics", status: "active" },
+      event: { status: "scheduled", tags: [] },
+    });
+
+    await expectConstraint(
+      `UPDATE "EventPreference" SET "interestTagsIv" = decode('00', 'hex') WHERE "id" = 'preference-valid'`,
+      "EventPreference_interestTagsEnvelope_check",
+    );
+    await expectConstraint(
+      `UPDATE "EventPreference" SET "maxDistanceKm" = 500.01 WHERE "id" = 'preference-valid'`,
+      "EventPreference_maxDistanceKm_check",
+    );
+    await expectConstraint(
+      `UPDATE "EventPreference" SET "travelSpeedKph" = 301 WHERE "id" = 'preference-valid'`,
+      "EventPreference_travelSpeedKph_check",
+    );
+    await expectConstraint(
+      `UPDATE "EventPreference" SET "travelBufferMinutes" = -1 WHERE "id" = 'preference-valid'`,
+      "EventPreference_travelBufferMinutes_check",
+    );
+    await expectConstraint(
+      `UPDATE "EventSource" SET "provider" = 'private-api' WHERE "id" = 'event-source-valid'`,
+      "EventSource_provider_check",
+    );
+    await expectConstraint(
+      `UPDATE "EventSource" SET "feedUrlMac" = 'ABC' WHERE "id" = 'event-source-valid'`,
+      "EventSource_feedUrlMac_check",
+    );
+    await expectConstraint(
+      `UPDATE "EventSource" SET "feedUrlTag" = decode('00', 'hex') WHERE "id" = 'event-source-valid'`,
+      "EventSource_feedUrlEnvelope_check",
+    );
+    await expectConstraint(
+      `UPDATE "EventSource" SET "countryCode" = 'ae' WHERE "id" = 'event-source-valid'`,
+      "EventSource_countryCode_check",
+    );
+    await expectConstraint(
+      `UPDATE "EventSource" SET "socialWeight" = 11 WHERE "id" = 'event-source-valid'`,
+      "EventSource_socialWeight_check",
+    );
+    await expectConstraint(
+      `UPDATE "EventSource" SET "status" = 'unknown' WHERE "id" = 'event-source-valid'`,
+      "EventSource_status_check",
+    );
+    await expectConstraint(
+      `UPDATE "EventSource" SET "pollIntervalMinutes" = 14 WHERE "id" = 'event-source-valid'`,
+      "EventSource_pollIntervalMinutes_check",
+    );
+    await expectConstraint(
+      `UPDATE "DiscoveredEvent" SET "providerEventIdMac" = 'ABC' WHERE "id" = 'discovered-event-valid'`,
+      "DiscoveredEvent_providerEventIdMac_check",
+    );
+    await expectConstraint(
+      `UPDATE "DiscoveredEvent" SET "providerEventIdKeyVersion" = 0 WHERE "id" = 'discovered-event-valid'`,
+      "DiscoveredEvent_providerEventIdEnvelope_check",
+    );
+    await expectConstraint(
+      `UPDATE "DiscoveredEvent" SET "canonicalMac" = 'ABC' WHERE "id" = 'discovered-event-valid'`,
+      "DiscoveredEvent_canonicalMac_check",
+    );
+    await expectConstraint(
+      `UPDATE "DiscoveredEvent" SET "countryCode" = 'USA' WHERE "id" = 'discovered-event-valid'`,
+      "DiscoveredEvent_countryCode_check",
+    );
+    await expectConstraint(
+      `UPDATE "DiscoveredEvent" SET "status" = 'unknown' WHERE "id" = 'discovered-event-valid'`,
+      "DiscoveredEvent_status_check",
+    );
+    await expectConstraint(
+      `UPDATE "DiscoveredEvent" SET "endAt" = "startAt" WHERE "id" = 'discovered-event-valid'`,
+      "DiscoveredEvent_timeRange_check",
+    );
+    await expectConstraint(
+      `UPDATE "DiscoveredEvent" SET "longitude" = NULL WHERE "id" = 'discovered-event-valid'`,
+      "DiscoveredEvent_coordinates_check",
+    );
+    await expectConstraint(
+      `UPDATE "DiscoveredEvent" SET "latitude" = 90.000001 WHERE "id" = 'discovered-event-valid'`,
+      "DiscoveredEvent_coordinates_check",
+    );
+    await assert.rejects(
+      client.query(
+        `INSERT INTO "DiscoveredEvent" (
+           "id", "ownerId", "sourceId", "providerEventIdMac",
+           "providerEventIdCiphertext", "providerEventIdIv", "providerEventIdTag",
+           "providerEventIdKeyVersion", "canonicalMac", "title", "startAt", "endAt",
+           "expiresAt", "updatedAt"
+         ) VALUES (
+           'event-cross-owner', 'event-other-owner', 'event-source-valid', repeat('d', 64),
+           ${ciphertext}, ${iv}, ${tag}, 1, repeat('e', 64), 'Cross owner',
+           CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '1 hour',
+           CURRENT_TIMESTAMP + INTERVAL '14 days', CURRENT_TIMESTAMP
+         )`,
+      ),
+      /foreign key constraint/,
     );
   }
 
@@ -1821,7 +2415,7 @@ if (!databaseUrl) {
     });
   });
 
-  test("upgraded migration deployment adds brief, agent, calendar, and location schemas", async () => {
+  test("upgraded migration deployment adds brief, agent, calendar, location, and event schemas", async () => {
     await withClient(async (client) => {
       await resetLegacySchema(client);
       for (const path of preBriefMigrationPaths) {
@@ -1872,6 +2466,12 @@ if (!databaseUrl) {
       assert.equal(await tableExists(client, "GoogleOAuthAttempt"), false);
       await client.query(readFileSync(calendarLocationMigrationPath, "utf8"));
       await assertCalendarLocationSchema(client);
+      assert.equal(await tableExists(client, "EventPreference"), false);
+      assert.equal(await tableExists(client, "EventSource"), false);
+      assert.equal(await tableExists(client, "DiscoveredEvent"), false);
+      await client.query(readFileSync(eventDiscoveryMigrationPath, "utf8"));
+      await assertEventDiscoverySchema(client);
+      await assertCalendarLocationSchema(client);
 
       const after = await client.query(
         `SELECT
@@ -1917,6 +2517,7 @@ if (!databaseUrl) {
       await assertOwnerConsistency(client);
       await assertAgentOwnerConsistency(client);
       await assertCalendarLocationBehavior(client);
+      await assertEventDiscoveryBehavior(client);
     });
 
     const output = execFileSync("node", ["scripts/compare-schema.mjs"], {
@@ -1950,6 +2551,8 @@ if (!databaseUrl) {
     await withClient(assertAgentInterfaceSchema);
     await withClient(assertCalendarLocationSchema);
     await withClient(assertCalendarLocationBehavior);
+    await withClient(assertEventDiscoverySchema);
+    await withClient(assertEventDiscoveryBehavior);
 
     execFileSync(
       "pnpm",
@@ -1962,5 +2565,6 @@ if (!databaseUrl) {
     );
     await withClient(assertAgentInterfaceSchema);
     await withClient(assertCalendarLocationSchema);
+    await withClient(assertEventDiscoverySchema);
   });
 }

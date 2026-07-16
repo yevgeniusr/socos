@@ -50,4 +50,11 @@ export const PERSONAL_DATA_ENVELOPES = [
   envelope("LocationSample", "coordinates", "location-sample-coordinates"),
   envelope("DerivedVisit", "centroid", "derived-visit-centroid"),
   envelope("LocationAlias", "alias", "location-alias"),
+  envelope("EventPreference", "interestTags", "event-preference-interest-tags"),
+  envelope("EventSource", "feedUrl", "event-source-feed-url"),
+  envelope(
+    "DiscoveredEvent",
+    "providerEventId",
+    "discovered-event-provider-event-id"
+  ),
 ] as const satisfies readonly PersonalDataEnvelopeDefinition[];

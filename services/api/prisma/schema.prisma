@@ -53,6 +53,9 @@ model User {
   derivedVisits             DerivedVisit[]
   locationAliases           LocationAlias[]
   cityStays                 CityStay[]
+  eventPreferences          EventPreference[]
+  eventSources              EventSource[]
+  discoveredEvents          DiscoveredEvent[]
 }
 
 // ==================== CALENDAR AND LOCATION ====================
@@ -338,6 +341,96 @@ model PersonalDataDeletionAudit {
   createdAt         DateTime @default(now())
 
   @@index([ownerMac, deletedAt])
+}
+
+// ==================== EVENT DISCOVERY ====================
+
+model EventPreference {
+  id                     String   @id @default(cuid())
+  ownerId                String   @unique
+  owner                  User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  interestTagsCiphertext Bytes
+  interestTagsIv         Bytes
+  interestTagsTag        Bytes
+  interestTagsKeyVersion Int
+  maxDistanceKm          Decimal  @default(50) @db.Decimal(6, 2)
+  travelSpeedKph         Int      @default(30)
+  travelBufferMinutes    Int      @default(15)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@unique([id, ownerId])
+}
+
+model EventSource {
+  id                  String            @id @default(cuid())
+  ownerId             String
+  owner               User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  provider            String            @default("ics")
+  externalSourceId    String
+  name                String
+  feedUrlMac          String
+  feedUrlCiphertext   Bytes
+  feedUrlIv           Bytes
+  feedUrlTag          Bytes
+  feedUrlKeyVersion   Int
+  allowedHost         String
+  city                String?
+  countryCode         String?
+  socialWeight        Int               @default(5)
+  status              String            @default("active")
+  pollIntervalMinutes Int               @default(60)
+  nextPollAt          DateTime
+  leaseUntil          DateTime?
+  lastPolledAt        DateTime?
+  errorCode           String?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  events              DiscoveredEvent[]
+
+  @@unique([ownerId, provider, externalSourceId])
+  @@unique([ownerId, feedUrlMac])
+  @@unique([id, ownerId])
+  @@index([status, nextPollAt, leaseUntil])
+}
+
+model DiscoveredEvent {
+  id                        String      @id @default(cuid())
+  ownerId                   String
+  owner                     User        @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  sourceId                  String
+  source                    EventSource @relation(fields: [sourceId, ownerId], references: [id, ownerId], onDelete: Cascade)
+  providerEventIdMac        String
+  providerEventIdCiphertext Bytes
+  providerEventIdIv         Bytes
+  providerEventIdTag        Bytes
+  providerEventIdKeyVersion Int
+  canonicalMac              String
+  title                     String
+  descriptionExcerpt        String?
+  url                       String?
+  startAt                   DateTime
+  endAt                     DateTime
+  timeZone                  String?
+  venueName                 String?
+  address                   String?
+  city                      String?
+  countryCode               String?
+  latitude                  Decimal?    @db.Decimal(9, 6)
+  longitude                 Decimal?    @db.Decimal(9, 6)
+  category                  String?
+  tags                      String[]    @default([])
+  status                    String      @default("scheduled")
+  sourceUpdatedAt           DateTime?
+  discoveredAt              DateTime    @default(now())
+  expiresAt                 DateTime
+  createdAt                 DateTime    @default(now())
+  updatedAt                 DateTime    @updatedAt
+
+  @@unique([sourceId, providerEventIdMac])
+  @@unique([id, ownerId])
+  @@index([ownerId, startAt, status, city])
+  @@index([sourceId, canonicalMac])
 }
 
 // ==================== VAULT ====================

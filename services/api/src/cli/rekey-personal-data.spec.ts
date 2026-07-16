@@ -1,5 +1,5 @@
 import type { ConfigService } from "@nestjs/config";
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import { PersonalDataCipherService } from "../modules/personal-data/personal-data-cipher.service.js";
 import { PERSONAL_DATA_ENVELOPES } from "../modules/personal-data/personal-data-envelope.registry.js";
 import {
@@ -138,7 +138,7 @@ function envelopeKey(
 }
 
 describe("personal data rekey command", () => {
-  it("registers exactly every Migration 1 calendar and location envelope", () => {
+  it("registers exactly every encrypted personal-data envelope and purpose", () => {
     expect(
       PERSONAL_DATA_ENVELOPES.map(({ model, name, purpose }) => [
         model,
@@ -169,7 +169,85 @@ describe("personal data rekey command", () => {
       ["LocationSample", "coordinates", "location-sample-coordinates"],
       ["DerivedVisit", "centroid", "derived-visit-centroid"],
       ["LocationAlias", "alias", "location-alias"],
+      ["EventPreference", "interestTags", "event-preference-interest-tags"],
+      ["EventSource", "feedUrl", "event-source-feed-url"],
+      [
+        "DiscoveredEvent",
+        "providerEventId",
+        "discovered-event-provider-event-id",
+      ],
     ]);
+  });
+
+  it("keeps the registry complete for every Prisma encrypted envelope", () => {
+    const suffixes = ["Ciphertext", "Iv", "Tag", "KeyVersion"] as const;
+    const groups = new Map<
+      string,
+      Array<{
+        suffix: (typeof suffixes)[number];
+        type: string;
+        required: boolean;
+        column: string;
+      }>
+    >();
+
+    for (const model of Prisma.dmmf.datamodel.models) {
+      for (const field of model.fields) {
+        const suffix = suffixes.find((candidate) =>
+          field.name.endsWith(candidate)
+        );
+        if (!suffix || field.kind !== "scalar") continue;
+        const base = field.name.slice(0, -suffix.length);
+        const key = `${model.name}.${base}`;
+        const members = groups.get(key) ?? [];
+        members.push({
+          suffix,
+          type: field.type,
+          required: field.isRequired,
+          column: field.dbName ?? field.name,
+        });
+        groups.set(key, members);
+      }
+    }
+
+    for (const [key, members] of groups) {
+      expect({
+        key,
+        fields: members
+          .map(({ suffix, type }) => [suffix, type])
+          .sort(([left], [right]) => left.localeCompare(right)),
+      }).toEqual({
+        key,
+        fields: [
+          ["Ciphertext", "Bytes"],
+          ["Iv", "Bytes"],
+          ["KeyVersion", "Int"],
+          ["Tag", "Bytes"],
+        ],
+      });
+      expect(new Set(members.map(({ required }) => required)).size).toBe(1);
+      const base = key.slice(key.indexOf(".") + 1);
+      for (const member of members) {
+        expect(member.column).toBe(`${base}${member.suffix}`);
+      }
+    }
+
+    const registryKeys = PERSONAL_DATA_ENVELOPES.map(envelopeKey);
+    expect(new Set(registryKeys).size).toBe(registryKeys.length);
+    expect([...registryKeys].sort()).toEqual([...groups.keys()].sort());
+    for (const envelope of PERSONAL_DATA_ENVELOPES) {
+      const columns = new Map(
+        groups
+          .get(envelopeKey(envelope))!
+          .map(({ suffix, column }) => [suffix, column])
+      );
+      expect(Object.fromEntries(columns)).toEqual({
+        Ciphertext: envelope.ciphertextColumn,
+        Iv: envelope.ivColumn,
+        Tag: envelope.tagColumn,
+        KeyVersion: envelope.keyVersionColumn,
+      });
+    }
   });
 
   it.each([
@@ -235,18 +313,18 @@ describe("personal data rekey command", () => {
       (line) => lines.push(line)
     );
 
-    expect(result).toEqual({ scanned: 15, rekeyed: 0, contended: 0 });
+    expect(result).toEqual({ scanned: 18, rekeyed: 0, contended: 0 });
     expect(reencrypt).not.toHaveBeenCalled();
     expect(store.pages).toEqual([]);
     expect(store.updates).toBe(0);
-    expect(lines).toHaveLength(16);
+    expect(lines).toHaveLength(19);
     expect(lines[0]).toBe(
       "registry=personal-data model=GoogleOAuthAttempt envelope=pkce scanned=1 rekeyed=0 contended=0"
     );
     expect(store.closed).toBe(true);
   });
 
-  it("re-encrypts every registered Migration 1 envelope to the explicit target", async () => {
+  it("re-encrypts every registered envelope to the explicit target", async () => {
     const store = new MemoryRekeyStore();
     const cipher = new PersonalDataCipherService(config());
     PERSONAL_DATA_ENVELOPES.forEach((_envelope, index) => {
@@ -259,7 +337,7 @@ describe("personal data rekey command", () => {
       cipher
     );
 
-    expect(result).toEqual({ scanned: 15, rekeyed: 15, contended: 0 });
+    expect(result).toEqual({ scanned: 18, rekeyed: 18, contended: 0 });
     PERSONAL_DATA_ENVELOPES.forEach((envelope, index) => {
       const row = store.rows.get(envelopeKey(envelope))?.[0];
       expect(row?.keyVersion).toBe(2);
@@ -451,14 +529,14 @@ describe("personal data rekey command", () => {
     expect(store.updates).toBe(0);
   });
 
-  it("resumes after interruption using only remaining source-version rows", async () => {
+  it("resumes an event envelope after interruption using only remaining source-version rows", async () => {
     const store = new MemoryRekeyStore();
     const cipher = new PersonalDataCipherService(config());
     store.seed(
-      0,
-      ["a", "b", "c"].map((id) => encryptedRow(cipher, 0, id))
+      15,
+      ["a", "b", "c"].map((id) => encryptedRow(cipher, 15, id))
     );
-    store.interruptTransaction = 2;
+    store.interruptTransaction = 17;
 
     await expect(
       runPersonalDataRekey(
@@ -468,7 +546,9 @@ describe("personal data rekey command", () => {
       )
     ).rejects.toThrow("synthetic-sensitive-interruption");
     expect(
-      store.rows.get("GoogleOAuthAttempt.pkce")?.map((row) => row.keyVersion)
+      store.rows
+        .get("EventPreference.interestTags")
+        ?.map((row) => row.keyVersion)
     ).toEqual([2, 2, 1]);
 
     store.interruptTransaction = undefined;
@@ -479,7 +559,9 @@ describe("personal data rekey command", () => {
     );
     expect(result).toEqual({ scanned: 1, rekeyed: 1, contended: 0 });
     expect(
-      store.rows.get("GoogleOAuthAttempt.pkce")?.map((row) => row.keyVersion)
+      store.rows
+        .get("EventPreference.interestTags")
+        ?.map((row) => row.keyVersion)
     ).toEqual([2, 2, 2]);
   });
 
