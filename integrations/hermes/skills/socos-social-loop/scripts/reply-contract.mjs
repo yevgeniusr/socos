@@ -1,25 +1,27 @@
-import { createHash } from "node:crypto";
+import { TextDecoder } from "node:util";
+import { realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 
 const ENTITY_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const DISCORD_MESSAGE_ID_PATTERN = /^[0-9]{17,20}$/;
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const DISCORD_EPOCH_MS = 1_420_070_400_000n;
 const MAX_MESSAGE_AGE_MS = 24 * 60 * 60 * 1_000;
-const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
-const INTERACTION_TYPES = new Set([
-  "call",
-  "message",
-  "meeting",
-  "note",
-  "email",
-  "social",
-]);
+const MAX_STDIN_BYTES = 64 * 1_024;
 const CHANNELS = new Set(["email", "sms", "social", "other"]);
-const IDEMPOTENCY_STEPS = new Set([
-  "feedback",
-  "log",
-  "complete",
-  "proposal",
+const IDEMPOTENCY_STEPS = new Set(["feedback", "complete", "proposal"]);
+const ALLOWED_MUTATION_TOOLS = new Set([
+  "socos_brief_feedback",
+  "socos_complete_quest",
+  "socos_propose_action",
 ]);
+const ENVELOPE_KEYS = [
+  "brief",
+  "editedTimestamp",
+  "messageId",
+  "nowMs",
+  "text",
+];
 const RFC3339_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|([+-])(\d{2}):(\d{2}))$/;
 
@@ -46,8 +48,7 @@ function parseReplyUnchecked(input) {
     return { kind: "feedback", action: "accept", itemId: entityId(match[1]) };
   }
 
-  match =
-    /^socos snooze item:([A-Za-z0-9_-]+) until (\S+)$/.exec(input);
+  match = /^socos snooze item:([A-Za-z0-9_-]+) until (\S+)$/.exec(input);
   if (match) {
     return {
       kind: "feedback",
@@ -62,8 +63,7 @@ function parseReplyUnchecked(input) {
     return { kind: "feedback", action: "dismiss", itemId: entityId(match[1]) };
   }
 
-  match =
-    /^socos dismiss item:([A-Za-z0-9_-]+) because ([^|]+)$/.exec(input);
+  match = /^socos dismiss item:([A-Za-z0-9_-]+) because ([^|]+)$/.exec(input);
   if (match) {
     return {
       kind: "feedback",
@@ -94,19 +94,6 @@ function parseReplyUnchecked(input) {
       kind: "quest-completion",
       questId: entityId(match[1]),
       reminderId: entityId(match[2]),
-    };
-  }
-
-  match =
-    /^socos did quest:([A-Za-z0-9_-]+) via ([a-z]+) \| ([^|]+)$/.exec(
-      input,
-    );
-  if (match && INTERACTION_TYPES.has(match[2])) {
-    return {
-      kind: "quest-log-completion",
-      questId: entityId(match[1]),
-      interactionType: match[2],
-      summary: boundedText(match[3], 10_000),
     };
   }
 
@@ -152,10 +139,9 @@ function parseReplyUnchecked(input) {
     };
   }
 
-  match =
-    /^socos propose invitation item:([A-Za-z0-9_-]+) \| ([^|]+)$/.exec(
-      input,
-    );
+  match = /^socos propose invitation item:([A-Za-z0-9_-]+) \| ([^|]+)$/.exec(
+    input,
+  );
   if (match) {
     return {
       kind: "proposal",
@@ -221,9 +207,16 @@ export function renderAddress(kind, id) {
 }
 
 export function addressBookForBrief(brief) {
-  if (!brief || typeof brief !== "object") {
+  if (!brief || typeof brief !== "object" || Array.isArray(brief)) {
     throw new Error("Invalid Socos brief.");
   }
+  if (brief.schemaVersion !== "1.0" && brief.schemaVersion !== "1.1") {
+    throw new Error("Invalid Socos brief.");
+  }
+  if (brief.schemaVersion === "1.1" && !Array.isArray(brief.events)) {
+    throw new Error("Invalid Socos brief.");
+  }
+
   const items = [];
   for (const [key, itemKind] of [
     ["people", "person"],
@@ -249,11 +242,17 @@ export function addressBookForBrief(brief) {
     const itemId = entityId(quest?.itemId);
     if (
       !["interaction", "reminder"].includes(quest?.completionType) ||
+      !["pending", "completed"].includes(quest?.status) ||
       !items.some((item) => item.itemId === itemId)
     ) {
       throw new Error("Invalid Socos brief.");
     }
-    return { questId, itemId, completionType: quest.completionType };
+    return {
+      questId,
+      itemId,
+      completionType: quest.completionType,
+      status: quest.status,
+    };
   });
   if (new Set(quests.map((quest) => quest.questId)).size !== quests.length) {
     throw new Error("Invalid Socos brief.");
@@ -285,28 +284,18 @@ export function assertKnownAddresses(command, book) {
     };
   }
 
-  if (
-    command.kind === "quest-completion" ||
-    command.kind === "quest-log-completion"
-  ) {
+  if (command.kind === "quest-completion") {
     const quest = book.quests.find((entry) => entry.questId === command.questId);
     if (!quest) throw new Error("Unknown full quest address.");
+    if (quest.status !== "pending") throw new Error("Quest is not pending.");
     const item = book.items.find((entry) => entry.itemId === quest.itemId);
     if (!item || item.contactId === null) {
       throw new Error("Quest does not resolve to a contact.");
     }
-    if (command.kind === "quest-completion") {
-      const evidenceType =
-        command.interactionId === undefined ? "reminder" : "interaction";
-      if (quest.completionType !== evidenceType) {
-        throw new Error(`Quest expects ${quest.completionType} evidence.`);
-      }
-    }
-    if (
-      command.kind === "quest-log-completion" &&
-      quest.completionType !== "interaction"
-    ) {
-      throw new Error("Quest does not accept interaction evidence.");
+    const evidenceType =
+      command.interactionId === undefined ? "reminder" : "interaction";
+    if (quest.completionType !== evidenceType) {
+      throw new Error(`Quest expects ${quest.completionType} evidence.`);
     }
     return {
       questId: quest.questId,
@@ -314,28 +303,21 @@ export function assertKnownAddresses(command, book) {
       contactId: item.contactId,
       itemKind: item.itemKind,
       completionType: quest.completionType,
+      status: quest.status,
     };
   }
 
   throw new Error("Invalid parsed Socos reply.");
 }
 
-export function canonicalizeReply(command) {
-  return JSON.stringify(sortJson(command));
-}
-
-export function discordIdempotencyKey({ messageId, command, step }) {
+export function discordIdempotencyKey({ messageId, step }) {
   if (!DISCORD_MESSAGE_ID_PATTERN.test(messageId)) {
     throw new Error("Invalid Discord message ID.");
   }
   if (!IDEMPOTENCY_STEPS.has(step)) {
     throw new Error("Invalid idempotency step.");
   }
-  const digest = createHash("sha256")
-    .update(canonicalizeReply(command))
-    .digest("hex")
-    .slice(0, 24);
-  const key = `dc.${messageId}.${digest}.${step}`;
+  const key = `dc.${messageId}.${step}`;
   if (!IDEMPOTENCY_KEY_PATTERN.test(key)) {
     throw new Error("Invalid idempotency key.");
   }
@@ -368,27 +350,115 @@ export function assertRecentDiscordMessage({ messageId, nowMs }) {
   return timestamp;
 }
 
-export function toolSequenceForReply(command) {
+export function planReply(input) {
+  try {
+    return planReplyUnchecked(input);
+  } catch {
+    throw new Error("Socos reply plan rejected.");
+  }
+}
+
+function planReplyUnchecked(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("Invalid planner input.");
+  }
+  if (!sameKeys(Object.keys(input).sort(), ENVELOPE_KEYS)) {
+    throw new Error("Invalid planner input.");
+  }
+  if (input.editedTimestamp !== null) {
+    throw new Error("Edited Discord messages are rejected.");
+  }
+  assertRecentDiscordMessage({ messageId: input.messageId, nowMs: input.nowMs });
+  const command = parseReply(input.text);
+  const book = addressBookForBrief(input.brief);
+  const resolved = assertKnownAddresses(command, book);
+
   if (command.kind === "feedback") {
-    return ["socos_brief_today", "socos_brief_feedback"];
+    const toolInput = {
+      itemId: command.itemId,
+      idempotencyKey: discordIdempotencyKey({
+        messageId: input.messageId,
+        step: "feedback",
+      }),
+      action: command.action,
+      ...(command.snoozedUntil === undefined
+        ? {}
+        : { snoozedUntil: command.snoozedUntil }),
+      ...(command.reason === undefined ? {} : { reason: command.reason }),
+    };
+    return { calls: [mutationCall("socos_brief_feedback", toolInput)] };
   }
+
   if (command.kind === "quest-completion") {
-    return ["socos_brief_today", "socos_complete_quest"];
+    const toolInput = {
+      questId: command.questId,
+      idempotencyKey: discordIdempotencyKey({
+        messageId: input.messageId,
+        step: "complete",
+      }),
+      ...(command.interactionId === undefined
+        ? { reminderId: command.reminderId }
+        : { interactionId: command.interactionId }),
+    };
+    return { calls: [mutationCall("socos_complete_quest", toolInput)] };
   }
-  if (command.kind === "quest-log-completion") {
-    return [
-      "socos_brief_today",
-      "socos_log_interaction",
-      "socos_complete_quest",
-    ];
-  }
+
   if (command.kind === "proposal") {
-    if (["message", "introduction", "invitation"].includes(command.actionType)) {
-      return ["socos_brief_today", "socos_propose_action"];
-    }
-    return ["socos_propose_action"];
+    const toolInput = {
+      actionType: command.actionType,
+      idempotencyKey: discordIdempotencyKey({
+        messageId: input.messageId,
+        step: "proposal",
+      }),
+      payload: proposalPayload(command, resolved),
+    };
+    return { calls: [mutationCall("socos_propose_action", toolInput)] };
   }
+
   throw new Error("Invalid parsed Socos reply.");
+}
+
+function proposalPayload(command, resolved) {
+  if (command.actionType === "message") {
+    return {
+      contactId: resolved.contactId,
+      channel: command.channel,
+      body: command.body,
+    };
+  }
+  if (command.actionType === "introduction") {
+    return {
+      contactId: resolved.contactId,
+      otherContactId: command.otherContactId,
+      context: command.context,
+    };
+  }
+  if (command.actionType === "invitation") {
+    return {
+      contactId: resolved.contactId,
+      title: command.title,
+      ...(command.scheduledAt === undefined
+        ? {}
+        : { scheduledAt: command.scheduledAt }),
+    };
+  }
+  if (command.actionType === "merge") {
+    return {
+      sourceContactId: command.sourceContactId,
+      targetContactId: command.targetContactId,
+    };
+  }
+  if (command.actionType === "delete") {
+    return { entityType: command.entityType, entityId: command.entityId };
+  }
+  throw new Error("Invalid proposal type.");
+}
+
+function mutationCall(tool, input) {
+  if (!ALLOWED_MUTATION_TOOLS.has(tool)) {
+    throw new Error("Forbidden Socos mutation tool.");
+  }
+  return { tool, input };
 }
 
 function entityId(value) {
@@ -418,7 +488,9 @@ function rfc3339(value) {
     .slice(1, 7)
     .map(Number);
   if (year === 0 || second > 59) throw invalidReply();
-  const nominal = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  const nominal = new Date(0);
+  nominal.setUTCHours(hour, minute, second, 0);
+  nominal.setUTCFullYear(year, month - 1, day);
   if (
     nominal.getUTCFullYear() !== year ||
     nominal.getUTCMonth() !== month - 1 ||
@@ -436,18 +508,50 @@ function rfc3339(value) {
   return value;
 }
 
-function sortJson(value) {
-  if (Array.isArray(value)) return value.map(sortJson);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.keys(value)
-        .sort()
-        .map((key) => [key, sortJson(value[key])]),
-    );
-  }
-  return value;
+function sameKeys(actual, expected) {
+  return (
+    actual.length === expected.length &&
+    actual.every((value, index) => value === expected[index])
+  );
 }
 
 function invalidReply() {
   return new Error("Invalid Socos reply.");
+}
+
+async function readBoundedStdin() {
+  const chunks = [];
+  let bytes = 0;
+  for await (const chunk of process.stdin) {
+    bytes += chunk.length;
+    if (bytes > MAX_STDIN_BYTES) {
+      throw new Error("Planner input is too large.");
+    }
+    chunks.push(chunk);
+  }
+  if (bytes === 0) throw new Error("Planner input is empty.");
+  return new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks));
+}
+
+async function runCli() {
+  if (process.argv.length !== 3 || process.argv[2] !== "plan") {
+    process.stderr.write("Socos reply plan rejected.\n");
+    process.exitCode = 64;
+    return;
+  }
+  try {
+    const raw = await readBoundedStdin();
+    const plan = planReply(JSON.parse(raw));
+    process.stdout.write(`${JSON.stringify(plan)}\n`);
+  } catch {
+    process.stderr.write("Socos reply plan rejected.\n");
+    process.exitCode = 1;
+  }
+}
+
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
+) {
+  await runCli();
 }

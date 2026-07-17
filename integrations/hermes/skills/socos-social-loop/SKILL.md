@@ -1,7 +1,7 @@
 ---
 name: socos-social-loop
 description: Use when rendering a Socos daily brief in Hermes or handling a Discord message that begins with the exact `socos` command prefix.
-version: 1.0.0
+version: 1.1.0
 author: Socos
 license: MIT
 metadata:
@@ -12,22 +12,17 @@ metadata:
 
 # Socos Social Loop
 
-## Overview
-
-Operate the relationship loop through authenticated Socos MCP.
-
 ## Daily Brief
 
-1. Call `socos_brief_today` with `{}`. Return exactly `[SILENT]` for
-   `BRIEF_NOT_READY`.
-2. Render concise people, dates, events, and quests. Preserve every full ID as
-   ``item:<itemId>`` or ``quest:<questId>``; never substitute a rank or alias.
-3. Show only relevant commands. Never expose credentials, full exports, or
-   precise location history.
+Call `socos_brief_today` with `{}`. Return exactly `[SILENT]` for
+`BRIEF_NOT_READY`. Render concise people, dates, events, and pending quests.
+Preserve every full ID as ``item:<itemId>`` or ``quest:<questId>``; never use a
+rank or truncated alias. Never expose credentials, full exports, or precise
+location history.
 
-## Strict Reply Contract
+## Reply Grammar
 
-Accept one single-line, lowercase command per Discord message:
+Accept one lowercase, single-line command:
 
 ```text
 socos accept item:<id>
@@ -36,7 +31,6 @@ socos dismiss item:<id>
 socos dismiss item:<id> because <reason>
 socos complete quest:<id> with interaction:<id>
 socos complete quest:<id> with reminder:<id>
-socos did quest:<id> via <call|message|meeting|note|email|social> | <summary>
 socos propose message item:<id> via <email|sms|social|other> | <body>
 socos propose introduction item:<id> with contact:<id> | <context>
 socos propose invitation item:<id> at <RFC3339> | <title>
@@ -45,50 +39,46 @@ socos propose merge contact:<source> into contact:<target>
 socos propose delete <contact|interaction|reminder>:<id>
 ```
 
-Reject fuzzy or multiple commands, missing offsets, truncated IDs, ambiguous
-contacts, messages older than 24 hours, and missing Discord message IDs. The
-executable grammar is `scripts/reply-contract.mjs`.
+There is no log-and-complete command. Completing a quest requires a full
+already-recorded interaction ID or already-completed reminder ID. A future
+server-side composite transaction is required before logging and completing can
+be one safe action.
 
-## MCP Mapping
+## Mandatory Planner
 
-Before mutation, call `socos_brief_today`, build an address book from its actual
-arrays, and require exact full-ID equality with `assertKnownAddresses`.
+Before every mutation:
 
-- `accept`, `snooze`, `dismiss`: call `socos_brief_feedback` with
-  `{ itemId, idempotencyKey, action }`, adding only `snoozedUntil` or `reason`
-  when that grammar supplies it.
-- Explicit `complete`: call `socos_complete_quest` with
-  `{ questId, idempotencyKey, interactionId }` or
-  `{ questId, idempotencyKey, reminderId }`, never both evidence fields.
-- `socos did`: re-read the brief; resolve `questId -> itemId -> contact.id` and
-  require an interaction quest. Call `socos_log_interaction` using the parsed
-  `{ contactId, type, content: summary, idempotencyKey }` with no `occurredAt`;
-  then call `socos_complete_quest` with its returned `interactionId`. Use
-  separate `log` and `complete` keys.
-- Contact-targeted proposals: re-read the brief and require exactly one contact.
-  Event items fail closed. Call `socos_propose_action` with
-  `{ actionType, idempotencyKey, payload }`; payload fields are exactly
-  `contactId/channel/body`, `contactId/otherContactId/context`, or
-  `contactId/title/scheduledAt` for the three item-targeted proposal types.
-- Merge payload is `{ sourceContactId, targetContactId }`. Delete payload is
-  `{ entityType, entityId }`. Use only the explicit full IDs in the command.
+1. Fetch `socos_brief_today` and retain the complete response in memory.
+2. Require Discord metadata with `editedTimestamp` explicitly present and
+   `null`. Reject edits, missing metadata, old/future messages, fuzzy commands,
+   missing offsets, unknown IDs, completed quests, and evidence-type mismatch.
+3. Run only:
 
-Before key derivation, require
-`assertRecentDiscordMessage({ messageId, nowMs: Date.now() })`. Then derive keys
-with `discordIdempotencyKey({ messageId, command, step })`. Retries reuse the
-exact input and key; retry only retryable results with bounded backoff.
+   ```text
+   node ~/.hermes/skills/socos/socos-social-loop/scripts/reply-contract.mjs plan
+   ```
 
-## Approval Boundary
+   Send one JSON object through process stdin with exactly `text`, `messageId`,
+   `editedTimestamp`, `nowMs`, and `brief`. Never place these values in argv, a
+   shell command, environment variable, or temporary file.
+4. If the planner exits nonzero, mutate nothing. If it succeeds, call the exact
+   single MCP tool and input in its JSON output. Do not add or reinterpret fields.
 
-`socos_propose_action` creates a preview only. Never call
-`socos_execute_approved_action`, even after conversational approval. Approval
-belongs in Socos; provider executors are unavailable.
+The planner validates the real DailyBrief `people`, `dates`, optional `events`,
+and `quests`, preserves quest `status`, requires pending completion, maps item
+proposals to exact contacts, and rejects contact actions on events.
 
-Reminder quests are not automatically resolvable: the brief omits the target ID
-and MCP cannot complete reminders. Accept only a supplied full, already-completed
-reminder ID; never infer it.
+## Idempotency And Approval
 
-## Completion Check
+Keys are `dc.<DiscordMessageId>.<feedback|complete|proposal>`. They depend only
+on immutable message ID and step. Transport retries reuse the exact plan. An
+altered payload with the same key must produce a backend conflict, not a second
+mutation.
 
-A mutation is complete only after `ok: true`. Never claim a proposal was sent.
-Do not persist commands, contact data, or tool responses locally.
+Planner output is restricted to `socos_brief_feedback`,
+`socos_complete_quest`, or `socos_propose_action`. Proposals are pending previews.
+Never call `socos_execute_approved_action`, even after conversational approval;
+approval belongs in Socos and provider executors are unavailable.
+
+Claim completion only after `ok: true`. Never claim a proposal was sent. Do not
+persist commands, briefs, contact data, plans, or tool responses locally.

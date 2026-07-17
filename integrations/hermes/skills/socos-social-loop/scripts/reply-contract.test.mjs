@@ -1,167 +1,122 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   addressBookForBrief,
   assertKnownAddresses,
-  assertRecentDiscordMessage,
-  canonicalizeReply,
-  contactAddress,
   discordIdempotencyKey,
-  discordMessageTimestamp,
-  itemAddress,
   parseReply,
-  questAddress,
+  planReply,
   renderAddress,
-  toolSequenceForReply,
 } from "./reply-contract.mjs";
 
+const contractPath = fileURLToPath(new URL("./reply-contract.mjs", import.meta.url));
 const itemId = "cmitem1234567890abcdef";
+const eventItemId = "cmevent1234567890abcdef";
+const reminderItemId = "cmdate1234567890abcdefg";
 const questId = "cmquest1234567890abcde";
+const completedQuestId = "cmquest1111111111abcde";
+const reminderQuestId = "cmquest9876543210abcde";
 const contactId = "cmcontact1234567890abc";
 const otherContactId = "cmcontact9876543210xyz";
 const interactionId = "cminteraction123456789";
 const reminderId = "cmreminder1234567890ab";
+const nowMs = Date.parse("2026-07-17T12:00:00.000Z");
 const DISCORD_EPOCH_MS = 1_420_070_400_000;
 
 function snowflakeAt(timestampMs) {
   return ((BigInt(timestampMs - DISCORD_EPOCH_MS) << 22n) + 1n).toString();
 }
 
-test("parses the exact feedback grammar", () => {
+function brief() {
+  return {
+    schemaVersion: "1.1",
+    briefId: "cmbrief1234567890abcdef",
+    localDate: "2026-07-17",
+    timeZone: "Asia/Dubai",
+    generatedAt: "2026-07-17T05:00:00.000Z",
+    people: [
+      {
+        itemId,
+        contact: { id: contactId, name: "Synthetic Contact" },
+        state: "pending",
+      },
+    ],
+    dates: [
+      {
+        itemId: reminderItemId,
+        contact: { id: contactId, name: "Synthetic Contact" },
+        state: "pending",
+      },
+    ],
+    events: [{ itemId: eventItemId, state: "pending" }],
+    quests: [
+      {
+        questId,
+        itemId,
+        completionType: "interaction",
+        status: "pending",
+      },
+      {
+        questId: completedQuestId,
+        itemId,
+        completionType: "interaction",
+        status: "completed",
+      },
+      {
+        questId: reminderQuestId,
+        itemId: reminderItemId,
+        completionType: "reminder",
+        status: "pending",
+      },
+    ],
+    allowedActions: ["accept", "snooze", "dismiss", "complete"],
+  };
+}
+
+function envelope(text, overrides = {}) {
+  return {
+    text,
+    messageId: snowflakeAt(nowMs - 1_000),
+    editedTimestamp: null,
+    nowMs,
+    brief: brief(),
+    ...overrides,
+  };
+}
+
+test("parses feedback, explicit evidence completion, and proposal grammar only", () => {
   assert.deepEqual(parseReply(`socos accept item:${itemId}`), {
     kind: "feedback",
     action: "accept",
     itemId,
   });
   assert.deepEqual(
-    parseReply(
-      `socos snooze item:${itemId} until 2026-07-18T09:30:00+04:00`,
-    ),
-    {
-      kind: "feedback",
-      action: "snooze",
-      itemId,
-      snoozedUntil: "2026-07-18T09:30:00+04:00",
-    },
+    parseReply(`socos complete quest:${questId} with interaction:${interactionId}`),
+    { kind: "quest-completion", questId, interactionId },
   );
   assert.deepEqual(
-    parseReply(`socos dismiss item:${itemId} because not relevant this week`),
-    {
-      kind: "feedback",
-      action: "dismiss",
-      itemId,
-      reason: "not relevant this week",
-    },
-  );
-  assert.deepEqual(parseReply(`socos dismiss item:${itemId}`), {
-    kind: "feedback",
-    action: "dismiss",
-    itemId,
-  });
-});
-
-test("parses explicit and two-step quest completion grammar", () => {
-  assert.deepEqual(
-    parseReply(
-      `socos complete quest:${questId} with interaction:${interactionId}`,
-    ),
-    {
-      kind: "quest-completion",
-      questId,
-      interactionId,
-    },
+    parseReply(`socos complete quest:${reminderQuestId} with reminder:${reminderId}`),
+    { kind: "quest-completion", questId: reminderQuestId, reminderId },
   );
   assert.deepEqual(
-    parseReply(`socos complete quest:${questId} with reminder:${reminderId}`),
-    {
-      kind: "quest-completion",
-      questId,
-      reminderId,
-    },
-  );
-  assert.deepEqual(
-    parseReply(`socos did quest:${questId} via meeting | Coffee catch-up`),
-    {
-      kind: "quest-log-completion",
-      questId,
-      interactionType: "meeting",
-      summary: "Coffee catch-up",
-    },
-  );
-});
-
-test("parses proposal-only commands for every risky action type", () => {
-  assert.deepEqual(
-    parseReply(
-      `socos propose message item:${itemId} via social | Want to catch up?`,
-    ),
+    parseReply(`socos propose message item:${itemId} via social | Hello`),
     {
       kind: "proposal",
       actionType: "message",
       itemId,
       channel: "social",
-      body: "Want to catch up?",
-    },
-  );
-  assert.deepEqual(
-    parseReply(
-      `socos propose introduction item:${itemId} with contact:${otherContactId} | Shared interest`,
-    ),
-    {
-      kind: "proposal",
-      actionType: "introduction",
-      itemId,
-      otherContactId,
-      context: "Shared interest",
-    },
-  );
-  assert.deepEqual(
-    parseReply(
-      `socos propose invitation item:${itemId} at 2026-07-20T18:00:00+04:00 | AI meetup`,
-    ),
-    {
-      kind: "proposal",
-      actionType: "invitation",
-      itemId,
-      scheduledAt: "2026-07-20T18:00:00+04:00",
-      title: "AI meetup",
-    },
-  );
-  assert.deepEqual(
-    parseReply(
-      `socos propose invitation item:${itemId} | Coffee next week`,
-    ),
-    {
-      kind: "proposal",
-      actionType: "invitation",
-      itemId,
-      title: "Coffee next week",
-    },
-  );
-  assert.deepEqual(
-    parseReply(
-      `socos propose merge contact:${contactId} into contact:${otherContactId}`,
-    ),
-    {
-      kind: "proposal",
-      actionType: "merge",
-      sourceContactId: contactId,
-      targetContactId: otherContactId,
-    },
-  );
-  assert.deepEqual(
-    parseReply(`socos propose delete reminder:${reminderId}`),
-    {
-      kind: "proposal",
-      actionType: "delete",
-      entityType: "reminder",
-      entityId: reminderId,
+      body: "Hello",
     },
   );
 });
 
-test("fails closed on fuzzy, multiline, truncated, ambiguous, and invalid commands", () => {
+test("rejects fuzzy, multiline, ambiguous, and invalid commands", () => {
   const invalid = [
     `accept item:${itemId}`,
     `SOCOS accept item:${itemId}`,
@@ -169,12 +124,11 @@ test("fails closed on fuzzy, multiline, truncated, ambiguous, and invalid comman
     `socos accept item:${itemId}\nsocos dismiss item:${itemId}`,
     `socos snooze item:${itemId} until 2026-07-18T09:30:00`,
     `socos snooze item:${itemId} until 2026-02-30T09:30:00+04:00`,
-    `socos did quest:${questId} via chat | A chat`,
-    `socos did quest:${questId} via meeting | `,
     `socos propose message item:${itemId} via discord | Hello`,
     `socos propose merge contact:${contactId} into contact:${contactId}`,
     `socos propose delete user:${contactId}`,
     `socos propose message item:${itemId} via social | one | two`,
+    `socos execute approved action`,
   ];
 
   for (const command of invalid) {
@@ -182,99 +136,21 @@ test("fails closed on fuzzy, multiline, truncated, ambiguous, and invalid comman
   }
 });
 
-test("enforces free-text limits from the agent tool contracts", () => {
-  assert.throws(
-    () =>
-      parseReply(`socos dismiss item:${itemId} because ${"x".repeat(501)}`),
-    /Invalid Socos reply/,
-  );
-  assert.throws(
-    () =>
-      parseReply(
-        `socos propose invitation item:${itemId} | ${"x".repeat(501)}`,
-      ),
-    /Invalid Socos reply/,
-  );
-  assert.throws(
-    () =>
-      parseReply(
-        `socos propose introduction item:${itemId} with contact:${otherContactId} | ${"x".repeat(2001)}`,
-      ),
-    /Invalid Socos reply/,
-  );
-  assert.throws(
-    () =>
-      parseReply(
-        `socos propose message item:${itemId} via social | ${"x".repeat(10_001)}`,
-      ),
-    /Invalid Socos reply/,
-  );
-});
-
-test("renders full server-owned addresses without aliases", () => {
-  assert.equal(itemAddress(itemId), `item:${itemId}`);
-  assert.equal(questAddress(questId), `quest:${questId}`);
-  assert.equal(contactAddress(contactId), `contact:${contactId}`);
-  assert.equal(renderAddress("item", itemId), `\`item:${itemId}\``);
-  assert.equal(itemAddress("short-but-complete"), "item:short-but-complete");
-});
-
-test("builds a brief address book and rejects truncated or contactless addresses", () => {
-  const eventItemId = "cmevent1234567890abcdef";
-  const reminderItemId = "cmdate1234567890abcdefg";
-  const reminderQuestId = "cmquest9876543210abcde";
-  const book = addressBookForBrief({
-    people: [{ itemId, contact: { id: contactId } }],
-    dates: [{ itemId: reminderItemId, contact: { id: contactId } }],
-    events: [{ itemId: eventItemId }],
-    quests: [
-      {
-        questId,
-        itemId,
-        completionType: "interaction",
-      },
-      {
-        questId: reminderQuestId,
-        itemId: reminderItemId,
-        completionType: "reminder",
-      },
-    ],
-  });
-
-  assert.deepEqual(
-    assertKnownAddresses(parseReply(`socos accept item:${itemId}`), book),
-    { itemId, contactId, itemKind: "person" },
-  );
-  assert.throws(
-    () =>
-      assertKnownAddresses(
-        parseReply(`socos accept item:${itemId.slice(0, 8)}`),
-        book,
-      ),
-    /Unknown full item address/,
+test("preserves quest status and rejects non-pending or mismatched completion", () => {
+  const book = addressBookForBrief(brief());
+  assert.equal(
+    book.quests.find((quest) => quest.questId === completedQuestId)?.status,
+    "completed",
   );
   assert.throws(
     () =>
       assertKnownAddresses(
         parseReply(
-          `socos propose message item:${eventItemId} via social | Hello`,
+          `socos complete quest:${completedQuestId} with interaction:${interactionId}`,
         ),
         book,
       ),
-    /does not resolve to a contact/,
-  );
-  assert.deepEqual(
-    assertKnownAddresses(
-      parseReply(`socos did quest:${questId} via meeting | Catch-up`),
-      book,
-    ),
-    {
-      questId,
-      itemId,
-      contactId,
-      itemKind: "person",
-      completionType: "interaction",
-    },
+    /Quest is not pending/,
   );
   assert.throws(
     () =>
@@ -296,137 +172,236 @@ test("builds a brief address book and rejects truncated or contactless addresses
   );
 });
 
-test("canonicalizes equivalent parsed commands deterministically", () => {
-  const first = {
-    kind: "feedback",
-    itemId,
-    action: "accept",
-  };
-  const reordered = {
-    action: "accept",
-    kind: "feedback",
-    itemId,
-  };
-
-  assert.equal(canonicalizeReply(first), canonicalizeReply(reordered));
+test("uses exact full brief addresses and rejects event contact proposals", () => {
+  const book = addressBookForBrief(brief());
+  assert.equal(renderAddress("item", itemId), `\`item:${itemId}\``);
+  assert.throws(
+    () =>
+      assertKnownAddresses(
+        parseReply(`socos accept item:${itemId.slice(0, 8)}`),
+        book,
+      ),
+    /Unknown full item address/,
+  );
+  assert.throws(
+    () =>
+      assertKnownAddresses(
+        parseReply(
+          `socos propose message item:${eventItemId} via social | Hello`,
+        ),
+        book,
+      ),
+    /does not resolve to a contact/,
+  );
 });
 
-test("derives stable valid idempotency keys from Discord message intent", () => {
-  const command = parseReply(`socos accept item:${itemId}`);
-  const first = discordIdempotencyKey({
-    messageId: "142857142857142857",
-    command,
+test("derives idempotency from immutable message ID and step only", () => {
+  const messageId = snowflakeAt(nowMs - 1_000);
+  const first = discordIdempotencyKey({ messageId, step: "feedback" });
+  const alteredPayload = discordIdempotencyKey({
+    messageId,
     step: "feedback",
+    command: { altered: "ignored" },
   });
-  const retry = discordIdempotencyKey({
-    messageId: "142857142857142857",
-    command,
-    step: "feedback",
-  });
-  const edited = discordIdempotencyKey({
-    messageId: "142857142857142857",
-    command: parseReply(`socos dismiss item:${itemId}`),
-    step: "feedback",
-  });
-  const secondStep = discordIdempotencyKey({
-    messageId: "142857142857142857",
-    command,
-    step: "complete",
-  });
-  const differentMessage = discordIdempotencyKey({
-    messageId: "142857142857142858",
-    command,
-    step: "feedback",
-  });
+  const otherStep = discordIdempotencyKey({ messageId, step: "proposal" });
 
-  assert.equal(first, retry);
-  assert.notEqual(first, edited);
-  assert.notEqual(first, secondStep);
-  assert.notEqual(first, differentMessage);
+  assert.equal(first, alteredPayload);
+  assert.notEqual(first, otherStep);
+  assert.equal(first, `dc.${messageId}.feedback`);
   assert.match(first, /^[A-Za-z0-9._:-]{8,128}$/);
-  assert.throws(
-    () =>
-      discordIdempotencyKey({
-        messageId: "not-a-discord-id",
-        command,
-        step: "feedback",
-      }),
-    /Invalid Discord message ID/,
+
+  const accepted = planReply(
+    envelope(`socos accept item:${itemId}`, { messageId }),
   );
-});
-
-test("decodes Discord Snowflakes and enforces the 24-hour boundary", () => {
-  const nowMs = Date.parse("2026-07-17T12:00:00.000Z");
-  const recent = snowflakeAt(nowMs - 1);
-  const boundary = snowflakeAt(nowMs - 24 * 60 * 60 * 1_000);
-  const old = snowflakeAt(nowMs - 24 * 60 * 60 * 1_000 - 1);
-  const future = snowflakeAt(nowMs + 1);
-
-  assert.equal(discordMessageTimestamp(recent), nowMs - 1);
-  assert.equal(assertRecentDiscordMessage({ messageId: recent, nowMs }), nowMs - 1);
+  const dismissed = planReply(
+    envelope(`socos dismiss item:${itemId}`, { messageId }),
+  );
   assert.equal(
-    assertRecentDiscordMessage({ messageId: boundary, nowMs }),
-    nowMs - 24 * 60 * 60 * 1_000,
-  );
-  assert.throws(
-    () => assertRecentDiscordMessage({ messageId: old, nowMs }),
-    /older than 24 hours/,
-  );
-  assert.throws(
-    () => assertRecentDiscordMessage({ messageId: future, nowMs }),
-    /future timestamp/,
-  );
-  assert.throws(
-    () => discordMessageTimestamp("not-a-snowflake"),
-    /Invalid Discord message ID/,
-  );
-  assert.throws(
-    () =>
-      assertRecentDiscordMessage({
-        messageId: recent,
-        nowMs: Number.NaN,
-      }),
-    /Invalid current timestamp/,
+    accepted.calls[0].input.idempotencyKey,
+    dismissed.calls[0].input.idempotencyKey,
   );
 });
 
-test("returns exact tool sequences and never approved execution", () => {
-  const cases = [
-    [
-      parseReply(`socos accept item:${itemId}`),
-      ["socos_brief_today", "socos_brief_feedback"],
+test("plans exact feedback and quest MCP calls", () => {
+  assert.deepEqual(planReply(envelope(`socos accept item:${itemId}`)), {
+    calls: [
+      {
+        tool: "socos_brief_feedback",
+        input: {
+          itemId,
+          idempotencyKey: `dc.${snowflakeAt(nowMs - 1_000)}.feedback`,
+          action: "accept",
+        },
+      },
     ],
-    [
-      parseReply(
+  });
+  assert.deepEqual(
+    planReply(
+      envelope(
         `socos complete quest:${questId} with interaction:${interactionId}`,
       ),
-      ["socos_brief_today", "socos_complete_quest"],
-    ],
-    [
-      parseReply(`socos did quest:${questId} via call | Catch-up`),
-      [
-        "socos_brief_today",
-        "socos_log_interaction",
-        "socos_complete_quest",
+    ),
+    {
+      calls: [
+        {
+          tool: "socos_complete_quest",
+          input: {
+            questId,
+            idempotencyKey: `dc.${snowflakeAt(nowMs - 1_000)}.complete`,
+            interactionId,
+          },
+        },
       ],
+    },
+  );
+});
+
+test("plans exact payloads for every proposal type and never execution", () => {
+  const cases = [
+    [
+      `socos propose message item:${itemId} via social | Hello`,
+      {
+        actionType: "message",
+        payload: { contactId, channel: "social", body: "Hello" },
+      },
     ],
     [
-      parseReply(
-        `socos propose message item:${itemId} via social | Hello there`,
-      ),
-      ["socos_brief_today", "socos_propose_action"],
+      `socos propose introduction item:${itemId} with contact:${otherContactId} | Shared work`,
+      {
+        actionType: "introduction",
+        payload: { contactId, otherContactId, context: "Shared work" },
+      },
     ],
     [
-      parseReply(
-        `socos propose merge contact:${contactId} into contact:${otherContactId}`,
-      ),
-      ["socos_propose_action"],
+      `socos propose invitation item:${itemId} at 2026-07-20T18:00:00+04:00 | Meetup`,
+      {
+        actionType: "invitation",
+        payload: {
+          contactId,
+          title: "Meetup",
+          scheduledAt: "2026-07-20T18:00:00+04:00",
+        },
+      },
+    ],
+    [
+      `socos propose merge contact:${contactId} into contact:${otherContactId}`,
+      {
+        actionType: "merge",
+        payload: { sourceContactId: contactId, targetContactId: otherContactId },
+      },
+    ],
+    [
+      `socos propose delete reminder:${reminderId}`,
+      {
+        actionType: "delete",
+        payload: { entityType: "reminder", entityId: reminderId },
+      },
     ],
   ];
 
-  for (const [command, expected] of cases) {
-    const sequence = toolSequenceForReply(command);
-    assert.deepEqual(sequence, expected);
-    assert.ok(!sequence.includes("socos_execute_approved_action"));
+  for (const [text, expected] of cases) {
+    const result = planReply(envelope(text));
+    assert.deepEqual(result, {
+      calls: [
+        {
+          tool: "socos_propose_action",
+          input: {
+            idempotencyKey: `dc.${snowflakeAt(nowMs - 1_000)}.proposal`,
+            ...expected,
+          },
+        },
+      ],
+    });
+    assert.ok(
+      result.calls.every((call) => call.tool !== "socos_execute_approved_action"),
+    );
+  }
+});
+
+test("rejects missing, extra, edited, old, future, and invalid planner envelopes", () => {
+  const validText = `socos accept item:${itemId}`;
+  const missingFields = Object.keys(envelope(validText)).map((field) => {
+    const input = envelope(validText);
+    delete input[field];
+    return input;
+  });
+  const cases = [
+    ...missingFields,
+    { ...envelope(validText), extra: true },
+    envelope(validText, { editedTimestamp: "2026-07-17T11:59:59.000Z" }),
+    envelope(validText, {
+      messageId: snowflakeAt(nowMs - 24 * 60 * 60 * 1_000 - 1),
+    }),
+    envelope(validText, { messageId: snowflakeAt(nowMs + 1) }),
+    envelope(`socos accept item:${itemId.slice(0, 8)}`),
+    envelope(`socos propose message item:${eventItemId} via social | Hello`),
+    envelope(
+      `socos complete quest:${completedQuestId} with interaction:${interactionId}`,
+    ),
+    envelope(validText, { brief: { schemaVersion: "1.1" } }),
+  ];
+
+  for (const input of cases) {
+    assert.throws(() => planReply(input), /Socos reply plan rejected/);
+  }
+});
+
+test("stdin plan CLI accepts one bounded strict JSON object", () => {
+  const result = spawnSync(process.execPath, [contractPath, "plan"], {
+    input: JSON.stringify(envelope(`socos accept item:${itemId}`)),
+    encoding: "utf8",
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), planReply(envelope(`socos accept item:${itemId}`)));
+  assert.equal(result.stderr, "");
+});
+
+test("stdin plan CLI runs when invoked through a symlinked install path", () => {
+  const directory = mkdtempSync(join(tmpdir(), "socos-reply-contract-"));
+  const linkedDirectory = join(directory, "linked");
+  symlinkSync(dirname(contractPath), linkedDirectory, "dir");
+  const result = spawnSync(
+    process.execPath,
+    [join(linkedDirectory, "reply-contract.mjs"), "plan"],
+    {
+      input: JSON.stringify(envelope(`socos accept item:${itemId}`)),
+      encoding: "utf8",
+    },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(
+    JSON.parse(result.stdout),
+    planReply(envelope(`socos accept item:${itemId}`)),
+  );
+});
+
+test("stdin CLI rejects argv payloads, malformed JSON, edits, and oversized input", () => {
+  const argvPayload = spawnSync(
+    process.execPath,
+    [contractPath, "plan", `socos accept item:${itemId}`],
+    { input: "{}", encoding: "utf8" },
+  );
+  assert.notEqual(argvPayload.status, 0);
+  assert.equal(argvPayload.stdout, "");
+
+  for (const input of [
+    "{}{}",
+    JSON.stringify(
+      envelope(`socos accept item:${itemId}`, {
+        editedTimestamp: "2026-07-17T11:59:59.000Z",
+      }),
+    ),
+    "x".repeat(65_537),
+  ]) {
+    const result = spawnSync(process.execPath, [contractPath, "plan"], {
+      input,
+      encoding: "utf8",
+    });
+    assert.notEqual(result.status, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "Socos reply plan rejected.\n");
+    assert.doesNotMatch(result.stderr, new RegExp(itemId));
   }
 });

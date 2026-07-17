@@ -51,6 +51,15 @@ helpers were absent. The next run passed 11 tests, including exact boundary,
 older, future, malformed, interaction-for-reminder, and reminder-for-interaction
 cases.
 
+### RED/GREEN 4: Review Hardening
+
+Review found that the installed module was not an executable gate, edited
+messages created new command-digest keys, and multi-tool interaction completion
+was not atomic. A rewritten test suite first failed because `planReply` was
+absent. The next run passed 11 tests after adding the bounded stdin planner,
+immutable-message idempotency, edit rejection, pending quest checks, exact tool
+plans, and removing every multi-tool completion path.
+
 ## Delivered Files
 
 - `integrations/hermes/skills/socos-social-loop/SKILL.md`
@@ -65,14 +74,18 @@ cases.
 - One lowercase, single-line `socos` command per Discord message.
 - RFC3339 timestamps require an explicit offset and a real calendar date.
 - Free-text limits match the agent-core tool schemas.
-- Idempotency keys are stable by Discord message, canonical command, and step,
-  and satisfy `^[A-Za-z0-9._:-]{8,128}$`.
+- Idempotency keys use immutable Discord message ID and step only and satisfy
+  `^[A-Za-z0-9._:-]{8,128}$`.
 - Discord Snowflake timestamps must be current, not future, and no older than
   the exact 24-hour server idempotency window.
 - Item and quest addresses must exactly match a full ID returned by the current
   daily brief.
-- Two-step interaction completion uses separate stable `log` and `complete`
-  keys so a retry does not duplicate the interaction.
+- Edited messages are rejected before planning; false edit metadata still uses
+  the same key and reaches the backend request-hash conflict boundary.
+- Planner input is one strict JSON object, limited to 64 KiB and accepted only
+  through stdin. Personal input is rejected in argv and is never written to a
+  temporary file.
+- Every successful plan contains exactly one allowlisted MCP mutation call.
 - Explicit evidence must match the quest's stored completion type before a
   mutation is attempted.
 - Risky commands only call `socos_propose_action`.
@@ -83,10 +96,11 @@ cases.
 
 ## Known Limitation
 
-Reminder quests cannot be automatically completed through the current 11-tool
-MCP surface. The brief omits the target reminder ID, and MCP cannot mark or read
-the completed target. Hermes must accept only a user-supplied full ID for an
-already-completed reminder and must never infer it.
+Quest completion requires an exact already-recorded interaction ID or exact
+already-completed reminder ID. The current MCP surface cannot safely combine
+interaction logging with quest completion; that workflow requires a future
+server-side composite transaction. The brief also omits a reminder quest's
+target reminder ID, so Hermes must never infer it.
 
 ## Verification
 

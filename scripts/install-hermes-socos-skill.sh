@@ -16,10 +16,15 @@ for file in SKILL.md scripts/reply-contract.mjs; do
 done
 
 node --check "$source_dir/scripts/reply-contract.mjs"
+if printf '%s' '{}' | node "$source_dir/scripts/reply-contract.mjs" plan \
+  >/dev/null 2>&1; then
+  echo "Socos planner did not reject an invalid envelope." >&2
+  exit 1
+fi
 
 case "${1:-}" in
   --dry-run)
-    printf 'install_status=dry-run files=2\n'
+    printf 'install_status=dry-run files=2 cli=plan\n'
     exit 0
     ;;
   '')
@@ -37,4 +42,4 @@ install -m 0600 \
   "$source_dir/scripts/reply-contract.mjs" \
   "$target_dir/scripts/reply-contract.mjs"
 
-printf 'install_status=installed files=2\n'
+printf 'install_status=installed files=2 cli=plan\n'
