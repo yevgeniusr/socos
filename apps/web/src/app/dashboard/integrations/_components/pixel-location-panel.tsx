@@ -56,6 +56,9 @@ export default function PixelLocationPanel() {
   const [rawRetentionDays, setRawRetentionDays] = useState(30);
   const [derivedRetentionDays, setDerivedRetentionDays] = useState(365);
   const [credentials, setCredentials] = useState<PixelCredentials | null>(null);
+  const [credentialReturnKind, setCredentialReturnKind] = useState<
+    "receipt" | "rotate"
+  >("receipt");
   const [pendingAction, setPendingAction] = useState<PendingPixelAction | null>(
     null
   );
@@ -93,6 +96,7 @@ export default function PixelLocationPanel() {
   async function createDevice(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     credentialReturnFocusRef.current = null;
+    setCredentialReturnKind("receipt");
     setBusy(true);
     setActionError(null);
     setReceipt(null);
@@ -134,6 +138,7 @@ export default function PixelLocationPanel() {
         `/api/location-devices/${encodeURIComponent(device.id)}/rotate`,
         { method: "POST" }
       );
+      setCredentialReturnKind("rotate");
       setCredentials(response.credentials);
       setReceipt("Pixel credentials rotated. Configure the replacement now.");
     } catch (error) {
@@ -474,7 +479,11 @@ export default function PixelLocationPanel() {
           username={credentials.username}
           password={credentials.password}
           initialFocusRef={credentialDialogFocusRef}
-          restoreFocusRef={credentialReturnFocusRef}
+          restoreFocusRef={
+            credentialReturnKind === "receipt"
+              ? receiptRef
+              : credentialReturnFocusRef
+          }
           onClose={() => setCredentials(null)}
         />
       ) : null}

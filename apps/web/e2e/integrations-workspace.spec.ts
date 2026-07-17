@@ -507,6 +507,15 @@ test.describe("authenticated Integrations workspace", () => {
         )
       )
       .not.toContain(FIRST_PASSWORD);
+    const creationReceipt = pixel
+      .getByRole("status")
+      .filter({ hasText: "Pixel device created" });
+    await credentials
+      .getByRole("button", { name: "Close credentials" })
+      .click();
+    await expect(page.getByText(FIRST_PASSWORD)).toHaveCount(0);
+    await expect(creationReceipt).toBeVisible();
+    await expect(creationReceipt).toBeFocused();
     await page.reload();
     await expect(page.getByText(FIRST_PASSWORD)).toHaveCount(0);
     await expect(credentials).toHaveCount(0);
