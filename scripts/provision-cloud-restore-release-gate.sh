@@ -232,6 +232,8 @@ REVOKE ALL PRIVILEGES ON DATABASE postgres FROM socos_release_gate_admin, socos_
 REVOKE CONNECT ON DATABASE postgres FROM PUBLIC;
 GRANT CONNECT ON DATABASE postgres TO socos_release_gate_admin, socos_release_gate_restore;
 REVOKE TEMPORARY ON DATABASE postgres FROM PUBLIC;
+REVOKE CONNECT ON DATABASE template1 FROM PUBLIC;
+REVOKE ALL PRIVILEGES ON DATABASE template1 FROM socos_release_gate_read, socos_release_gate_admin, socos_release_gate_restore;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 REVOKE ALL PRIVILEGES ON SCHEMA public FROM socos_release_gate_admin, socos_release_gate_restore;
 REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM socos_release_gate_admin, socos_release_gate_restore;
@@ -259,6 +261,9 @@ GRANT CONNECT ON DATABASE socos TO socos_release_gate_read;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 REVOKE ALL PRIVILEGES ON SCHEMA public FROM socos_release_gate_read;
 GRANT USAGE ON SCHEMA public TO socos_release_gate_read;
+ALTER DEFAULT PRIVILEGES FOR ROLE socos_app REVOKE EXECUTE ON ROUTINES FROM PUBLIC;
+ALTER DEFAULT PRIVILEGES FOR ROLE socos_app IN SCHEMA public GRANT SELECT ON TABLES TO socos_release_gate_read;
+ALTER DEFAULT PRIVILEGES FOR ROLE socos_app IN SCHEMA public GRANT SELECT ON SEQUENCES TO socos_release_gate_read;
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON ALL TABLES IN SCHEMA public FROM PUBLIC;
 REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM socos_release_gate_read;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO socos_release_gate_read;
@@ -266,9 +271,6 @@ REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM socos_release_gate_
 GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO socos_release_gate_read;
 REVOKE EXECUTE ON ALL ROUTINES IN SCHEMA public FROM PUBLIC;
 REVOKE ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA public FROM socos_release_gate_read;
-ALTER DEFAULT PRIVILEGES FOR ROLE socos_app REVOKE EXECUTE ON ROUTINES FROM PUBLIC;
-ALTER DEFAULT PRIVILEGES FOR ROLE socos_app IN SCHEMA public GRANT SELECT ON TABLES TO socos_release_gate_read;
-ALTER DEFAULT PRIVILEGES FOR ROLE socos_app IN SCHEMA public GRANT SELECT ON SEQUENCES TO socos_release_gate_read;
 SQL
 then
   fail

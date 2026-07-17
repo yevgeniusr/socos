@@ -202,6 +202,8 @@ Set `SOCOS_RELEASE_GATE_CLUSTER_ID` to the PostgreSQL system identifier from
 `pg_control_system()`. Production read, administration, and restore URLs must
 use three distinct rotating gate roles on that exact cluster. The production
 URL uses `socos_release_gate_read`, never the application runtime credential.
+The read role cannot connect to `template1`; the gate proves that connection is
+blocked in addition to validating the production query boundary.
 The gate positively verifies public-schema `USAGE` and `SELECT` on every current
 public table, view, materialized view, foreign table, and sequence. It also
 verifies the read role has no database `CREATE` or `TEMPORARY`, schema `CREATE`,
@@ -211,9 +213,12 @@ does not weaken this rule because a login can still use `SET ROLE`. These checks
 fail closed even when a schema has no objects. The provisioner grants the read
 role `SELECT` by default on future public tables and sequences owned by
 `socos_app`, and globally revokes the owner's default `PUBLIC` execution for
-future app-owned routines. It revokes production `PUBLIC` `TEMPORARY` and
-current public-routine execution while preserving any effective `TEMPORARY`
-privilege that `socos_app` had before provisioning. The gate separately verifies
+future app-owned routines. These owner defaults are installed before the
+current-object table, sequence, and routine sweep so a concurrent app migration
+cannot create an object between the sweep and its future-object protection. It
+revokes production `PUBLIC` `TEMPORARY` and current public-routine execution
+while preserving any effective `TEMPORARY` privilege that `socos_app` had before
+provisioning. The gate separately verifies
 the restore role has no elevated role flags, inherited memberships,
 maintenance-database write capabilities, or production access, rejects reuse of
 the administration credential, and uses the restricted role only for the
@@ -266,7 +271,8 @@ be a subset of `postgres`, `socos_app`, `socos_release_gate_read`,
 `socos_release_gate_admin`, and `socos_release_gate_restore`. The provisioner
 checks this allowlist itself and fails without printing an unexpected `LOGIN`
 role before it creates or rotates gate roles or makes any cluster-wide
-maintenance `CONNECT`, production `TEMPORARY`, or routine `PUBLIC` revoke.
+maintenance or `template1` `PUBLIC CONNECT`, production `TEMPORARY`, or routine
+`PUBLIC` revoke.
 Do not expand the allowlist to accommodate another application; move that
 application to a separate database container.
 
@@ -439,7 +445,7 @@ JOIN pg_roles member_role ON member_role.oid = membership.member
 WHERE member_role.rolname IN ('socos_release_gate_read', 'socos_release_gate_admin', 'socos_release_gate_restore')
 ORDER BY member_role.rolname, granted.rolname;
 SELECT datname, datacl FROM pg_database
-WHERE datname IN ('postgres', 'socos') ORDER BY datname;
+WHERE datname IN ('postgres', 'socos', 'template1') ORDER BY datname;
 SQL
 ```
 
@@ -452,10 +458,10 @@ non-replication, and non-bypass-RLS. Only `socos_release_gate_admin` may have
 `CREATEDB`, and its only membership is `socos_release_gate_restore`. Read and
 restore must have no memberships. The read role has only production `CONNECT`,
 public-schema `USAGE`, and `SELECT` on all public tables and sequences; it has
-no maintenance connection, routine execution, table- or column-level writes,
-sequence `USAGE`/`UPDATE`, database `CREATE`/`TEMPORARY`, or schema `CREATE`.
-Future
-app-owned public tables and sequences inherit read-role `SELECT`; the global
+no maintenance or `template1` connection, routine execution, table- or
+column-level writes, sequence `USAGE`/`UPDATE`, database `CREATE`/`TEMPORARY`, or
+schema `CREATE`. Future app-owned public tables and sequences inherit read-role
+`SELECT`; the global
 `socos_app` routine defaults prevent future app-owned routines in every schema
 from inheriting `PUBLIC` execution. The application role's effective
 `TEMPORARY` access is preserved if it existed. `PUBLIC` has no
@@ -470,6 +476,11 @@ privileges are additive, so revoking it only from the read role cannot override
 the default `PUBLIC` grant. Provisioning explicitly regrants maintenance access
 to admin and restore; the `postgres` owner retains access, while the application
 continues to use only `socos`.
+The same additive rule requires revoking `template1` `PUBLIC CONNECT`; no gate
+role receives an explicit replacement grant. Admin creates disposable databases
+while connected to `postgres` with `CREATEDB`; PostgreSQL performs the template
+copy internally, so template connection privilege is not required. The gate's
+later successful `createdb` phase preserves executable proof of that capability.
 
 The immutable runtime tag is
 `socos-release-gate-runtime:node22-pnpm10.10.0-pg16-v2`. Provisioning verifies

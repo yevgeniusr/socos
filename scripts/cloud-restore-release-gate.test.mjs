@@ -172,12 +172,20 @@ test('database boundary proof rejects a privileged restore role', () => {
     administration: '7493810472398012345|admin|postgres|f\n',
     restore: '7493810472398012345|restore|postgres|t|t\n',
     restoreProductionBlocked: true,
+    productionTemplateBlocked: true,
   };
   assert.doesNotThrow(() => validateDatabaseBoundaryProofs(config, proof));
   assert.throws(
     () => validateDatabaseBoundaryProofs(config, { ...proof, restore: '7493810472398012345|restore|postgres|t|f\n' }),
     /invalid_configuration/,
   );
+  assert.throws(
+    () => validateDatabaseBoundaryProofs(config, { ...proof, productionTemplateBlocked: false }),
+    /invalid_configuration/,
+  );
+  const gateSource = readFileSync(join(root, 'scripts/cloud-restore-release-gate.mjs'), 'utf8');
+  assert.match(gateSource, /\.\.\.config\.productionPg, PGDATABASE: 'template1'/);
+  assert.match(gateSource, /restoreProductionBlocked,\s+productionTemplateBlocked,/);
 });
 
 test('production boundary query proves current read access and rejects every durable write path', async () => {

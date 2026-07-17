@@ -230,6 +230,9 @@ test('provisioner renders the locked account, exact resources, database boundary
   assert.match(sql, /REVOKE ALL PRIVILEGES ON DATABASE postgres FROM socos_release_gate_read/);
   assert.match(sql, /REVOKE CONNECT ON DATABASE postgres FROM PUBLIC/);
   assert.doesNotMatch(sql, /GRANT CONNECT ON DATABASE postgres TO[^;]*socos_release_gate_read/);
+  assert.match(sql, /REVOKE CONNECT ON DATABASE template1 FROM PUBLIC/);
+  assert.match(sql, /REVOKE ALL PRIVILEGES ON DATABASE template1 FROM socos_release_gate_read, socos_release_gate_admin, socos_release_gate_restore/);
+  assert.doesNotMatch(sql, /GRANT CONNECT ON DATABASE template1 TO[^;]*socos_release_gate_(?:read|admin|restore)/);
   assert.match(sql, /REVOKE CREATE ON SCHEMA public FROM PUBLIC/);
   assert.match(sql, /REVOKE TEMPORARY ON DATABASE postgres FROM PUBLIC/);
   assert.match(productionSql, /REVOKE ALL PRIVILEGES ON DATABASE socos FROM socos_release_gate_read/);
@@ -252,6 +255,18 @@ test('provisioner renders the locked account, exact resources, database boundary
   assert.doesNotMatch(productionSql, /ALTER DEFAULT PRIVILEGES FOR ROLE socos_app IN SCHEMA public REVOKE EXECUTE ON ROUTINES FROM PUBLIC/);
   assert.match(productionSql, /ALTER DEFAULT PRIVILEGES FOR ROLE socos_app IN SCHEMA public GRANT SELECT ON TABLES TO socos_release_gate_read/);
   assert.match(productionSql, /ALTER DEFAULT PRIVILEGES FOR ROLE socos_app IN SCHEMA public GRANT SELECT ON SEQUENCES TO socos_release_gate_read/);
+  const defaultAclEnd = Math.max(
+    productionSql.indexOf('ALTER DEFAULT PRIVILEGES FOR ROLE socos_app REVOKE EXECUTE ON ROUTINES FROM PUBLIC;'),
+    productionSql.indexOf('ALTER DEFAULT PRIVILEGES FOR ROLE socos_app IN SCHEMA public GRANT SELECT ON TABLES TO socos_release_gate_read;'),
+    productionSql.indexOf('ALTER DEFAULT PRIVILEGES FOR ROLE socos_app IN SCHEMA public GRANT SELECT ON SEQUENCES TO socos_release_gate_read;'),
+  );
+  const currentObjectSweepStart = Math.min(
+    productionSql.indexOf('REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON ALL TABLES IN SCHEMA public FROM PUBLIC;'),
+    productionSql.indexOf('REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM socos_release_gate_read;'),
+    productionSql.indexOf('REVOKE EXECUTE ON ALL ROUTINES IN SCHEMA public FROM PUBLIC;'),
+  );
+  assert.ok(defaultAclEnd >= 0);
+  assert.ok(currentObjectSweepStart > defaultAclEnd);
   assert.doesNotMatch(`${sql}\n${productionSql}`, /ALTER ROLE socos_app|ALTER FUNCTION|REVOKE [^;]+ FROM socos_app/);
 
   const calls = readFileSync(f.log, 'utf8');
@@ -330,6 +345,8 @@ test('package wiring and runbook cover secure provisioning, audits, rotation, st
     /pg_auth_members/,
     /dedicated PostgreSQL container/i,
     /unexpected `LOGIN` role/i,
+    /read role cannot connect to `template1`/i,
+    /template1.*`PUBLIC CONNECT`/is,
     /token and role rotation/i,
     /rmdir \/var\/lock\/socos-release-gate\/gate\.lock/,
     /084b7addb0ccc765aa343c5412ed8f5fe5f6da0b.*ancestor/s,

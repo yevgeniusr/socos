@@ -64,6 +64,7 @@ export function validateDatabaseBoundaryProofs(config, proof) {
     || proof.administration !== `${config.clusterId}|${config.adminRole}|${config.adminDatabase}|f\n`
     || proof.restore !== `${config.clusterId}|${config.restoreRole}|${config.restoreBaseDatabase}|t|t\n`
     || proof.restoreProductionBlocked !== true
+    || proof.productionTemplateBlocked !== true
   ) throw new GateFailure('invalid_configuration');
 }
 
@@ -513,15 +514,28 @@ function createDependencies(config, signal) {
         const prod = await q(config.productionPg, queries.production);
         const admin = await q(config.adminPg, queries.administration);
         const restore = await q(pgEnvironment(config.restoreBaseUrl), queries.restore);
-        let blocked = false;
-        try {
-          await q({ ...pgEnvironment(config.restoreBaseUrl), PGDATABASE: config.productionDatabase }, 'SELECT 1;');
-        } catch { blocked = true; }
+        const connectionBlocked = async (pg) => {
+          try {
+            await q(pg, 'SELECT 1;');
+            return false;
+          } catch (error) {
+            if (error instanceof GateFailure && error.code === 'interrupted') throw error;
+            return true;
+          }
+        };
+        const restoreProductionBlocked = await connectionBlocked({
+          ...pgEnvironment(config.restoreBaseUrl),
+          PGDATABASE: config.productionDatabase,
+        });
+        const productionTemplateBlocked = await connectionBlocked({
+          ...config.productionPg, PGDATABASE: 'template1',
+        });
         validateDatabaseBoundaryProofs(config, {
           production: prod,
           administration: admin,
           restore,
-          restoreProductionBlocked: blocked,
+          restoreProductionBlocked,
+          productionTemplateBlocked,
         });
       } catch (error) {
         if (error instanceof GateFailure && error.code === 'interrupted') throw error;
