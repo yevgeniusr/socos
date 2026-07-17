@@ -114,8 +114,13 @@ export default function QuestCompletionDialog({
         body: JSON.stringify(body),
       }
     );
+    const receipt = buildQuestReceipt(
+      quest,
+      action?.completionType ?? "interaction",
+      result
+    );
     registry.current.resolve(quest.questId, "complete", body);
-    return buildQuestReceipt(quest, action?.completionType ?? "interaction", result);
+    return receipt;
   }
 
   async function submitInteraction(event: FormEvent) {

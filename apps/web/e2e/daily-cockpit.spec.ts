@@ -127,6 +127,7 @@ async function installApi(
     loseFirstInteractionResponse?: boolean;
     loseFirstReminderCreateResponse?: boolean;
     loseFirstQuestCompletionResponse?: boolean;
+    mismatchFirstQuestCompletionResponse?: boolean;
     durableApprovedHistoryThenOmitAndFail?: boolean;
     failRejectedHistoryAfterDecision?: boolean;
     briefTimeZone?: string;
@@ -481,6 +482,17 @@ async function installApi(
           { message: "Synthetic lost quest completion response" },
           503
         );
+      if (
+        options.mismatchFirstQuestCompletionResponse &&
+        state.questBodies.length === 1
+      )
+        return json(route, {
+          feedbackId: "quest-feedback",
+          questId: "different-quest",
+          status: "completed",
+          completedAt: now,
+          xpAwarded: 20,
+        });
       return json(route, {
         feedbackId: "quest-feedback",
         questId: questComplete[1],
@@ -915,6 +927,53 @@ test("retries a lost quest-completion response with one verified receipt", async
   expect(api.questCompletionKeys).toHaveLength(2);
   expect(api.questCompletionKeys[1]).toBe(api.questCompletionKeys[0]);
   expect(api.questCompletionKeys[0]).toMatch(/^[A-Za-z0-9._:-]{8,128}$/);
+});
+
+test("retries a mismatched committed quest response with the same intent key", async ({
+  page,
+}) => {
+  const api = await installApi(page, {
+    mismatchFirstQuestCompletionResponse: true,
+  });
+  await page.goto("/dashboard/today");
+
+  const quest = page
+    .locator("li")
+    .filter({ hasText: "Log a synthetic interaction" });
+  await quest.getByRole("button", { name: "Complete quest" }).click();
+  const dialog = page.getByRole("dialog", {
+    name: "Log a synthetic interaction",
+  });
+  await dialog.getByRole("textbox", { name: "Title" }).fill("Committed call");
+  await dialog
+    .getByRole("textbox", { name: "Notes" })
+    .fill("Durable verification notes");
+  await dialog.getByRole("button", { name: "Log and verify" }).click();
+
+  await expect(dialog.getByRole("alert")).toContainText(
+    "Quest verification response does not match the request"
+  );
+  await expect(page.getByRole("heading", { name: "Quest verified" })).toHaveCount(0);
+  await expect(page.getByText("+20 XP awarded")).toHaveCount(0);
+  expect(api.interactionBodies).toHaveLength(1);
+  expect(api.questBodies).toEqual([{ interactionId: "interaction-evidence" }]);
+  expect(api.questCompletionKeys).toHaveLength(1);
+  expect(api.questCompletionKeys[0]).toMatch(/^[A-Za-z0-9._:-]{8,128}$/);
+
+  await dialog.getByRole("button", { name: "Retry verification" }).click();
+
+  await expect(dialog).toBeHidden();
+  const receiptHeading = page.getByRole("heading", { name: "Quest verified" });
+  await expect(receiptHeading).toHaveCount(1);
+  await expect(receiptHeading).toBeFocused();
+  await expect(page.getByText("+20 XP awarded")).toHaveCount(1);
+  expect(api.interactionBodies).toHaveLength(1);
+  expect(api.questBodies).toEqual([
+    { interactionId: "interaction-evidence" },
+    { interactionId: "interaction-evidence" },
+  ]);
+  expect(api.questCompletionKeys).toHaveLength(2);
+  expect(api.questCompletionKeys[1]).toBe(api.questCompletionKeys[0]);
 });
 
 test("moves focus to the verified receipt after each successful quest", async ({
