@@ -129,6 +129,7 @@ async function installApi(
     loseFirstQuestCompletionResponse?: boolean;
     durableApprovedHistoryThenOmitAndFail?: boolean;
     failRejectedHistoryAfterDecision?: boolean;
+    briefTimeZone?: string;
     statsMode?: "ready" | "deferred-error";
   } = {}
 ): Promise<ApiState> {
@@ -259,7 +260,10 @@ async function installApi(
       return json(route, { message: "Synthetic brief refresh failure" }, 503);
     if (url.pathname === "/api/briefs/today")
       return briefReady
-        ? json(route, brief)
+        ? json(route, {
+            ...brief,
+            timeZone: options.briefTimeZone ?? brief.timeZone,
+          })
         : json(
             route,
             {
@@ -271,7 +275,10 @@ async function installApi(
     if (url.pathname === "/api/briefs/generate" && method === "POST") {
       state.generateCalls += 1;
       briefReady = true;
-      return json(route, brief);
+      return json(route, {
+        ...brief,
+        timeZone: options.briefTimeZone ?? brief.timeZone,
+      });
     }
     if (url.pathname === "/api/reminders/upcoming")
       return json(route, {
@@ -875,6 +882,7 @@ test("retries a lost quest-completion response with one verified receipt", async
   const api = await installApi(page, {
     loseFirstQuestCompletionResponse: true,
     failBriefAfterQuest: true,
+    briefTimeZone: "America/New_York",
   });
   await page.goto("/dashboard/today");
 
@@ -899,11 +907,14 @@ test("retries a lost quest-completion response with one verified receipt", async
   await dialog.getByRole("button", { name: "Retry verification" }).click();
   await expect(dialog).toBeHidden();
   await expect(page.getByRole("heading", { name: "Quest verified" })).toHaveCount(1);
+  await expect(page.getByRole("heading", { name: "Quest verified" })).toBeFocused();
   await expect(page.getByText("+20 XP awarded")).toHaveCount(1);
+  await expect(page.getByText("Verified Jul 17, 4:00 AM")).toBeVisible();
   await expect(page.getByText("Synthetic brief refresh failure")).toBeVisible();
   expect(api.interactionBodies).toHaveLength(1);
   expect(api.questCompletionKeys).toHaveLength(2);
   expect(api.questCompletionKeys[1]).toBe(api.questCompletionKeys[0]);
+  expect(api.questCompletionKeys[0]).toMatch(/^[A-Za-z0-9._:-]{8,128}$/);
 });
 
 test("moves focus to the verified receipt after each successful quest", async ({

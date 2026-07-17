@@ -97,7 +97,9 @@ export default function DailyCockpit() {
   const [selectedQuest, setSelectedQuest] = useState<
     DailyBrief["quests"][number] | null
   >(null);
-  const [questReceipt, setQuestReceipt] = useState<QuestReceipt | null>(null);
+  const [questReceipt, setQuestReceipt] = useState<
+    (QuestReceipt & { timeZone: string }) | null
+  >(null);
   const reminderTriggerRef = useRef<HTMLButtonElement>(null);
   const questTriggerRef = useRef<HTMLButtonElement>(null);
   const questReceiptFocusRef = useRef<HTMLHeadingElement>(null);
@@ -433,7 +435,7 @@ export default function DailyCockpit() {
                 +{questReceipt.xpAwarded} XP awarded
               </p>
               <p className="mt-1 text-xs text-on-surface-variant">
-                Verified {formatBriefDate(questReceipt.verifiedAt, timeZone)}
+                Verified {formatBriefDate(questReceipt.verifiedAt, questReceipt.timeZone)}
               </p>
             </section>
           ) : null}
@@ -516,7 +518,7 @@ export default function DailyCockpit() {
           quest={selectedQuest}
           onClose={closeQuestDialog}
           onSuccess={async (receipt) => {
-            setQuestReceipt(receipt);
+            setQuestReceipt({ ...receipt, timeZone });
             await refreshQuestData();
           }}
         />
