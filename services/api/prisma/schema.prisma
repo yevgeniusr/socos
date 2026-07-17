@@ -442,7 +442,7 @@ model EventCatalogFollow {
   listingId    String
   listing      EventCatalogListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
   sourceId     String?
-  source       EventSource?        @relation(fields: [sourceId, ownerId], references: [id, ownerId], onDelete: Cascade)
+  source       EventSource?        @relation(fields: [sourceId, ownerId], references: [id, ownerId], onDelete: Restrict)
   status       String              @default("active")
   socialWeight Int                 @default(5)
   createdAt    DateTime            @default(now())

@@ -21,6 +21,7 @@ import {
   EventCatalogQueryDto,
   PatchEventCatalogFollowDto,
   PutEventCatalogFollowDto,
+  StrictJsonObjectPipe,
 } from "./event-catalog.dto.js";
 import { EventSourceService } from "./event-source.service.js";
 import {
@@ -123,7 +124,7 @@ export class EventCatalogController {
   putFollow(
     @Request() request: AuthenticatedEventRequest,
     @Param("slug") slug: string,
-    @Body() input: PutEventCatalogFollowDto
+    @Body(new StrictJsonObjectPipe()) input: PutEventCatalogFollowDto
   ) {
     return this.catalog.putFollow(request.user.userId, slug, input);
   }

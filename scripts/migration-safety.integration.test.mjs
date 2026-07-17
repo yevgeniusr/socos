@@ -1058,7 +1058,7 @@ test("event catalog migration is transactional, owner-scoped, and seeds determin
   assert.doesNotMatch(migration, /"sourceId" TEXT NOT NULL/);
   assert.match(
     migration,
-    /FOREIGN KEY \("sourceId", "ownerId"\)[\s\S]*REFERENCES "EventSource"\("id", "ownerId"\) ON DELETE CASCADE/,
+    /FOREIGN KEY \("sourceId", "ownerId"\)[\s\S]*REFERENCES "EventSource"\("id", "ownerId"\) ON DELETE RESTRICT/,
   );
   assert.match(
     migration,
@@ -1483,7 +1483,7 @@ if (!databaseUrl) {
     );
     assert.match(
       definitions.get("EventCatalogFollow_sourceId_ownerId_fkey") ?? "",
-      /FOREIGN KEY \(sourceId, ownerId\) REFERENCES EventSource\(id, ownerId\)/,
+      /FOREIGN KEY \(sourceId, ownerId\) REFERENCES EventSource\(id, ownerId\).*ON DELETE RESTRICT/,
     );
     assert.match(
       definitions.get("EventCatalogFollow_status_check") ?? "",
@@ -1505,19 +1505,52 @@ if (!databaseUrl) {
     await client.query(
       `INSERT INTO "User" ("id", "email", "updatedAt")
        VALUES ('catalog-follow-owner', 'catalog-follow-owner@example.invalid', CURRENT_TIMESTAMP);
+       INSERT INTO "EventSource" (
+         "id", "ownerId", "externalSourceId", "name", "feedUrlMac",
+         "feedUrlCiphertext", "feedUrlIv", "feedUrlTag", "feedUrlKeyVersion",
+         "allowedHost", "nextPollAt", "updatedAt"
+       ) VALUES (
+         'catalog-linked-source', 'catalog-follow-owner', 'catalog-external-source',
+         'Synthetic catalog source', repeat('a', 64), decode('00', 'hex'),
+         decode(repeat('00', 12), 'hex'), decode(repeat('00', 16), 'hex'), 1,
+         'events.example.test', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+       );
        INSERT INTO "EventCatalogFollow" (
          "id", "ownerId", "listingId", "status", "socialWeight", "updatedAt"
        ) VALUES (
          'catalog-follow-without-source', 'catalog-follow-owner',
          'catalog-uae-public-holidays', 'active', 5, CURRENT_TIMESTAMP
+       ), (
+         'catalog-follow-with-source', 'catalog-follow-owner',
+         'catalog-un-international-days', 'active', 5, CURRENT_TIMESTAMP
        );`,
+    );
+    await client.query(
+      `UPDATE "EventCatalogFollow" SET "sourceId" = 'catalog-linked-source'
+        WHERE "id" = 'catalog-follow-with-source'`,
     );
     const sourceFreeFollow = await client.query(
       `SELECT "sourceId" FROM "EventCatalogFollow"
         WHERE "id" = 'catalog-follow-without-source'`,
     );
     assert.equal(sourceFreeFollow.rows[0]?.sourceId, null);
-    await client.query(`DELETE FROM "User" WHERE "id" = 'catalog-follow-owner'`);
+    await assert.rejects(
+      client.query(`DELETE FROM "EventSource" WHERE "id" = 'catalog-linked-source'`),
+      /EventCatalogFollow_sourceId_ownerId_fkey/,
+    );
+    const preservedFollows = await client.query(
+      `SELECT "id", "sourceId" FROM "EventCatalogFollow"
+        WHERE "ownerId" = 'catalog-follow-owner' ORDER BY "id"`,
+    );
+    assert.deepEqual(preservedFollows.rows, [
+      { id: "catalog-follow-with-source", sourceId: "catalog-linked-source" },
+      { id: "catalog-follow-without-source", sourceId: null },
+    ]);
+    await client.query(
+      `DELETE FROM "EventCatalogFollow" WHERE "ownerId" = 'catalog-follow-owner';
+       DELETE FROM "EventSource" WHERE "ownerId" = 'catalog-follow-owner';
+       DELETE FROM "User" WHERE "id" = 'catalog-follow-owner';`,
+    );
   }
 
   async function assertCalendarLocationSchema(client) {

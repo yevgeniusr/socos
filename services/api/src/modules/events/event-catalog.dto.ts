@@ -1,4 +1,5 @@
 import { Transform, Type } from "class-transformer";
+import { BadRequestException, type PipeTransform } from "@nestjs/common";
 import {
   IsIn,
   IsInt,
@@ -15,6 +16,15 @@ function PreserveJsonType(): PropertyDecorator {
   return Transform(({ obj, key }) => (obj as Record<string, unknown>)[key], {
     toClassOnly: true,
   });
+}
+
+export class StrictJsonObjectPipe implements PipeTransform {
+  transform(value: unknown): object {
+    if (value === null || Array.isArray(value) || typeof value !== "object") {
+      throw new BadRequestException("Event catalog follow body must be an object");
+    }
+    return value;
+  }
 }
 
 export class EventCatalogQueryDto {

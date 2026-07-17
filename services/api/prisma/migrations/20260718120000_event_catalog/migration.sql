@@ -65,7 +65,7 @@ CREATE TABLE "EventCatalogFollow" (
   CONSTRAINT "EventCatalogFollow_socialWeight_check" CHECK ("socialWeight" BETWEEN 0 AND 10),
   CONSTRAINT "EventCatalogFollow_ownerId_fkey" FOREIGN KEY ("ownerId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT "EventCatalogFollow_listingId_fkey" FOREIGN KEY ("listingId") REFERENCES "EventCatalogListing"("id") ON DELETE CASCADE ON UPDATE CASCADE,
-  CONSTRAINT "EventCatalogFollow_sourceId_ownerId_fkey" FOREIGN KEY ("sourceId", "ownerId") REFERENCES "EventSource"("id", "ownerId") ON DELETE CASCADE ON UPDATE CASCADE
+  CONSTRAINT "EventCatalogFollow_sourceId_ownerId_fkey" FOREIGN KEY ("sourceId", "ownerId") REFERENCES "EventSource"("id", "ownerId") ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
 CREATE UNIQUE INDEX "EventCatalogListing_slug_key" ON "EventCatalogListing"("slug");
