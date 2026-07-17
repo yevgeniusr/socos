@@ -293,9 +293,39 @@ sudo awk 'END { print NR }' /var/lib/socos-release-gate/.ssh/authorized_keys
 sudo visudo -cf /etc/sudoers.d/socos-release-gate
 sudo -l -U socos-release-gate
 
+bounded() {
+  seconds=$1
+  shift
+  /usr/bin/perl -e '
+    use strict;
+    use warnings;
+    my $seconds = shift @ARGV;
+    exit 127 unless defined $seconds && $seconds =~ /\A[1-9][0-9]*\z/ && @ARGV;
+    my $pid = fork();
+    exit 127 unless defined $pid;
+    if ($pid == 0) {
+      exec { $ARGV[0] } @ARGV;
+      exit 127;
+    }
+    local $SIG{ALRM} = sub {
+      kill "TERM", $pid;
+      select undef, undef, undef, 0.2;
+      kill "KILL", $pid;
+      waitpid $pid, 0;
+      exit 124;
+    };
+    alarm $seconds;
+    waitpid $pid, 0;
+    alarm 0;
+    my $status = $?;
+    if ($status & 127) { exit(128 + ($status & 127)); }
+    exit($status >> 8);
+  ' "$seconds" "$@"
+}
+
 if auth_output=$(
   printf '%s\n' 'invalid-candidate' |
-    timeout 10 ssh -o BatchMode=yes -o RequestTTY=no socos-release-gate 2>&1
+    bounded 10 ssh -o BatchMode=yes -o RequestTTY=no socos-release-gate 2>&1
 ); then
   auth_status=0
 else
@@ -314,8 +344,8 @@ printf '%s\n' 'auth_status=launcher_reached'
 audit_rejected() {
   label=$1
   shift
-  if timeout 10 "$@"; then status=0; else status=$?; fi
-  case "$status" in
+  if bounded 10 "$@"; then audit_code=0; else audit_code=$?; fi
+  case "$audit_code" in
     0) printf '%s\n' "audit_status=unexpected_success audit=$label" >&2; return 1 ;;
     124) printf '%s\n' 'audit_status=timeout' >&2; return 1 ;;
     *) printf '%s\n' "audit_status=rejected audit=$label" ;;
@@ -342,7 +372,8 @@ launcher and return exactly its fixed failure marker; `Permission denied`,
 timeout, success, or any other output fails the audit. Only after that proof may
 each nonzero transport result count as rejection. The dispatcher rejects the
 remote command while it is still unprivileged, before sudo clears the SSH
-environment.
+environment. The operator-side `bounded` helper uses macOS `/usr/bin/perl`,
+executes argv without shell interpolation, and reports deadline expiry as 124.
 Audit role flags, memberships, and database ACLs without selecting passwords or
 application rows:
 

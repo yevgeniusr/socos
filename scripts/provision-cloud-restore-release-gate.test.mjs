@@ -234,7 +234,12 @@ test('package wiring and runbook cover secure provisioning, audits, rotation, st
     /audit_rejected sftp sftp/,
     /audit_rejected\(\)/,
     /124\) printf '%s\\n' 'audit_status=timeout'/,
-    /printf '%s\\n' 'invalid-candidate' \|\s*timeout 10 ssh[\s\S]*socos-release-gate 2>&1/,
+    /bounded\(\)/,
+    /\/usr\/bin\/perl -e/,
+    /alarm \$seconds/,
+    /exec \{ \$ARGV\[0\] \} @ARGV/,
+    /exit 124/,
+    /printf '%s\\n' 'invalid-candidate' \|\s*bounded 10 ssh[\s\S]*socos-release-gate 2>&1/,
     /\[ "\$auth_output" = 'launcher_status=failed' \]/,
     /auth_status=timeout/,
     /Permission denied/,
@@ -251,6 +256,17 @@ test('package wiring and runbook cover secure provisioning, audits, rotation, st
     /rmdir \/var\/lock\/socos-release-gate\/gate\.lock/,
     /084b7addb0ccc765aa343c5412ed8f5fe5f6da0b.*ancestor/s,
   ]) assert.match(runbook, expected);
+  const auditBlock = runbook.slice(
+    runbook.indexOf('### Audit the forced command and role boundary'),
+    runbook.indexOf('Audit role flags, memberships, and database ACLs'),
+  );
+  const rejectionHelper = auditBlock.slice(
+    auditBlock.indexOf('audit_rejected()'),
+    auditBlock.indexOf('git fetch --no-tags'),
+  );
+  assert.doesNotMatch(auditBlock, /\btimeout 10\b/);
+  assert.match(rejectionHelper, /if bounded 10 "\$@"; then audit_code=0; else audit_code=\$\?; fi/);
+  assert.doesNotMatch(rejectionHelper, /\bstatus=/);
   assert.ok(runbook.indexOf("'launcher_status=failed'") < runbook.indexOf('audit_rejected()'));
   assert.doesNotMatch(runbook, /exact trusted `origin\/main` is currently\s*`[0-9a-f]{40}`/);
   assert.doesNotMatch(runbook, /&& exit 1 \|\| true/);
