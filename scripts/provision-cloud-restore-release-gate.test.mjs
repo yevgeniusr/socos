@@ -160,7 +160,7 @@ case "$name" in
       probe_container_count=$((probe_container_count + 1))
       printf '%s' "$probe_container_count" > "$SHIM_STATE/probe-container-count"
       probe_container_id=$(printf '%064x' "$((4096 + probe_container_count))")
-      printf '%s\\n' "$probe_container_id" > "$probe_cidfile"
+      printf '%s' "$probe_container_id" > "$probe_cidfile"
       : > "$SHIM_STATE/container-$probe_container_id"
       probe_user=$(sed -n 's/^PGUSER=//p' "$probe_env")
       probe_database=$(sed -n 's/^PGDATABASE=//p' "$probe_env")
@@ -677,7 +677,7 @@ test('timed-out credential probe force-removes its orphan and every cidfile', ()
   assert.equal(readFileSync(join(f.state, 'probe-removals'), 'utf8').trim().split('\n').length, 6);
 });
 
-test('rerun cleans only validated stale SIGKILL artifacts and labeled probe containers', () => {
+test('rerun cleans validated no-newline stale SIGKILL artifacts and labeled probe containers', () => {
   const f = fixture();
   const etc = join(f.root, 'etc');
   const tmpRoot = join(f.root, 'var/lib/socos-release-gate');
@@ -698,7 +698,7 @@ test('rerun cleans only validated stale SIGKILL artifacts and labeled probe cont
   ];
   writeFileSync(stalePaths[0], 'stale-staged-secret\n', { mode: 0o600 });
   writeFileSync(stalePaths[1], 'stale-probe-secret\n', { mode: 0o600 });
-  writeFileSync(stalePaths[2], `${staleCid}\n`, { mode: 0o600 });
+  writeFileSync(stalePaths[2], staleCid, { mode: 0o600 });
   writeFileSync(stalePaths[3], '', { mode: 0o600 });
   writeFileSync(staleInputPath, '{"coolify_token":"stale-token-bearing-input"}\n', { mode: 0o600 });
   writeFileSync(inputDecoyPath, 'keep nonmatching input\n', { mode: 0o600 });
@@ -722,6 +722,33 @@ test('rerun cleans only validated stale SIGKILL artifacts and labeled probe cont
   assert.ok(calls.indexOf('flock <-x>') < calls.indexOf('<label=com.socos.owner=socos-release-gate-credential-probe>'));
   assert.match(calls, new RegExp(`docker <rm> <-f> <--> <${staleCid}>`));
   assert.match(calls, new RegExp(`docker <rm> <-f> <--> <${labeledCid}>`));
+});
+
+test('rerun rejects stale cidfiles with a newline or extra byte without deleting their container', () => {
+  const staleCid = 'c'.repeat(64);
+  for (const [suffix, contents] of [
+    ['AbC123', `${staleCid}\n`],
+    ['DeF456', `${staleCid}0`],
+  ]) {
+    const f = fixture();
+    const tmpRoot = join(f.root, 'var/lib/socos-release-gate');
+    mkdirSync(tmpRoot, { recursive: true });
+    const staleCidfile = join(tmpRoot, `credential-probe-cid.${suffix}`);
+    const containerMarker = join(f.state, `container-${staleCid}`);
+    writeFileSync(staleCidfile, contents, { mode: 0o600 });
+    writeFileSync(containerMarker, '');
+
+    const result = run(f.input, f.env);
+    assert.notEqual(result.status, 0);
+    assert.equal(result.stdout, '');
+    assert.equal(result.stderr, 'provision_status=failed\n');
+    assert.equal(existsSync(staleCidfile), true);
+    assert.equal(existsSync(containerMarker), true);
+    assert.doesNotMatch(
+      readFileSync(f.log, 'utf8'),
+      new RegExp(`docker <rm> <-f> <--> <${staleCid}>`),
+    );
+  }
 });
 
 test('package wiring and runbook cover secure provisioning, audits, rotation, stale locks, and the exact candidate', () => {

@@ -30,27 +30,31 @@ env_tmp=''
 credential_probe_tmp=''
 credential_probe_cidfile=''
 credentials_verified=0
+validated_probe_cid=''
+
+read_exact_probe_cidfile() {
+  local probe_cidfile=$1
+  local probe_cidfile_size=''
+  validated_probe_cid=''
+  [[ -f "$probe_cidfile" && ! -L "$probe_cidfile" ]] || return 1
+  chmod 0600 "$probe_cidfile" >/dev/null 2>&1 || return 1
+  probe_cidfile_size=$(wc -c < "$probe_cidfile" | tr -d '[:space:]') || return 1
+  [[ "$probe_cidfile_size" == '64' ]] || return 1
+  IFS= read -r validated_probe_cid < "$probe_cidfile" || [[ -n "$validated_probe_cid" ]] || return 1
+  [[ "$validated_probe_cid" =~ ^[0-9a-f]{64}$ ]]
+}
 
 cleanup_probe_container() {
   local probe_cid=''
-  local probe_extra=''
   local probe_owner=''
   local probe_cleanup_status=0
   if [[ -n "$credential_probe_cidfile" && ( -e "$credential_probe_cidfile" || -L "$credential_probe_cidfile" ) ]]; then
-    if [[ -f "$credential_probe_cidfile" && ! -L "$credential_probe_cidfile" ]]; then
-      chmod 0600 "$credential_probe_cidfile" >/dev/null 2>&1 || probe_cleanup_status=1
-      IFS= read -r probe_cid < "$credential_probe_cidfile" || probe_cleanup_status=1
-      if IFS= read -r probe_extra < <(tail -n +2 "$credential_probe_cidfile"); then
-        probe_cleanup_status=1
-      fi
-      if [[ "$probe_cid" =~ ^[0-9a-f]{64}$ ]]; then
-        probe_owner=$(docker inspect --format "{{ index .Config.Labels \"$CREDENTIAL_PROBE_LABEL_KEY\" }}" "$probe_cid" 2>/dev/null) \
-          || probe_cleanup_status=1
-        if [[ "$probe_owner" == "$CREDENTIAL_PROBE_LABEL_VALUE" ]]; then
-          docker rm -f -- "$probe_cid" >/dev/null 2>&1 || probe_cleanup_status=1
-        else
-          probe_cleanup_status=1
-        fi
+    if read_exact_probe_cidfile "$credential_probe_cidfile"; then
+      probe_cid=$validated_probe_cid
+      probe_owner=$(docker inspect --format "{{ index .Config.Labels \"$CREDENTIAL_PROBE_LABEL_KEY\" }}" "$probe_cid" 2>/dev/null) \
+        || probe_cleanup_status=1
+      if [[ "$probe_owner" == "$CREDENTIAL_PROBE_LABEL_VALUE" ]]; then
+        docker rm -f -- "$probe_cid" >/dev/null 2>&1 || probe_cleanup_status=1
       else
         probe_cleanup_status=1
       fi
@@ -204,19 +208,14 @@ for stale_probe_cidfile in "$tmp_root"/credential-probe-cid.??????; do
   stale_probe_basename=${stale_probe_cidfile##*/}
   [[ "$stale_probe_basename" =~ ^credential-probe-cid\.[A-Za-z0-9]{6}$ ]] || fail
   [[ -f "$stale_probe_cidfile" && ! -L "$stale_probe_cidfile" ]] || fail
-  quiet chmod 0600 "$stale_probe_cidfile"
   if [[ ! -s "$stale_probe_cidfile" ]]; then
+    quiet chmod 0600 "$stale_probe_cidfile"
     stale_probe_cidfiles[$stale_probe_cidfile_count]=$stale_probe_cidfile
     stale_probe_cidfile_count=$((stale_probe_cidfile_count + 1))
     continue
   fi
-  stale_probe_cid=''
-  stale_probe_extra=''
-  IFS= read -r stale_probe_cid < "$stale_probe_cidfile" || fail
-  if IFS= read -r stale_probe_extra < <(tail -n +2 "$stale_probe_cidfile"); then
-    fail
-  fi
-  [[ "$stale_probe_cid" =~ ^[0-9a-f]{64}$ ]] || fail
+  read_exact_probe_cidfile "$stale_probe_cidfile" || fail
+  stale_probe_cid=$validated_probe_cid
   stale_probe_owner=''
   if stale_probe_owner=$(docker inspect --format "{{ index .Config.Labels \"$CREDENTIAL_PROBE_LABEL_KEY\" }}" "$stale_probe_cid" 2>/dev/null); then
     [[ "$stale_probe_owner" == "$CREDENTIAL_PROBE_LABEL_VALUE" ]] || fail
@@ -260,7 +259,7 @@ for stale_probe_tmp in "$tmp_root"/credential-probe.??????; do
 done
 unset stale_probe_cids stale_probe_cidfiles labeled_probe_cids remaining_probe_cids
 unset stale_probe_cid_count stale_probe_cidfile_count stale_probe_index
-unset stale_probe_cid stale_probe_cidfile stale_probe_owner stale_probe_extra
+unset stale_probe_cid stale_probe_cidfile stale_probe_owner
 unset stale_probe_tmp stale_env_tmp stale_input_tmp
 unset stale_probe_basename stale_env_basename stale_input_basename
 
