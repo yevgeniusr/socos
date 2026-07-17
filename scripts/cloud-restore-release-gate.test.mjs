@@ -349,6 +349,71 @@ fs.writeFileSync('${callLog}', JSON.stringify({
   assert.doesNotMatch(JSON.stringify(call.args), /postgres(?:ql)?:\/\/|secret-password/);
 });
 
+test('pg_restore receives the exact target database with restore environment and contained dump', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'socos-release-restore-backup-'));
+  const bin = join(dir, 'bin');
+  const backupDir = join(dir, 'backup');
+  const dumpFile = join(backupDir, 'independent.dump');
+  const callLog = join(dir, 'pg-restore-call.json');
+  spawnSync('mkdir', ['-p', bin, backupDir]);
+  writeFileSync(dumpFile, 'synthetic-custom-dump');
+  nodeExecutable(
+    bin,
+    'pg_restore',
+    `const fs = require('node:fs');
+fs.writeFileSync('${callLog}', JSON.stringify({
+  args: process.argv.slice(2),
+  isRestoreUser: process.env.PGUSER === 'socos_release_gate_restore',
+  hasRestorePassword: process.env.PGPASSWORD === 'restore-secret-password',
+  host: process.env.PGHOST,
+  port: process.env.PGPORT,
+  database: process.env.PGDATABASE,
+  sslmode: process.env.PGSSLMODE,
+  appname: process.env.PGAPPNAME,
+  hasDatabaseUrl: Object.hasOwn(process.env, 'DATABASE_URL'),
+}));`,
+  );
+  const databaseName = 'socos_release_gate_disposable';
+  const databaseUrl = `postgresql://socos_release_gate_restore:restore-secret-password@database.internal:6543/${databaseName}?sslmode=require&application_name=restore-run`;
+  const dependencies = createDependencies({
+    operationTimeoutMs: 5_000,
+    cleanupTimeoutMs: 5_000,
+    terminationGraceMs: 100,
+  }, new AbortController().signal);
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${bin}:${originalPath}`;
+  try {
+    await dependencies.restoreBackup(
+      candidate,
+      { workspace: dir, backupDir },
+      { dumpFile },
+      { databaseName, databaseUrl },
+    );
+  } finally {
+    process.env.PATH = originalPath;
+  }
+
+  const call = JSON.parse(readFileSync(callLog, 'utf8'));
+  assert.deepEqual(call.args, [
+    '--exit-on-error',
+    '--no-owner',
+    '--no-privileges',
+    `--dbname=${databaseName}`,
+    dumpFile,
+  ]);
+  assert.equal(call.args.at(-1), dumpFile);
+  assert.equal(resolve(dumpFile).startsWith(`${resolve(backupDir)}/`), true);
+  assert.equal(call.isRestoreUser, true);
+  assert.equal(call.hasRestorePassword, true);
+  assert.equal(call.host, 'database.internal');
+  assert.equal(call.port, '6543');
+  assert.equal(call.database, databaseName);
+  assert.equal(call.sslmode, 'require');
+  assert.equal(call.appname, 'restore-run');
+  assert.equal(call.hasDatabaseUrl, false);
+  assert.doesNotMatch(JSON.stringify(call.args), /postgres(?:ql)?:\/\/|secret-password/);
+});
+
 test('local wrapper validates the candidate before invoking ssh', () => {
   const dir = mkdtempSync(join(tmpdir(), 'socos-release-local-invalid-'));
   const called = join(dir, 'called');

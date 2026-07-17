@@ -677,7 +677,13 @@ export function createDependencies(config, signal) {
       void candidateSha;
       void workspace;
       try {
-        await run('pg_restore', ['--exit-on-error', '--no-owner', '--no-privileges', independent.dumpFile], {
+        await run('pg_restore', [
+          '--exit-on-error',
+          '--no-owner',
+          '--no-privileges',
+          `--dbname=${restore.databaseName}`,
+          independent.dumpFile,
+        ], {
           env: commandEnvironment(pgEnvironment(new URL(restore.databaseUrl))),
         });
       } catch (error) {
