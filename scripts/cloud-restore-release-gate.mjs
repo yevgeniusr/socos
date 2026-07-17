@@ -476,7 +476,7 @@ function containedFile(parent, path) {
   return fromParent !== '' && !fromParent.startsWith('..') && !isAbsolute(fromParent);
 }
 
-function createDependencies(config, signal) {
+export function createDependencies(config, signal) {
   const trustedRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
   const run = makeCommandRunner(signal, config);
   const safe = commandEnvironment();
@@ -487,14 +487,15 @@ function createDependencies(config, signal) {
   const api = async (path, options = {}) => {
     let response;
     try {
+      const hasJsonBody = options.jsonBody !== undefined;
       response = await fetch(`${config.coolifyBaseUrl}${path}`, {
         method: options.method || 'GET',
         headers: {
           authorization: `Bearer ${config.coolifyToken}`,
           accept: 'application/json',
-          ...(options.method ? { 'content-type': 'application/json' } : {}),
+          ...(hasJsonBody ? { 'content-type': 'application/json' } : {}),
         },
-        body: options.method ? '{}' : undefined,
+        body: hasJsonBody ? JSON.stringify(options.jsonBody) : undefined,
         redirect: 'error',
         signal: AbortSignal.any([signal, AbortSignal.timeout(config.httpTimeoutMs)]),
       });
@@ -502,6 +503,7 @@ function createDependencies(config, signal) {
       throw new GateFailure(signal.aborted ? 'interrupted' : 'coolify_request_failed');
     }
     if (!response.ok) throw new GateFailure('coolify_request_failed');
+    if (options.responseMode === 'none') return undefined;
     try {
       return await response.json();
     } catch {
@@ -587,12 +589,17 @@ function createDependencies(config, signal) {
       }
     },
     async proveFreshCoolifyBackup() {
-      const path = `/api/v1/databases/${config.databaseUuid}/backups/${config.backupUuid}/executions`;
-      const before = listExecutions(await api(path));
+      const backupPath = `/api/v1/databases/${config.databaseUuid}/backups/${config.backupUuid}`;
+      const executionsPath = `${backupPath}/executions`;
+      const before = listExecutions(await api(executionsPath));
       const startedAt = Date.now();
-      await api(path, { method: 'POST' });
+      await api(backupPath, {
+        method: 'PATCH',
+        jsonBody: { backup_now: true },
+        responseMode: 'none',
+      });
       for (let attempt = 0; attempt < config.pollAttempts; attempt += 1) {
-        const current = listExecutions(await api(path));
+        const current = listExecutions(await api(executionsPath));
         try {
           return validateFreshBackup(before, current, startedAt);
         } catch (error) {

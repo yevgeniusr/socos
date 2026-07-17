@@ -7,6 +7,7 @@ import test from 'node:test';
 
 import {
   configFromEnvironment,
+  createDependencies,
   GateFailure,
   makeCommandRunner,
   publicFailureReceipt,
@@ -59,6 +60,44 @@ function realCommandRunner() {
   });
 }
 
+function coolifyDependencies() {
+  return createDependencies({
+    coolifyBaseUrl: 'https://coolify.invalid',
+    coolifyToken: 'fixed-test-token',
+    databaseUuid: 'database',
+    backupUuid: 'backup',
+    pollAttempts: 1,
+    pollMs: 0,
+    httpTimeoutMs: 5_000,
+    operationTimeoutMs: 5_000,
+    cleanupTimeoutMs: 5_000,
+    terminationGraceMs: 100,
+  }, new AbortController().signal);
+}
+
+async function withCapturedFetch(responses, callback) {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (...args) => {
+    calls.push(args);
+    assert.notEqual(responses.length, 0, 'unexpected Fetch call');
+    return responses.shift();
+  };
+  try {
+    return await callback(calls);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+function fetchResponse(status, json) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json,
+  };
+}
+
 test('command runner converts an early-exit large-input write failure to fixed command_failed', async () => {
   const run = realCommandRunner();
   await assert.rejects(
@@ -84,6 +123,75 @@ test('command runner accepts an empty-input command that closes stdin and exits 
     ['-e', "process.stdin.destroy(); process.stdout.write('empty_input_ok\\n');"],
   );
   assert.equal(output, 'empty_input_ok\n');
+});
+
+test('Coolify backup trigger PATCHes the exact config with fixed JSON and accepts empty 2xx', async () => {
+  const oldExecution = {
+    uuid: 'old_execution',
+    status: 'success',
+    size: '1',
+    created_at: '2026-07-16T00:00:00.000Z',
+  };
+  const newExecution = {
+    uuid: 'new_execution',
+    status: 'success',
+    size: '173187',
+    created_at: new Date(Date.now() + 1_000).toISOString(),
+  };
+  const responses = [
+    fetchResponse(200, async () => ({ executions: [oldExecution] })),
+    fetchResponse(204, async () => { throw new Error('empty trigger response must not be parsed'); }),
+    fetchResponse(200, async () => ({ executions: [oldExecution, newExecution] })),
+  ];
+
+  await withCapturedFetch(responses, async (calls) => {
+    const proof = await coolifyDependencies().proveFreshCoolifyBackup();
+    assert.deepEqual(proof, { executionUuid: 'new_execution', sizeBytes: '173187' });
+    assert.equal(calls.length, 3);
+    assert.equal(calls[0][0], 'https://coolify.invalid/api/v1/databases/database/backups/backup/executions');
+    assert.deepEqual(calls[0][1].headers, {
+      authorization: 'Bearer fixed-test-token',
+      accept: 'application/json',
+    });
+    assert.equal(calls[0][1].method, 'GET');
+    assert.equal(calls[0][1].body, undefined);
+    assert.equal(calls[1][0], 'https://coolify.invalid/api/v1/databases/database/backups/backup');
+    assert.deepEqual(calls[1][1].headers, {
+      authorization: 'Bearer fixed-test-token',
+      accept: 'application/json',
+      'content-type': 'application/json',
+    });
+    assert.equal(calls[1][1].method, 'PATCH');
+    assert.equal(calls[1][1].body, '{"backup_now":true}');
+    assert.equal(calls[2][0], calls[0][0]);
+    assert.equal(calls[2][1].method, 'GET');
+  });
+});
+
+test('Coolify backup trigger rejects non-2xx without polling executions again', async () => {
+  const responses = [
+    fetchResponse(200, async () => ({ executions: [] })),
+    fetchResponse(404, async () => ({ message: 'not found' })),
+  ];
+  await withCapturedFetch(responses, async (calls) => {
+    await assert.rejects(
+      coolifyDependencies().proveFreshCoolifyBackup(),
+      (error) => error instanceof GateFailure && error.code === 'coolify_request_failed',
+    );
+    assert.equal(calls.length, 2);
+  });
+});
+
+test('Coolify execution-list GET rejects malformed JSON', async () => {
+  const responses = [fetchResponse(200, async () => { throw new SyntaxError('malformed'); })];
+  await withCapturedFetch(responses, async (calls) => {
+    await assert.rejects(
+      coolifyDependencies().proveFreshCoolifyBackup(),
+      (error) => error instanceof GateFailure && error.code === 'coolify_request_failed',
+    );
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0][1].method, 'GET');
+  });
 });
 
 test('local wrapper validates the candidate before invoking ssh', () => {
