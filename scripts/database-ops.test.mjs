@@ -216,6 +216,29 @@ test('independent recovery runbook uses secret-store libpq variables instead of 
   assert.doesNotMatch(independentRecovery, /(?:^|[\s(])DATABASE_URL=/m);
 });
 
+test('post-migration recovery example uses required and configured optional libpq variables', () => {
+  const runbook = readFileSync(resolve(root, 'docs/runbooks/database-backup-restore.md'), 'utf8');
+  const migrationRecovery = runbook
+    .split('## Migration Recovery Drill')[1]
+    .split('\n## ')[0];
+  assert.match(migrationRecovery, /PGHOST.*PGPORT.*PGUSER.*PGPASSWORD.*PGDATABASE/is);
+  for (const optionalVariable of [
+    'PGSSLMODE',
+    'PGSSLCERT',
+    'PGSSLKEY',
+    'PGSSLROOTCERT',
+    'PGSSLCRL',
+    'PGCONNECT_TIMEOUT',
+    'PGAPPNAME',
+    'PGOPTIONS',
+  ]) assert.match(migrationRecovery, new RegExp(`\\b${optionalVariable}\\b`));
+  assert.match(migrationRecovery, /only.*configured.*optional libpq/is);
+  assert.match(
+    migrationRecovery,
+    /(?:^|\n)node scripts\/verify-post-migration-counts\.mjs "\$PRE_MIGRATION_METADATA"/,
+  );
+});
+
 test('restore verification always drops its disposable database', () => {
   const dir = mkdtempSync(join(tmpdir(), 'socos-restore-test-'));
   const bin = join(dir, 'bin');
@@ -360,7 +383,7 @@ test('post-migration verifier supports the current rollout from the pre-agent ba
   const result = run('scripts/verify-post-migration-counts.mjs', {
     args: [before],
     env: {
-      DATABASE_URL: 'postgresql://secret-user:secret-password@example.invalid/socos',
+      ...backupPgEnvironment,
       PATH: `${bin}:${process.env.PATH}`,
     },
   });
@@ -392,7 +415,7 @@ test('post-migration verifier supports a seven-migration upgrade and preserves c
   const result = run('scripts/verify-post-migration-counts.mjs', {
     args: [before],
     env: {
-      DATABASE_URL: 'postgresql://secret-user:secret-password@example.invalid/socos',
+      ...backupPgEnvironment,
       PATH: `${bin}:${process.env.PATH}`,
     },
   });
@@ -424,7 +447,7 @@ test('post-migration verifier supports an eight-migration upgrade with event tab
   const result = run('scripts/verify-post-migration-counts.mjs', {
     args: [before],
     env: {
-      DATABASE_URL: 'postgresql://secret-user:secret-password@example.invalid/socos',
+      ...backupPgEnvironment,
       PATH: `${bin}:${process.env.PATH}`,
     },
   });
@@ -458,7 +481,7 @@ test('post-migration verifier supports a nine-migration upgrade before event-bri
   const result = run('scripts/verify-post-migration-counts.mjs', {
     args: [before],
     env: {
-      DATABASE_URL: 'postgresql://secret-user:secret-password@example.invalid/socos',
+      ...backupPgEnvironment,
       PATH: `${bin}:${process.env.PATH}`,
     },
   });
@@ -486,7 +509,7 @@ test('post-migration verifier preserves human idempotency rows current-to-curren
   const result = run('scripts/verify-post-migration-counts.mjs', {
     args: [before],
     env: {
-      DATABASE_URL: 'postgresql://secret-user:secret-password@example.invalid/socos',
+      ...backupPgEnvironment,
       PATH: `${bin}:${process.env.PATH}`,
     },
   });
@@ -515,7 +538,7 @@ test('post-migration verifier supports an eleven-to-twelve migration upgrade wit
   const result = run('scripts/verify-post-migration-counts.mjs', {
     args: [before],
     env: {
-      DATABASE_URL: 'postgresql://secret-user:secret-password@example.invalid/socos',
+      ...backupPgEnvironment,
       PATH: `${bin}:${process.env.PATH}`,
     },
   });
@@ -523,6 +546,103 @@ test('post-migration verifier supports an eleven-to-twelve migration upgrade wit
   assert.match(result.stdout, /new_empty_tables=1 migrations=12/);
   assert.doesNotMatch(result.stdout + result.stderr, /secret-user|secret-password/);
   assert.doesNotMatch(readFileSync(argsLog, 'utf8'), /secret-user|secret-password/);
+});
+
+test('post-migration verifier gives psql only the configured libpq environment', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'socos-migration-environment-test-'));
+  const bin = join(dir, 'bin');
+  const before = join(dir, 'before.tsv');
+  const callLog = join(dir, 'psql-call.json');
+  execFileSync('mkdir', ['-p', bin]);
+  const expectedMigrationCount = readdirSync(resolve(root, 'services/api/prisma/migrations'))
+    .filter((name) => existsSync(resolve(root, 'services/api/prisma/migrations', name, 'migration.sql')))
+    .length;
+  const metadata =
+    `table_name\trow_count\nActionOutbox\t1\nActionProposal\t2\nAgentClient\t3\nAgentCredential\t3\nAgentIdempotencyRecord\t4\nApprovalGrant\t1\nCalendarEvent\t0\nCalendarSource\t0\nCalendarWatch\t0\nCityStay\t0\nContact\t106\nDerivedVisit\t0\nDiscoveredEvent\t0\nEventPreference\t0\nEventSource\t0\nGoogleCalendarConnection\t0\nGoogleOAuthAttempt\t0\nHumanIdempotencyRecord\t3\nInteractionReceipt\t0\nLocationAlias\t0\nLocationDevice\t0\nLocationSample\t0\nMutationAuditEvent\t8\nPersonalDataDeletionAudit\t0\n_prisma_migrations\t${expectedMigrationCount}\n`;
+  writeFileSync(before, metadata);
+  const psql = join(bin, 'psql');
+  writeFileSync(
+    psql,
+    `#!${process.execPath}\nconst fs = require('node:fs');
+const allowed = new Set([
+  'PATH', 'HOME', 'LANG', 'LC_ALL',
+  '__CF_USER_TEXT_ENCODING',
+  'PGHOST', 'PGPORT', 'PGUSER', 'PGPASSWORD', 'PGDATABASE',
+  'PGSSLMODE', 'PGSSLCERT', 'PGSSLKEY', 'PGSSLROOTCERT', 'PGSSLCRL',
+  'PGCONNECT_TIMEOUT', 'PGAPPNAME', 'PGOPTIONS',
+]);
+fs.writeFileSync('${callLog}', JSON.stringify({
+  args: process.argv.slice(2),
+  host: process.env.PGHOST,
+  port: process.env.PGPORT,
+  user: process.env.PGUSER,
+  hasPassword: process.env.PGPASSWORD === 'secret-password',
+  database: process.env.PGDATABASE,
+  sslmode: process.env.PGSSLMODE,
+  appname: process.env.PGAPPNAME,
+  optional: Object.fromEntries([
+    'PGSSLMODE', 'PGSSLCERT', 'PGSSLKEY', 'PGSSLROOTCERT', 'PGSSLCRL',
+    'PGCONNECT_TIMEOUT', 'PGAPPNAME', 'PGOPTIONS',
+  ].map((key) => [key, process.env[key]])),
+  hasBaseEnvironment: ['PATH', 'HOME', 'LANG', 'LC_ALL']
+    .every((key) => typeof process.env[key] === 'string' && process.env[key] !== ''),
+  hasDatabaseUrl: Object.hasOwn(process.env, 'DATABASE_URL'),
+  unexpectedKeys: Object.keys(process.env).filter((key) => !allowed.has(key)).sort(),
+}));
+process.stdout.write(${JSON.stringify(metadata)});`,
+  );
+  chmodSync(psql, 0o755);
+
+  const result = run('scripts/verify-post-migration-counts.mjs', {
+    args: [before],
+    env: {
+      PGHOST: 'database.internal',
+      PGPORT: '6543',
+      PGUSER: 'secret-user',
+      PGPASSWORD: 'secret-password',
+      PGDATABASE: 'socos_release_gate_restore',
+      PGSSLMODE: 'require',
+      PGSSLCERT: '/tls/client.crt',
+      PGSSLKEY: '/tls/client.key',
+      PGSSLROOTCERT: '/tls/root.crt',
+      PGSSLCRL: '/tls/root.crl',
+      PGCONNECT_TIMEOUT: '15',
+      PGAPPNAME: 'release-invariants',
+      PGOPTIONS: '-c statement_timeout=30000',
+      DATABASE_URL: 'postgresql://decoy-user:decoy-password@decoy.invalid/wrong',
+      UNRELATED_SECRET: 'must-not-reach-psql',
+      PATH: `${bin}:${process.env.PATH}`,
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(
+    result.stdout.trim(),
+    `migration_counts_status=preserved existing_tables=24 new_empty_tables=0 migrations=${expectedMigrationCount}`,
+  );
+  const call = JSON.parse(readFileSync(callLog, 'utf8'));
+  assert.equal(call.host, 'database.internal');
+  assert.equal(call.port, '6543');
+  assert.equal(call.user, 'secret-user');
+  assert.equal(call.hasPassword, true);
+  assert.equal(call.database, 'socos_release_gate_restore');
+  assert.equal(call.sslmode, 'require');
+  assert.equal(call.appname, 'release-invariants');
+  assert.deepEqual(call.optional, {
+    PGSSLMODE: 'require',
+    PGSSLCERT: '/tls/client.crt',
+    PGSSLKEY: '/tls/client.key',
+    PGSSLROOTCERT: '/tls/root.crt',
+    PGSSLCRL: '/tls/root.crl',
+    PGCONNECT_TIMEOUT: '15',
+    PGAPPNAME: 'release-invariants',
+    PGOPTIONS: '-c statement_timeout=30000',
+  });
+  assert.equal(call.hasBaseEnvironment, true);
+  assert.equal(call.hasDatabaseUrl, false);
+  assert.deepEqual(call.unexpectedKeys, []);
+  assert.doesNotMatch(JSON.stringify(call.args), /postgres(?:ql)?:\/\/|secret-password/);
+  assert.doesNotMatch(result.stdout + result.stderr, /secret-password|decoy-password/);
 });
 
 test('post-migration verifier requires human idempotency metadata at the current baseline', () => {
@@ -538,7 +658,7 @@ test('post-migration verifier requires human idempotency metadata at the current
 
   const result = run('scripts/verify-post-migration-counts.mjs', {
     args: [before],
-    env: { DATABASE_URL: 'postgresql://example.invalid/socos' },
+    env: { ...backupPgEnvironment },
   });
 
   assert.equal(result.status, 65);
@@ -566,7 +686,7 @@ test('post-migration verifier derives migration count and allows calendar locati
   const result = run('scripts/verify-post-migration-counts.mjs', {
     args: [before],
     env: {
-      DATABASE_URL: 'postgresql://secret-user:secret-password@example.invalid/socos',
+      ...backupPgEnvironment,
       PATH: `${bin}:${process.env.PATH}`,
     },
   });
@@ -596,7 +716,7 @@ test('post-migration verifier rejects nonzero introduced calendar location event
   const result = run('scripts/verify-post-migration-counts.mjs', {
     args: [before],
     env: {
-      DATABASE_URL: 'postgresql://secret-user:secret-password@example.invalid/socos',
+      ...backupPgEnvironment,
       PATH: `${bin}:${process.env.PATH}`,
     },
   });
@@ -623,7 +743,7 @@ test('post-migration verifier rejects unexpected post-migration tables', () => {
   const result = run('scripts/verify-post-migration-counts.mjs', {
     args: [before],
     env: {
-      DATABASE_URL: 'postgresql://secret-user:secret-password@example.invalid/socos',
+      ...backupPgEnvironment,
       PATH: `${bin}:${process.env.PATH}`,
     },
   });
@@ -639,7 +759,7 @@ test('post-migration verifier rejects metadata without migration history', () =>
 
   const result = run('scripts/verify-post-migration-counts.mjs', {
     args: [before],
-    env: { DATABASE_URL: 'postgresql://example.invalid/socos' },
+    env: { ...backupPgEnvironment },
   });
 
   assert.equal(result.status, 65);
@@ -656,7 +776,7 @@ test('post-migration verifier rejects count-eight metadata missing calendar-loca
 
   const result = run('scripts/verify-post-migration-counts.mjs', {
     args: [before],
-    env: { DATABASE_URL: 'postgresql://example.invalid/socos' },
+    env: { ...backupPgEnvironment },
   });
 
   assert.equal(result.status, 65);
@@ -673,7 +793,7 @@ test('post-migration verifier rejects count-nine metadata missing event-discover
 
   const result = run('scripts/verify-post-migration-counts.mjs', {
     args: [before],
-    env: { DATABASE_URL: 'postgresql://example.invalid/socos' },
+    env: { ...backupPgEnvironment },
   });
 
   assert.equal(result.status, 65);
@@ -690,7 +810,7 @@ test('post-migration verifier rejects count-seven metadata missing an agent tabl
 
   const result = run('scripts/verify-post-migration-counts.mjs', {
     args: [before],
-    env: { DATABASE_URL: 'postgresql://example.invalid/socos' },
+    env: { ...backupPgEnvironment },
   });
 
   assert.equal(result.status, 65);

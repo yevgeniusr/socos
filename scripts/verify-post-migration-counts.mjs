@@ -3,8 +3,21 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const databaseUrl = process.env.DATABASE_URL;
 const metadataPath = process.argv[2];
+const requiredPgVariables = ['PGHOST', 'PGPORT', 'PGUSER', 'PGPASSWORD', 'PGDATABASE'];
+const optionalPgVariables = [
+  'PGSSLMODE',
+  'PGSSLCERT',
+  'PGSSLKEY',
+  'PGSSLROOTCERT',
+  'PGSSLCRL',
+  'PGCONNECT_TIMEOUT',
+  'PGAPPNAME',
+  'PGOPTIONS',
+];
+const pgEnvironment = Object.fromEntries(
+  requiredPgVariables.map((name) => [name, process.env[name]]),
+);
 const migrationsRoot = resolve(
   process.env.SOCOS_MIGRATIONS_ROOT ?? 'services/api/prisma/migrations',
 );
@@ -51,9 +64,23 @@ const allowedNewTables = new Set([
   ...introducedTableRollouts.flatMap((rollout) => rollout.tables),
 ]);
 
-if (!databaseUrl || !metadataPath) {
-  console.error('DATABASE_URL and aggregate metadata are required.');
+if (
+  !metadataPath
+  || requiredPgVariables.some((name) => typeof pgEnvironment[name] !== 'string' || pgEnvironment[name] === '')
+) {
+  console.error('PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE, and aggregate metadata are required.');
   process.exit(64);
+}
+
+const psqlEnvironment = {
+  PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
+  HOME: process.env.HOME || '/nonexistent',
+  LANG: process.env.LANG || 'C',
+  LC_ALL: process.env.LC_ALL || 'C',
+  ...pgEnvironment,
+};
+for (const name of optionalPgVariables) {
+  if (process.env[name] !== undefined) psqlEnvironment[name] = process.env[name];
 }
 
 function parseMetadata(raw) {
@@ -125,7 +152,7 @@ const result = spawnSync(
     '--pset=footer=off',
     `--command=${query}`,
   ],
-  { encoding: 'utf8', env: { ...process.env, PGDATABASE: databaseUrl } },
+  { encoding: 'utf8', env: psqlEnvironment },
 );
 
 if (result.error || result.status !== 0) {

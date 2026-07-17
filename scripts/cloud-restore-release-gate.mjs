@@ -742,7 +742,7 @@ export function createDependencies(config, signal) {
           {
             cwd: trustedRoot,
             env: commandEnvironment({
-              DATABASE_URL: restore.databaseUrl,
+              ...pgEnvironment(new URL(restore.databaseUrl)),
               SOCOS_MIGRATIONS_ROOT: join(workspace.worktree, 'services/api/prisma/migrations'),
             }),
           },

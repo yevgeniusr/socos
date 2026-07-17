@@ -48,13 +48,23 @@ Before touching production:
 Do not use `prisma db push`, `migrate reset`, or edit the two historical
 migration files. The verified production restore has no `_prisma_migrations`
 table. Before the first deploy, baseline those files on the disposable restore
-using Prisma's supported history command, then deploy the reconciliation:
+using Prisma's supported history command, then deploy the reconciliation. For
+the final count verification, load `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`,
+and `PGDATABASE` from the runner secret store. Export only configured optional
+libpq variables from `PGSSLMODE`, `PGSSLCERT`, `PGSSLKEY`, `PGSSLROOTCERT`,
+`PGSSLCRL`, `PGCONNECT_TIMEOUT`, `PGAPPNAME`, and `PGOPTIONS`:
 
 ```bash
 DATABASE_URL="$RESTORED_DATABASE_URL" pnpm --filter @socos/api exec prisma migrate resolve --applied 20260327000000_initial_schema
 DATABASE_URL="$RESTORED_DATABASE_URL" pnpm --filter @socos/api exec prisma migrate resolve --applied 20260331000000_add_celebrations
 DATABASE_URL="$RESTORED_DATABASE_URL" pnpm --filter @socos/api exec prisma migrate deploy
-DATABASE_URL="$RESTORED_DATABASE_URL" node scripts/verify-post-migration-counts.mjs "$PRE_MIGRATION_METADATA"
+: "${PGHOST:?PGHOST is required}"
+: "${PGPORT:?PGPORT is required}"
+: "${PGUSER:?PGUSER is required}"
+: "${PGPASSWORD:?PGPASSWORD is required}"
+: "${PGDATABASE:?PGDATABASE is required}"
+export PGHOST PGPORT PGUSER PGPASSWORD PGDATABASE
+node scripts/verify-post-migration-counts.mjs "$PRE_MIGRATION_METADATA"
 ```
 
 The completed cloud drill on 2026-07-16 baselined both historical migrations,

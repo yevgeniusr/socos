@@ -154,14 +154,24 @@ published sidecars are removed by the `EXIT` trap.
 
 Provision a separate disposable cloud restore through the administration plane
 and capture its pre-migration aggregate metadata using the same aggregate query
-as the verifier. Then run:
+as the verifier. Before count verification, load `PGHOST`, `PGPORT`, `PGUSER`,
+`PGPASSWORD`, and `PGDATABASE` directly from the runner secret store. Export
+only the configured optional libpq variables from this allowlist: `PGSSLMODE`,
+`PGSSLCERT`, `PGSSLKEY`, `PGSSLROOTCERT`, `PGSSLCRL`, `PGCONNECT_TIMEOUT`,
+`PGAPPNAME`, and `PGOPTIONS`. Optional values that are not configured need not
+be set or exported. Then run:
 
 ```bash
 DATABASE_URL="$RESTORED_DATABASE_URL" pnpm --filter @socos/api exec prisma migrate deploy
 DATABASE_URL="$RESTORED_DATABASE_URL" pnpm --filter @socos/api exec prisma validate
 DATABASE_URL="$RESTORED_DATABASE_URL" node scripts/compare-schema.mjs
-DATABASE_URL="$RESTORED_DATABASE_URL" \
-  node scripts/verify-post-migration-counts.mjs "$PRE_MIGRATION_METADATA"
+: "${PGHOST:?PGHOST is required}"
+: "${PGPORT:?PGPORT is required}"
+: "${PGUSER:?PGUSER is required}"
+: "${PGPASSWORD:?PGPASSWORD is required}"
+: "${PGDATABASE:?PGDATABASE is required}"
+export PGHOST PGPORT PGUSER PGPASSWORD PGDATABASE
+node scripts/verify-post-migration-counts.mjs "$PRE_MIGRATION_METADATA"
 ```
 
 Require `schema_status=match statements=0` and

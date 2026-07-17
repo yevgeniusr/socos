@@ -414,6 +414,75 @@ fs.writeFileSync('${callLog}', JSON.stringify({
   assert.doesNotMatch(JSON.stringify(call.args), /postgres(?:ql)?:\/\/|secret-password/);
 });
 
+test('release invariant verifier receives parsed restore libpq environment without a database URL', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'socos-release-invariants-environment-'));
+  const bin = join(dir, 'bin');
+  const worktree = join(dir, 'worktree');
+  const migrations = join(worktree, 'services/api/prisma/migrations');
+  const metadataFile = join(dir, 'before.tsv');
+  const callLog = join(dir, 'psql-call.json');
+  spawnSync('mkdir', ['-p', bin, migrations]);
+  for (let index = 1; index <= 12; index++) {
+    const migration = join(migrations, `migration-${index}`);
+    spawnSync('mkdir', ['-p', migration]);
+    writeFileSync(join(migration, 'migration.sql'), '-- synthetic migration\n');
+  }
+  const metadata =
+    'table_name\trow_count\nActionOutbox\t0\nActionProposal\t0\nAgentClient\t0\nAgentCredential\t0\nAgentIdempotencyRecord\t0\nApprovalGrant\t0\nCalendarEvent\t0\nCalendarSource\t0\nCalendarWatch\t0\nCityStay\t0\nContact\t106\nDerivedVisit\t0\nDiscoveredEvent\t0\nEventPreference\t0\nEventSource\t0\nGoogleCalendarConnection\t0\nGoogleOAuthAttempt\t0\nHumanIdempotencyRecord\t0\nInteractionReceipt\t0\nLocationAlias\t0\nLocationDevice\t0\nLocationSample\t0\nMutationAuditEvent\t0\nPersonalDataDeletionAudit\t0\n_prisma_migrations\t12\n';
+  writeFileSync(metadataFile, metadata);
+  nodeExecutable(
+    bin,
+    'psql',
+    `const fs = require('node:fs');
+fs.writeFileSync('${callLog}', JSON.stringify({
+  args: process.argv.slice(2),
+  host: process.env.PGHOST,
+  port: process.env.PGPORT,
+  user: process.env.PGUSER,
+  hasPassword: process.env.PGPASSWORD === 'restore-secret-password',
+  database: process.env.PGDATABASE,
+  sslmode: process.env.PGSSLMODE,
+  appname: process.env.PGAPPNAME,
+  hasDatabaseUrl: Object.hasOwn(process.env, 'DATABASE_URL'),
+}));
+process.stdout.write(${JSON.stringify(metadata)});`,
+  );
+  const dependencies = createDependencies({
+    operationTimeoutMs: 5_000,
+    cleanupTimeoutMs: 5_000,
+    terminationGraceMs: 100,
+  }, new AbortController().signal);
+  const databaseName = 'socos_release_gate_invariants';
+  const databaseUrl = `postgresql://socos_release_gate_restore:restore-secret-password@database.internal:6543/${databaseName}?sslmode=require&application_name=release-invariants`;
+  const originalPath = process.env.PATH;
+  const originalDatabaseUrl = process.env.DATABASE_URL;
+  process.env.PATH = `${bin}:${originalPath}`;
+  process.env.DATABASE_URL = 'postgresql://decoy-user:decoy-password@decoy.invalid/wrong';
+  try {
+    await dependencies.verifyReleaseInvariants(
+      candidate,
+      { worktree },
+      { metadataFile },
+      { databaseName, databaseUrl },
+    );
+  } finally {
+    process.env.PATH = originalPath;
+    if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = originalDatabaseUrl;
+  }
+
+  const call = JSON.parse(readFileSync(callLog, 'utf8'));
+  assert.equal(call.host, 'database.internal');
+  assert.equal(call.port, '6543');
+  assert.equal(call.user, 'socos_release_gate_restore');
+  assert.equal(call.hasPassword, true);
+  assert.equal(call.database, databaseName);
+  assert.equal(call.sslmode, 'require');
+  assert.equal(call.appname, 'release-invariants');
+  assert.equal(call.hasDatabaseUrl, false);
+  assert.doesNotMatch(JSON.stringify(call.args), /postgres(?:ql)?:\/\/|secret-password/);
+});
+
 test('local wrapper validates the candidate before invoking ssh', () => {
   const dir = mkdtempSync(join(tmpdir(), 'socos-release-local-invalid-'));
   const called = join(dir, 'called');
