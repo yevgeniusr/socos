@@ -21,8 +21,9 @@ The final Google account permission grant remains a separate unavoidable
 user-confirmed action. Pixel location, event discovery, and event briefs remain
 disabled so activation still follows dependency order.
 
-P1 source changes and the agent-safety hardening slice are implemented,
-independently reviewed, restore-gated, and deployed. The release includes a
+P1 source changes, the agent-safety hardening slice, and the searchable Event
+Catalog marketplace are implemented, independently reviewed, restore-gated,
+and deployed. The release includes a
 durable interaction receipt, truthful compact integration status/mobile cues,
 the cloud-only disposable restore release gate, removal of direct human-JWT CRM
 hard-delete routes, scope-aware MCP discovery/metadata, and first-class
@@ -30,9 +31,9 @@ read-only Codex and Claude plugin packages. The receipt adds migration 12, so
 the dedicated forced-command runner was provisioned with isolated rotating
 read/admin/restore roles and audited before deployment. The latest exact
 wrapper-level restore gate passed for
-`2b696aadb1c91a518eb4a9eda1256f3a1c26d04c`, and Coolify deployment
-`n11xjt6f1hpmjnpki9w4uxrj` finished at that same SHA.
-Production is healthy with 12 applied migrations, 48 public tables, 106
+`c17228405da9cf8d8ef3982e9c1ad78066aaba31`, and Coolify deployment
+`ua8hrkxs1ft32oyy0u7ma190` finished at that same SHA.
+Production is healthy with 13 applied migrations, 50 public tables, 106
 non-demo contacts, 7 isolated demos, and the migration-12 receipt table.
 
 The tracked Hermes `socos-social-loop` skill is installed and attached to the
@@ -46,11 +47,11 @@ Snapshot taken in `/Users/mac/Desktop/projects/personal/socos`.
 
 | Area | State |
 | --- | --- |
-| Reviewed application SHA | `2b696aadb1c91a518eb4a9eda1256f3a1c26d04c` |
-| Latest reviewed source commit before this handoff | `2b696aadb1c91a518eb4a9eda1256f3a1c26d04c` |
+| Reviewed application SHA | `c17228405da9cf8d8ef3982e9c1ad78066aaba31` |
+| Latest reviewed source commit before this handoff | `c17228405da9cf8d8ef3982e9c1ad78066aaba31` |
 | Reviewed application-code ancestor | `084b7addb0ccc765aa343c5412ed8f5fe5f6da0b` |
 | Pre-activation-tooling baseline SHA | `69e6ac0444a50ae92d811155493fcff559774a86` |
-| Production application SHA | `2b696aadb1c91a518eb4a9eda1256f3a1c26d04c` |
+| Production application SHA | `c17228405da9cf8d8ef3982e9c1ad78066aaba31` |
 | Current source branch | `main`; this handoff may be a later documentation-only commit; resolve any future candidate action-time |
 | Production status | `running:healthy` |
 | Production URL | `https://socos.rachkovan.com` |
@@ -60,7 +61,8 @@ Snapshot taken in `/Users/mac/Desktop/projects/personal/socos`.
 | Google OAuth material | verified in Keychain; plaintext client JSON deleted |
 | Owner access | recovered; HTTPS login and guarded route verified |
 | Pixel location | disabled |
-| Event discovery | disabled |
+| Event catalog | deployed with 6 global listings and source-free owner follows |
+| Event ingestion | disabled |
 | Event briefs | disabled |
 | Hermes | installed, gateway supervised, cron active |
 | Live Discord reply proof | pending |
@@ -202,6 +204,29 @@ The resulting product direction is:
 - Graph introductions fail closed with `INSUFFICIENT_GRAPH_DATA` when evidence
   is too sparse.
 
+### Event Catalog Marketplace
+
+- `/dashboard/discover` provides authenticated search, tags, type/country/trust
+  filters, stable pagination, All/Following views, provenance, explicit usage
+  rights, date certainty, freshness, and a responsive detail drawer.
+- Migration 13 adds six deterministic public listings: UAE public holidays, UN
+  observances, two Hebcal calendars, GITEX Global, and AI Everything Global.
+- Owner-scoped follow, pause, and resume are idempotent. A follow can exist
+  before a certified source; deleting a later linked source is restricted so it
+  cannot erase the saved preference.
+- Connector references and content hashes remain server-only. External polling,
+  provider importers, location ranking, Daily Brief delivery, and MCP tools are
+  not enabled by this release.
+- Fresh verification passed 39 focused API tests, 84 web tests, both production
+  builds, 11/11 disposable PostgreSQL migration cases, 153/153 release tooling
+  tests, the 607-file security scan, independent backend/frontend reviews, and
+  real Chromium desktop/Pixel production smoke with zero browser errors.
+- The first live gate for application SHA `34a337a` failed closed before any
+  deployment because the invariant registry assumed every new table was empty.
+  Commit `c172284` added an exact migration-13 allowance for six listings and
+  zero follows, with wrong-count and unexpected-table rejection tests. An
+  independent review approved the stricter registry before the successful gate.
+
 ### Interaction Receipt And Release Gate
 
 - Added one owner-scoped `InteractionReceipt` per interaction in migration 12.
@@ -239,8 +264,9 @@ The resulting product direction is:
   rotating isolated PostgreSQL roles, private work/lock paths, and exact cleanup
   proofs are live. Preserve this boundary and rerun provisioning after any
   interrupted credential rotation.
-- Migration 12 and the reviewed P1 source are deployed. The current exact gated
-  production SHA is `2b696aadb1c91a518eb4a9eda1256f3a1c26d04c`.
+- Migration 13, the reviewed P1 source, and the Event Catalog marketplace are
+  deployed. The current exact gated production SHA is
+  `c17228405da9cf8d8ef3982e9c1ad78066aaba31`.
 - Every later schema candidate still requires its own exact-SHA live receipt,
   exact deployment, and aggregate smoke; the current receipt is not reusable.
 
@@ -413,18 +439,19 @@ release gate: PASS
 Application UUID: swwcg80gkw4k0k4oco8w8wgw
 Database UUID: zwkk0scogckskkwss8oo48k4
 Backup configuration UUID: b85nxfljaz0xpo9xqa57lfr4
-Reviewed/deployed SHA: 2b696aadb1c91a518eb4a9eda1256f3a1c26d04c
-Current deployment: n11xjt6f1hpmjnpki9w4uxrj
-Live restore-gate backup: f6i8nb4aua7510m8iihgbta5
-Live restore-gate backup size: 178612 bytes
-Live restore-gate dump SHA-256: 55fc5fa4913e22d92f15ff5c772ca2f87a89ad67c533bf55d93252887ae2951e
+Reviewed/deployed SHA: c17228405da9cf8d8ef3982e9c1ad78066aaba31
+Current deployment: ua8hrkxs1ft32oyy0u7ma190
+Live restore-gate backup: b10np7jcsl20l9j2sbp2zh74
+Live restore-gate backup size: 178830 bytes
+Live restore-gate dump SHA-256: 48d49a511feda9daa00c4db8f97e7fa489f9686535bfbfb419abbbb4a07cef12
 Live restore-gate aggregate tables: 48
 Live restore-gate result: passed; schema statements 0; counts preserved; cleanup verified
-Post-deploy migrations: 12
-Post-deploy public tables: 48
+Post-deploy migrations: 13
+Post-deploy public tables: 50
+Event catalog listings/follows: 6/0
 Disabled-first deployment: jstocddvahtq2ptk159krd6e
-Calendar activation deployment: n11xjt6f1hpmjnpki9w4uxrj
-Calendar activation backup: ug28hprq8vx6lflzykdw8dx3
+Calendar activation deployment: ua8hrkxs1ft32oyy0u7ma190
+Calendar activation backup: d1kx9cmwkzi44ywd85ne83jp
 Calendar activation backup status: success
 Calendar activation backup size: 173186 bytes
 Owner-recovery backup: z7fzdte9nlv0b5v06bepzon8
@@ -482,16 +509,17 @@ for the exact SHA above; later schema candidates require a new receipt.
   parser now accepts only documented scalar metadata, discards it before state
   validation, and still rejects unknown, duplicate, owner, and redirect input.
   Calendar tests pass 96/96 and independent review approved the fix.
-- A fresh retry window was opened after deployment, but no callback arrived
-  during the monitoring window. The real Google account is not yet connected;
-  no partial connection row or consumed attempt is claimed.
+- A fresh retry window was opened again after deployment `ua8hrkxs1ft32oyy0u7ma190`,
+  but no callback arrived during the monitoring window. The real Google account
+  is not yet connected; no partial connection row or consumed attempt is claimed.
 
 ### Documentation
 
 - This document is the current transfer artifact.
 - `docs/plans/2026-07-18-event-catalog-design.md` records the approved
   searchable catalog/follow architecture, seed-source assessment, safety rules,
-  delivery slices, and acceptance criteria. Implementation has not started.
+  implemented browse/follow slices, remaining importer/MCP work, safety rules,
+  and acceptance criteria.
 - It should be updated again after Calendar, Pixel, events, briefs, and the live
   Discord reply are proven.
 
@@ -521,6 +549,10 @@ already delivered.
   daily brief, but the modern dashboard has no usable celebration-management
   workspace. `Gift`, `Activity`, and `Task` are dormant schema surfaces rather
   than shipped workflows.
+- The Event Catalog can search and save public listing metadata, but followed
+  listings do not produce occurrences until reviewed importers and source
+  attachment are implemented. Recommendations are not yet location-ranked, and
+  the catalog is not exposed through MCP.
 - The modern web reads streak state but does not call the existing streak
   check-in mutation. Achievements lack a first-class modern view.
 - Hermes has not yet proven a post-skill-attachment brief followed by one real,
@@ -639,12 +671,12 @@ Trust current evidence over any stale snapshot. Do not reset, clean, stash,
 rewrite history, switch branches, or discard existing/user changes.
 
 Production is deployed and healthy at exact reviewed SHA
-2b696aadb1c91a518eb4a9eda1256f3a1c26d04c through Coolify deployment
-n11xjt6f1hpmjnpki9w4uxrj. The dedicated forced-command runner returned an exit-0
+c17228405da9cf8d8ef3982e9c1ad78066aaba31 through Coolify deployment
+ua8hrkxs1ft32oyy0u7ma190. The dedicated forced-command runner returned an exit-0
 live restore receipt for that exact SHA: fresh backup
-f6i8nb4aua7510m8iihgbta5, 48 aggregate tables, zero schema drift, preserved
+b10np7jcsl20l9j2sbp2zh74, 48 pre-migration aggregate tables, zero schema drift, preserved
 migration counts, and verified cleanup. The activation then created backup
-ug28hprq8vx6lflzykdw8dx3. Independent read-only verification confirmed the
+d1kx9cmwkzi44ywd85ne83jp. Independent read-only verification confirmed the
 healthy exact deployment, equal environment pairs, Calendar credentials matching
 Keychain, Calendar enabled, and location/discovery/brief disabled. Public smokes
 are health 200, Calendar guard 401, disabled OwnTracks 503, and enabled Calendar
@@ -664,9 +696,10 @@ The prior disabled-first and Calendar deployments remain historical rollback
 context, not the current release. Trust the exact current gate/deployment facts
 above and re-read Coolify before any later mutation.
 
-All 106 real Monica contacts plus 7 isolated demos are cloud-only. Calendar code
-is currently enabled; location, event discovery, and event briefs are false in
-both profiles. Owner access was recovered through an independently reviewed,
+All 106 real Monica contacts plus 7 isolated demos are cloud-only. The global
+Event Catalog has 6 listings and 0 owner follows. Calendar code is currently
+enabled; location, event ingestion, and event briefs are false in both profiles.
+Owner access was recovered through an independently reviewed,
 guarded cloud-only rotation after successful backup
 z7fzdte9nlv0b5v06bepzon8. HTTPS login and a guarded route were verified from the
 primary socos-production-login Keychain item. Never print it. Password rotation
