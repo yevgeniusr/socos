@@ -176,6 +176,10 @@ describe("calendar controller boundaries", () => {
     [{ state: "state", code: ["one", "two"] }, "duplicate code"],
     [{ state: ["one", "two"], code: "code" }, "duplicate state"],
     [{ state: "state", code: "code", error: "denied" }, "code and error"],
+    [
+      { state: "state", code: "code", scope: ["one", "two"] },
+      "duplicate scope",
+    ],
     [{ state: "state", code: "code", ownerId: "injected" }, "extra owner"],
     [
       { state: "state", code: "code", redirect_uri: "https://attacker.test" },
@@ -188,7 +192,20 @@ describe("calendar controller boundaries", () => {
     );
   });
 
-  it("accepts exactly one scalar code or provider error", () => {
+  it("accepts Google success metadata but returns only state and code", () => {
+    expect(
+      parseGoogleOAuthCallbackQuery({
+        state: "state",
+        code: "code",
+        scope: "calendar.events.readonly calendar.calendarlist.readonly",
+        authuser: "0",
+        prompt: "consent",
+        hd: "example.test",
+      })
+    ).toEqual({ state: "state", code: "code" });
+  });
+
+  it("accepts exactly one scalar code or provider error without metadata", () => {
     expect(
       parseGoogleOAuthCallbackQuery({ state: "state", code: "code" })
     ).toEqual({ state: "state", code: "code" });

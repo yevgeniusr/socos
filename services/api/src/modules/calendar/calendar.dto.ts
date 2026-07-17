@@ -16,6 +16,13 @@ export type GoogleOAuthCallbackInput =
   | { state: string; code: string; error?: never }
   | { state: string; error: string; code?: never };
 
+const GOOGLE_SUCCESS_METADATA_KEYS = new Set([
+  "scope",
+  "authuser",
+  "prompt",
+  "hd",
+]);
+
 export type CalendarConnectionSummary = {
   id: string;
   status: string;
@@ -34,7 +41,17 @@ export function parseGoogleOAuthCallbackQuery(
   }
   const input = query as Record<string, unknown>;
   const keys = Object.keys(input).sort();
-  const isCode = keys.length === 2 && keys[0] === "code" && keys[1] === "state";
+  const isCode =
+    keys.includes("code") &&
+    keys.includes("state") &&
+    !keys.includes("error") &&
+    keys.every(
+      (key) =>
+        key === "code" ||
+        key === "state" ||
+        GOOGLE_SUCCESS_METADATA_KEYS.has(key)
+    ) &&
+    keys.every((key) => isScalar(input[key]));
   const isError =
     keys.length === 2 && keys[0] === "error" && keys[1] === "state";
   if (!isCode && !isError) throw callbackError();
