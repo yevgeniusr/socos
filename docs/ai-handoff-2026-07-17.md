@@ -13,10 +13,15 @@ Daily Cockpit, approvals, quests, XP, and authenticated REST/MCP access.
 
 The new Integrations workspace is deployed at
 `https://socos.rachkovan.com/dashboard/integrations`. Google Calendar code is
-enabled and healthy, but the real Google account is not connected. The protected
-Socos Keychain login credential is stale, and the final Google OAuth grant is an
-unavoidable user-confirmed action. Pixel location, event discovery, and event
-briefs remain disabled so activation still follows dependency order.
+enabled and healthy, but the real Google account is not connected. Owner access
+was recovered with a reviewed cloud-only password rotation and verified through
+both login and an authenticated route; the current credential is in the macOS
+Keychain. A dedicated personal Google Cloud project now exists and its Calendar
+API is enabled. OAuth consent setup is paused at Google's required User Data
+Policy agreement, which Yev must explicitly accept before an agent can continue.
+The final Google account grant is a second unavoidable user-confirmed action.
+Pixel location, event discovery, and event briefs remain disabled so activation
+still follows dependency order.
 
 The tracked Hermes `socos-social-loop` skill is installed and attached to the
 active 09:00 Asia/Dubai Discord cron. The gateway is supervised. Today's
@@ -30,13 +35,15 @@ Snapshot taken in `/Users/mac/Desktop/projects/personal/socos`.
 | Area | State |
 | --- | --- |
 | Reviewed application SHA | `1b25328de683e5b7923d4219d0401a1f93f168b2` |
-| GitHub `origin/main` before this docs-only update | same reviewed SHA |
+| Documentation baseline SHA | `6d67953b40c79f887b0bfe7b235bf2f3aa0f709a` |
 | Production application SHA | same reviewed SHA |
 | Production status | `running:healthy` |
 | Production URL | `https://socos.rachkovan.com` |
 | Real contacts | 106 non-demo, cloud-only |
 | Demo contacts | 7, isolated where required |
 | Calendar code | enabled; real OAuth connection pending |
+| Google Cloud | dedicated project created; Calendar API enabled; consent setup awaiting policy acceptance |
+| Owner access | recovered; HTTPS login and guarded route verified |
 | Pixel location | disabled |
 | Event discovery | disabled |
 | Event briefs | disabled |
@@ -243,9 +250,11 @@ Backup configuration UUID: b85nxfljaz0xpo9xqa57lfr4
 Reviewed/deployed SHA: 1b25328de683e5b7923d4219d0401a1f93f168b2
 Disabled-first deployment: jstocddvahtq2ptk159krd6e
 Calendar activation deployment: y113fr76fqqod7wq8uatmgzx
-Fresh backup execution: mnqo384k8e83wtmxl0a7x7lq
-Fresh backup status: success
-Fresh backup size: 173186 bytes
+Calendar activation backup: mnqo384k8e83wtmxl0a7x7lq
+Calendar activation backup status: success
+Calendar activation backup size: 173186 bytes
+Owner-recovery backup: z7fzdte9nlv0b5v06bepzon8
+Owner-recovery backup status: success
 Rollback SHA: b0e88ccc535ba79d71a5586f341e0d3ac6be8ac1
 ```
 
@@ -281,15 +290,34 @@ schema-neutral release.
 ### Google Calendar
 
 - Calendar code and configuration are enabled and production is healthy.
-- Google credentials, callback, result URL, webhook URL, and encryption
-  configuration are structurally present.
+- A dedicated personal Google Cloud project named `Socos Personal CRM` with ID
+  `socos-personal-crm` was created under Yev's personal Google account.
+- Google Calendar API is enabled in that project.
+- The OAuth application name, external audience, support email, and developer
+  contact were entered. Configuration is paused before accepting Google's API
+  Services User Data Policy; no agent accepted that legal agreement.
+- The exact production callback is
+  `https://socos.rachkovan.com/api/integrations/google-calendar/callback`.
+- Socos requests exactly `calendar.calendarlist.readonly` and
+  `calendar.events.readonly`, with no identity, profile, or write scope.
+- Production client ID and secret are still placeholders. No OAuth credential
+  has been created or copied into Coolify yet.
 - The real Google account is not connected and no Calendar rows are claimed.
-- Arc's saved Socos session expired.
-- The `socos-production-login` Keychain credential is stale and returns
-  `Invalid credentials`.
-- The repository has no password reset or recovery route. The next step requires
-  either a user-supplied valid login or a separately reviewed cloud-only password
-  rotation procedure, followed by user-confirmed Google read-only OAuth consent.
+
+### Owner Access Recovery
+
+- A fresh backup execution `z7fzdte9nlv0b5v06bepzon8` succeeded before the
+  credential change.
+- An independent reviewer approved a guarded rotation procedure.
+- A random temporary password stayed only in macOS Keychain. A cost-10 bcrypt
+  hash was applied in an explicit transaction that required the exact owner and
+  exactly 106 non-demo contacts, locked and updated exactly one user row, and
+  returned only `rotation_result=1`.
+- HTTPS verification returned `200` for login and an authenticated route before
+  and after promotion to the primary `socos-production-login` Keychain item.
+- The temporary Keychain item was deleted and the clipboard cleared.
+- Existing stateless JWTs were not revoked by password rotation; they expire on
+  their normal schedule.
 
 ### Documentation
 
@@ -305,35 +333,48 @@ For every remaining flag stage: take fresh backup evidence, update both
 production and preview copies, deploy the exact reviewed SHA, require health and
 stage-local smoke, and restore the prior flag plus redeploy on failure.
 
-1. Obtain a valid Socos owner login from Yev, or design and independently review
-   a cloud-only password rotation procedure before using it. The repository has
-   no reset/recovery endpoint. Update the protected credential store without
-   printing the password; never improvise a raw production DB edit.
-2. Sign in to `/dashboard/integrations`, click Google Calendar Connect, stop
-   immediately before the Google permission grant, obtain action-time
-   confirmation, then grant read-only access and select calendars.
-3. Verify only aggregate Calendar connection/source/watch/sync state and the
+1. Obtain Yev's explicit `I agree` for the Google API Services User Data Policy,
+   then finish the external OAuth consent configuration. Do not infer legal
+   acceptance from blanket system access.
+2. Configure only the two exact read-only Calendar scopes and add Yev as a test
+   user if Google keeps the app in Testing. The repository's intended target is
+   External/Production; document any temporary Testing-mode deviation and its
+   token-lifetime consequence.
+3. Create one confidential Web application OAuth client with the exact callback
+   above. Transfer the client ID and secret directly into both Coolify runtime
+   profiles without printing, downloading JSON, storing locally, or putting the
+   secret in argv. Clear the clipboard. Without outputting either value, require
+   both profile copies to be equal, non-empty, and different from the disabled
+   placeholders. Take a fresh backup, redeploy the exact reviewed application
+   SHA, and require health `200`, the unauthenticated Calendar route `401`, and
+   disabled OwnTracks `503`. On any failure, restore both prior credential
+   copies or disable Calendar in both profiles, redeploy the same SHA, and
+   verify health. Do not start Socos Connect before this gate passes.
+4. Sign in to `/dashboard/integrations`, click Google Calendar Connect, stop
+   immediately before the Google account permission grant, obtain separate
+   action-time confirmation, then grant read-only access and select calendars.
+5. Verify only aggregate Calendar connection/source/watch/sync state and the
    user-visible connected status. On integrity failure, disable Calendar in
    both profiles, deploy the same SHA, stop active Google channels, and verify
    scheduler quietness.
-4. Take a fresh backup, enable `LOCATION_INGEST_ENABLED` in both profiles,
+6. Take a fresh backup, enable `LOCATION_INGEST_ENABLED` in both profiles,
    deploy the same exact SHA, and require health. Create the Pixel device only
    while Yev can consume the one-time credentials.
-5. On the Pixel, install/configure OwnTracks HTTP mode, enter the one-time
+7. On the Pixel, install/configure OwnTracks HTTP mode, enter the one-time
    credentials, grant precise and background location, remove battery
    restrictions, and verify aggregate device/sample/last-seen state.
-6. Re-certify one current public Dubai ICS source. Candidate feeds:
+8. Re-certify one current public Dubai ICS source. Candidate feeds:
    - `https://www.meetup.com/dubai-ai/events/ical/`
    - `https://www.meetup.com/dubai-ai-meetup/events/ical/`
    - `https://www.meetup.com/startups-and-tech-events-in-dubai/events/ical/`
-7. Set both profiles of `EVENT_SOURCE_ALLOWED_HOSTS=www.meetup.com`, enable both
+9. Set both profiles of `EVENT_SOURCE_ALLOWED_HOSTS=www.meetup.com`, enable both
    profiles of `EVENT_DISCOVERY_ENABLED`, deploy and smoke the same exact SHA,
    add one source through the UI, and verify aggregate source/poll/event state
    plus visible ranking/conflict behavior.
-8. After a fresh stage backup, enable both profiles of `EVENT_BRIEF_ENABLED`
+10. After a fresh stage backup, enable both profiles of `EVENT_BRIEF_ENABLED`
    last, deploy and smoke the same exact SHA, and verify the next new brief is
    V1.1 with no more than three event items. Never rewrite existing V1 batches.
-9. Trigger or wait for a skill-generated Hermes brief, then have Yev send one
+11. Trigger or wait for a skill-generated Hermes brief, then have Yev send one
    controlled unedited `socos ...` Discord reply. Verify one feedback or exact
    evidence CRM mutation occurred exactly once. Replay the exact immutable plan
    or tool input and verify no second mutation. Do not test outbound execution.
@@ -415,16 +456,30 @@ positive size. Do not claim restore proof.
 
 All 106 real Monica contacts plus 7 isolated demos are cloud-only. Calendar code
 is currently enabled; location, event discovery, and event briefs are false in
-both profiles. The real Google account is not connected. Arc's Socos session
-expired and the protected socos-production-login Keychain value is stale. Do
-not print it. The repository has no password reset/recovery route. Require a
-user-supplied valid login or first design and independently review a cloud-only
-password rotation procedure; never improvise a raw production DB edit.
+both profiles. Owner access was recovered through an independently reviewed,
+guarded cloud-only rotation after successful backup
+z7fzdte9nlv0b5v06bepzon8. HTTPS login and a guarded route were verified from the
+primary socos-production-login Keychain item. Never print it. Password rotation
+did not revoke existing stateless JWTs.
 
-Calendar is the current activation checkpoint. Sign in, prepare the Google
-read-only OAuth flow, and stop immediately before granting persistent Google
-access for action-time confirmation. After consent, select calendars and verify
-only aggregate connection/source/watch/sync state plus the visible UI.
+Calendar is the current activation checkpoint. A dedicated personal Google
+Cloud project `socos-personal-crm` exists and Google Calendar API is enabled.
+OAuth branding/external-audience setup is paused at Google's required API
+Services User Data Policy agreement. Obtain Yev's explicit `I agree` before
+checking that box; blanket access is not legal consent. Then configure exactly
+calendar.calendarlist.readonly and calendar.events.readonly, create a Web
+application client with callback
+https://socos.rachkovan.com/api/integrations/google-calendar/callback, and move
+the client ID/secret directly into both Coolify profiles without printing or
+local files. Without outputting the values, require both copies to be equal,
+non-empty, and non-placeholder. Take a fresh backup, redeploy the exact reviewed
+SHA, and require health 200, unauthenticated Calendar 401, and disabled
+OwnTracks 503. On failure, restore both prior copies or disable Calendar in both
+profiles, redeploy the same SHA, and verify health. Do not start Socos Connect
+until this gate passes. Then stop immediately before the Google account
+permission grant for separate action-time confirmation. After that consent,
+select calendars and verify only aggregate connection/source/watch/sync state
+plus the visible UI.
 
 For every stage below, take fresh backup evidence, update both environment
 profiles, deploy the exact reviewed SHA, require health/stage smoke, and restore
