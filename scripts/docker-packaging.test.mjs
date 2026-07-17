@@ -19,6 +19,10 @@ test('web standalone build traces and preserves the monorepo layout', () => {
   );
   assert.match(
     dockerfile,
+    /COPY packages\/agent-core\/package\.json packages\/agent-core\//,
+  );
+  assert.match(
+    dockerfile,
     /COPY --from=builder --chown=nextjs:nodejs \/app\/apps\/web\/\.next\/standalone \/app/,
   );
   assert.match(
