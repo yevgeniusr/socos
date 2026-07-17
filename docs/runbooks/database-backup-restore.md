@@ -202,8 +202,18 @@ Set `SOCOS_RELEASE_GATE_CLUSTER_ID` to the PostgreSQL system identifier from
 `pg_control_system()`. Production read, administration, and restore URLs must
 use three distinct rotating gate roles on that exact cluster. The production
 URL uses `socos_release_gate_read`, never the application runtime credential.
-The gate verifies the read role has no write/schema/database-create capability,
-verifies the restore role has no elevated role flags, inherited memberships,
+The gate positively verifies public-schema `USAGE` and `SELECT` on every current
+public table, view, materialized view, foreign table, and sequence. It also
+verifies the read role has no database `CREATE` or `TEMPORARY`, schema `CREATE`,
+table write, sequence `USAGE`/`UPDATE`, public-routine `EXECUTE`, elevated role
+flag, or dangerous inherited membership. These checks fail closed even when a
+schema has no objects. The provisioner grants the read role `SELECT` by default
+on future public tables and sequences owned by `socos_app`, and revokes default
+`PUBLIC` execution of future app-owned public routines. It revokes production
+`PUBLIC` `TEMPORARY` and current public-routine execution while preserving any
+effective `TEMPORARY` privilege that `socos_app` had before provisioning. The
+gate separately verifies the restore role has no elevated role flags, inherited
+memberships,
 maintenance-database write
 capabilities, or production access, rejects reuse of the administration
 credential, and uses the restricted role only for the randomly named
@@ -419,9 +429,17 @@ non-replication, and non-bypass-RLS. Only `socos_release_gate_admin` may have
 `CREATEDB`, and its only membership is `socos_release_gate_restore`. Read and
 restore must have no memberships. The read role has only production `CONNECT`,
 public-schema `USAGE`, and `SELECT` on all public tables and sequences; it has
-no maintenance connection. The application role remains unchanged. `PUBLIC`
-has neither `TEMPORARY` nor `CONNECT` on the maintenance database and lacks
-`CREATE` on its public schema, so restore cannot write maintenance temp tables.
+no maintenance connection, routine execution, table writes, sequence
+`USAGE`/`UPDATE`, database `CREATE`/`TEMPORARY`, or schema `CREATE`. Future
+app-owned public tables and sequences inherit read-role `SELECT`; future
+app-owned public routines do not inherit `PUBLIC` execution. The application
+role's effective `TEMPORARY` access is preserved if it existed. `PUBLIC` has no
+`TEMPORARY` on production, no execution on current public routines, neither
+`TEMPORARY` nor `CONNECT` on the maintenance database, and no `CREATE` on either
+public schema. The production proof requires positive schema `USAGE` and
+positive `SELECT` coverage for every current public relation and sequence, so
+missing read grants cannot pass merely because write privileges are absent.
+Restore therefore cannot write maintenance temp tables.
 The maintenance `CONNECT` revoke is intentionally cluster-wide: PostgreSQL
 privileges are additive, so revoking it only from the read role cannot override
 the default `PUBLIC` grant. Provisioning explicitly regrants maintenance access

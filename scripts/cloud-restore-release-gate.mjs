@@ -67,6 +67,35 @@ export function validateDatabaseBoundaryProofs(config, proof) {
   ) throw new GateFailure('invalid_configuration');
 }
 
+export function databaseBoundaryQueries(config) {
+  const literal = (value) => `'${value.replaceAll("'", "''")}'`;
+  const cluster = '(SELECT system_identifier::text FROM pg_control_system())';
+  const roleSafe = `NOT r.rolsuper AND NOT r.rolcreatedb AND NOT r.rolcreaterole AND NOT r.rolreplication AND NOT r.rolbypassrls`;
+  const dangerousRoles = [
+    config.productionRole,
+    config.adminRole,
+    'pg_execute_server_program',
+    'pg_read_server_files',
+    'pg_write_server_files',
+    'pg_signal_backend',
+    'pg_checkpoint',
+  ].map(literal).join(',');
+  const noDangerousMembership = `NOT EXISTS (SELECT 1 FROM pg_roles inherited WHERE inherited.rolname <> current_user AND pg_has_role(current_user, inherited.rolname, 'MEMBER') AND (inherited.rolsuper OR inherited.rolcreatedb OR inherited.rolcreaterole OR inherited.rolreplication OR inherited.rolbypassrls OR inherited.rolname IN (${dangerousRoles})))`;
+  const noMembership = `NOT EXISTS (SELECT 1 FROM pg_roles inherited WHERE inherited.rolname <> current_user AND pg_has_role(current_user, inherited.rolname, 'MEMBER'))`;
+  const publicRelations = `FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public'`;
+  const tableKinds = `c.relkind IN ('r','p','v','m','f')`;
+  const noPublicWrites = `NOT EXISTS (SELECT 1 ${publicRelations} AND ${tableKinds} AND (has_table_privilege(current_user,c.oid,'INSERT') OR has_table_privilege(current_user,c.oid,'UPDATE') OR has_table_privilege(current_user,c.oid,'DELETE') OR has_table_privilege(current_user,c.oid,'TRUNCATE') OR has_table_privilege(current_user,c.oid,'TRIGGER') OR has_table_privilege(current_user,c.oid,'REFERENCES')))`;
+  const allPublicTablesReadable = `NOT EXISTS (SELECT 1 ${publicRelations} AND ${tableKinds} AND NOT has_table_privilege(current_user,c.oid,'SELECT'))`;
+  const noPublicFunctionExecute = `NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND has_function_privilege(current_user,p.oid,'EXECUTE'))`;
+  const noSequenceWrites = `NOT EXISTS (SELECT 1 ${publicRelations} AND c.relkind='S' AND (has_sequence_privilege(current_user,c.oid,'USAGE') OR has_sequence_privilege(current_user,c.oid,'UPDATE')))`;
+  const allSequencesReadable = `NOT EXISTS (SELECT 1 ${publicRelations} AND c.relkind='S' AND NOT has_sequence_privilege(current_user,c.oid,'SELECT'))`;
+  return {
+    production: `SELECT ${cluster}, current_user, current_database(), (${roleSafe} AND ${noDangerousMembership} AND NOT pg_has_role(current_user, ${literal(config.restoreRole)}, 'MEMBER') AND NOT has_database_privilege(current_user,current_database(),'CREATE') AND NOT has_database_privilege(current_user,current_database(),'TEMPORARY') AND has_schema_privilege(current_user,'public','USAGE') AND NOT has_schema_privilege(current_user,'public','CREATE') AND ${noPublicWrites} AND ${noPublicFunctionExecute} AND ${noSequenceWrites} AND ${allPublicTablesReadable} AND ${allSequencesReadable}) FROM pg_roles r WHERE r.rolname=current_user;`,
+    administration: `SELECT ${cluster}, current_user, current_database(), has_database_privilege(${literal(config.restoreRole)}, ${literal(config.productionDatabase)}, 'CONNECT');`,
+    restore: `SELECT ${cluster}, current_user, current_database(), (${roleSafe} AND r.rolname NOT IN (${dangerousRoles}) AND ${noMembership} AND NOT has_database_privilege(current_user,current_database(),'CREATE') AND NOT has_schema_privilege(current_user,'public','CREATE') AND ${noPublicWrites}), NOT has_database_privilege(current_user,current_database(),'TEMPORARY') FROM pg_roles r WHERE r.rolname=current_user;`,
+  };
+}
+
 function backupId(execution) {
   const value = execution?.uuid ?? execution?.id;
   return typeof value === 'string' && SAFE_ID.test(value) ? value : undefined;
@@ -480,25 +509,11 @@ function createDependencies(config, signal) {
       const q = async (pg, sql) => run('psql', ['-X', '--set=ON_ERROR_STOP=1', '--tuples-only', '--no-align', `--command=${sql}`], {
         env: commandEnvironment(pg),
       });
-      const literal = (value) => `'${value.replaceAll("'", "''")}'`;
-      const cluster = '(SELECT system_identifier::text FROM pg_control_system())';
-      const roleSafe = `NOT r.rolsuper AND NOT r.rolcreatedb AND NOT r.rolcreaterole AND NOT r.rolreplication AND NOT r.rolbypassrls`;
-      const dangerousRoles = [
-        config.productionRole,
-        config.adminRole,
-        'pg_execute_server_program',
-        'pg_read_server_files',
-        'pg_write_server_files',
-        'pg_signal_backend',
-        'pg_checkpoint',
-      ].map(literal).join(',');
-      const noDangerousMembership = `NOT EXISTS (SELECT 1 FROM pg_roles inherited WHERE inherited.rolname <> current_user AND pg_has_role(current_user, inherited.rolname, 'MEMBER') AND (inherited.rolsuper OR inherited.rolcreatedb OR inherited.rolcreaterole OR inherited.rolreplication OR inherited.rolbypassrls OR inherited.rolname IN (${dangerousRoles})))`;
-      const noMembership = `NOT EXISTS (SELECT 1 FROM pg_roles inherited WHERE inherited.rolname <> current_user AND pg_has_role(current_user, inherited.rolname, 'MEMBER'))`;
-      const noPublicWrites = `NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('r','p') AND (has_table_privilege(current_user,c.oid,'INSERT') OR has_table_privilege(current_user,c.oid,'UPDATE') OR has_table_privilege(current_user,c.oid,'DELETE') OR has_table_privilege(current_user,c.oid,'TRUNCATE') OR has_table_privilege(current_user,c.oid,'TRIGGER') OR has_table_privilege(current_user,c.oid,'REFERENCES')))`;
+      const queries = databaseBoundaryQueries(config);
       try {
-        const prod = await q(config.productionPg, `SELECT ${cluster}, current_user, current_database(), (${roleSafe} AND ${noDangerousMembership} AND NOT pg_has_role(current_user, ${literal(config.restoreRole)}, 'MEMBER') AND NOT has_database_privilege(current_user,current_database(),'CREATE') AND NOT has_schema_privilege(current_user,'public','CREATE') AND ${noPublicWrites}) FROM pg_roles r WHERE r.rolname=current_user;`);
-        const admin = await q(config.adminPg, `SELECT ${cluster}, current_user, current_database(), has_database_privilege(${literal(config.restoreRole)}, ${literal(config.productionDatabase)}, 'CONNECT');`);
-        const restore = await q(pgEnvironment(config.restoreBaseUrl), `SELECT ${cluster}, current_user, current_database(), (${roleSafe} AND r.rolname NOT IN (${dangerousRoles}) AND ${noMembership} AND NOT has_database_privilege(current_user,current_database(),'CREATE') AND NOT has_schema_privilege(current_user,'public','CREATE') AND ${noPublicWrites}), NOT has_database_privilege(current_user,current_database(),'TEMPORARY') FROM pg_roles r WHERE r.rolname=current_user;`);
+        const prod = await q(config.productionPg, queries.production);
+        const admin = await q(config.adminPg, queries.administration);
+        const restore = await q(pgEnvironment(config.restoreBaseUrl), queries.restore);
         let blocked = false;
         try {
           await q({ ...pgEnvironment(config.restoreBaseUrl), PGDATABASE: config.productionDatabase }, 'SELECT 1;');

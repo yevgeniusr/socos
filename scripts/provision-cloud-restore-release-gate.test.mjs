@@ -227,6 +227,9 @@ test('provisioner renders the locked account, exact resources, database boundary
   assert.match(sql, /REVOKE TEMPORARY ON DATABASE postgres FROM PUBLIC/);
   assert.match(productionSql, /REVOKE ALL PRIVILEGES ON DATABASE socos FROM socos_release_gate_read/);
   assert.match(productionSql, /REVOKE CREATE ON DATABASE socos FROM PUBLIC/);
+  assert.match(productionSql, /app_had_temporary boolean := has_database_privilege\('socos_app', 'socos', 'TEMPORARY'\)/);
+  assert.match(productionSql, /REVOKE TEMPORARY ON DATABASE socos FROM PUBLIC/);
+  assert.match(productionSql, /IF app_had_temporary THEN[\s\S]*GRANT TEMPORARY ON DATABASE socos TO socos_app/);
   assert.match(productionSql, /GRANT CONNECT ON DATABASE socos TO socos_release_gate_read/);
   assert.match(productionSql, /REVOKE ALL PRIVILEGES ON SCHEMA public FROM socos_release_gate_read/);
   assert.match(productionSql, /REVOKE CREATE ON SCHEMA public FROM PUBLIC/);
@@ -236,6 +239,11 @@ test('provisioner renders the locked account, exact resources, database boundary
   assert.match(productionSql, /GRANT SELECT ON ALL TABLES IN SCHEMA public TO socos_release_gate_read/);
   assert.match(productionSql, /REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM socos_release_gate_read/);
   assert.match(productionSql, /GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO socos_release_gate_read/);
+  assert.match(productionSql, /REVOKE EXECUTE ON ALL ROUTINES IN SCHEMA public FROM PUBLIC/);
+  assert.match(productionSql, /REVOKE ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA public FROM socos_release_gate_read/);
+  assert.match(productionSql, /ALTER DEFAULT PRIVILEGES FOR ROLE socos_app IN SCHEMA public REVOKE EXECUTE ON ROUTINES FROM PUBLIC/);
+  assert.match(productionSql, /ALTER DEFAULT PRIVILEGES FOR ROLE socos_app IN SCHEMA public GRANT SELECT ON TABLES TO socos_release_gate_read/);
+  assert.match(productionSql, /ALTER DEFAULT PRIVILEGES FOR ROLE socos_app IN SCHEMA public GRANT SELECT ON SEQUENCES TO socos_release_gate_read/);
   assert.doesNotMatch(`${sql}\n${productionSql}`, /ALTER ROLE socos_app|ALTER FUNCTION|REVOKE [^;]+ FROM socos_app/);
 
   const calls = readFileSync(f.log, 'utf8');

@@ -238,6 +238,16 @@ fi
 
 if ! docker exec -i "$DATABASE_CONTAINER" psql -X --set=ON_ERROR_STOP=1 --username=postgres --dbname=socos >/dev/null 2>&1 <<SQL
 REVOKE CREATE ON DATABASE socos FROM PUBLIC;
+DO \$app_privileges\$
+DECLARE
+  app_had_temporary boolean := has_database_privilege('socos_app', 'socos', 'TEMPORARY');
+BEGIN
+  EXECUTE 'REVOKE TEMPORARY ON DATABASE socos FROM PUBLIC';
+  IF app_had_temporary THEN
+    EXECUTE 'GRANT TEMPORARY ON DATABASE socos TO socos_app';
+  END IF;
+END
+\$app_privileges\$;
 REVOKE ALL PRIVILEGES ON DATABASE socos FROM socos_release_gate_read;
 GRANT CONNECT ON DATABASE socos TO socos_release_gate_read;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
@@ -248,7 +258,11 @@ REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM socos_release_gate_rea
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO socos_release_gate_read;
 REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM socos_release_gate_read;
 GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO socos_release_gate_read;
-REVOKE ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public FROM socos_release_gate_read;
+REVOKE EXECUTE ON ALL ROUTINES IN SCHEMA public FROM PUBLIC;
+REVOKE ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA public FROM socos_release_gate_read;
+ALTER DEFAULT PRIVILEGES FOR ROLE socos_app IN SCHEMA public REVOKE EXECUTE ON ROUTINES FROM PUBLIC;
+ALTER DEFAULT PRIVILEGES FOR ROLE socos_app IN SCHEMA public GRANT SELECT ON TABLES TO socos_release_gate_read;
+ALTER DEFAULT PRIVILEGES FOR ROLE socos_app IN SCHEMA public GRANT SELECT ON SEQUENCES TO socos_release_gate_read;
 SQL
 then
   fail
