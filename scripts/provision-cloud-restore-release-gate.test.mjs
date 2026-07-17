@@ -8,6 +8,7 @@ import {
   readdirSync,
   readFileSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -684,16 +685,25 @@ test('rerun cleans only validated stale SIGKILL artifacts and labeled probe cont
   mkdirSync(tmpRoot, { recursive: true });
   const staleCid = 'a'.repeat(64);
   const labeledCid = 'b'.repeat(64);
+  const staleInputPath = join(tmpRoot, 'provision-input.MnO345');
+  const inputDecoyPath = join(tmpRoot, 'provision-input.keep');
+  const inputSymlinkTarget = join(tmpRoot, 'provision-input-target');
+  const inputSymlinkPath = join(tmpRoot, 'provision-input.PqR678');
   const stalePaths = [
     join(etc, 'socos-release-gate.env.AbC123'),
     join(tmpRoot, 'credential-probe.DeF456'),
     join(tmpRoot, 'credential-probe-cid.GhI789'),
     join(tmpRoot, 'credential-probe-cid.JkL012'),
+    staleInputPath,
   ];
   writeFileSync(stalePaths[0], 'stale-staged-secret\n', { mode: 0o600 });
   writeFileSync(stalePaths[1], 'stale-probe-secret\n', { mode: 0o600 });
   writeFileSync(stalePaths[2], `${staleCid}\n`, { mode: 0o600 });
   writeFileSync(stalePaths[3], '', { mode: 0o600 });
+  writeFileSync(staleInputPath, '{"coolify_token":"stale-token-bearing-input"}\n', { mode: 0o600 });
+  writeFileSync(inputDecoyPath, 'keep nonmatching input\n', { mode: 0o600 });
+  writeFileSync(inputSymlinkTarget, 'keep symlink target\n', { mode: 0o600 });
+  symlinkSync(inputSymlinkTarget, inputSymlinkPath);
   writeFileSync(join(etc, 'socos-release-gate.env.keep'), 'keep\n');
   writeFileSync(join(tmpRoot, 'credential-probe.keep'), 'keep\n');
   writeFileSync(join(f.state, `container-${staleCid}`), '');
@@ -704,6 +714,8 @@ test('rerun cleans only validated stale SIGKILL artifacts and labeled probe cont
   for (const path of stalePaths) assert.equal(existsSync(path), false);
   assert.equal(existsSync(join(etc, 'socos-release-gate.env.keep')), true);
   assert.equal(existsSync(join(tmpRoot, 'credential-probe.keep')), true);
+  assert.equal(readFileSync(inputDecoyPath, 'utf8'), 'keep nonmatching input\n');
+  assert.equal(readFileSync(inputSymlinkPath, 'utf8'), 'keep symlink target\n');
   assert.equal(existsSync(join(f.state, `container-${staleCid}`)), false);
   assert.equal(existsSync(join(f.state, `container-${labeledCid}`)), false);
   const calls = readFileSync(f.log, 'utf8');
@@ -763,6 +775,7 @@ test('package wiring and runbook cover secure provisioning, audits, rotation, st
     /password-independent HBA/i,
     /cidfile.*ownership label/is,
     /stale.*SIGKILL.*artifacts/is,
+    /provision-input.*temporary-name pattern/is,
     /password transaction.*external timeout.*reconciliation/is,
     /SIGKILL.*mandatory immediate\s+rerun/is,
     /token and role rotation/i,

@@ -237,6 +237,13 @@ for ((stale_probe_index = 0; stale_probe_index < stale_probe_cidfile_count; stal
   rm -f -- "$stale_probe_cidfile"
 done
 
+for stale_input_tmp in "$tmp_root"/provision-input.??????; do
+  [[ -e "$stale_input_tmp" || -L "$stale_input_tmp" ]] || continue
+  stale_input_basename=${stale_input_tmp##*/}
+  [[ "$stale_input_basename" =~ ^provision-input\.[A-Za-z0-9]{6}$ ]] || fail
+  [[ -f "$stale_input_tmp" && ! -L "$stale_input_tmp" ]] || continue
+  rm -f -- "$stale_input_tmp"
+done
 for stale_env_tmp in "$etc_dir"/socos-release-gate.env.??????; do
   [[ -e "$stale_env_tmp" || -L "$stale_env_tmp" ]] || continue
   stale_env_basename=${stale_env_tmp##*/}
@@ -254,7 +261,8 @@ done
 unset stale_probe_cids stale_probe_cidfiles labeled_probe_cids remaining_probe_cids
 unset stale_probe_cid_count stale_probe_cidfile_count stale_probe_index
 unset stale_probe_cid stale_probe_cidfile stale_probe_owner stale_probe_extra
-unset stale_probe_tmp stale_env_tmp stale_probe_basename stale_env_basename
+unset stale_probe_tmp stale_env_tmp stale_input_tmp
+unset stale_probe_basename stale_env_basename stale_input_basename
 
 if [[ ! -d "$repository/.git" ]]; then
   quiet git -C "$repository" init

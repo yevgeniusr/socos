@@ -541,9 +541,10 @@ Every probe container has a root-only cidfile and the fixed ownership label
 and EXIT cleanup validate the full container ID and label before force-removing the
 container, then remove its cidfile and secret env file. After taking the updater
 lock, every rerun also validates and removes only exact staged-environment, probe,
-and cidfile temporary-name patterns left as stale `SIGKILL` artifacts. It validates
-and force-removes both labeled probe containers and labeled CIDs recovered from
-cidfiles; unrelated containers and nonmatching files are never cleanup targets.
+cidfile, and `provision-input.??????` temporary-name patterns left as stale `SIGKILL`
+artifacts. The input cleanup accepts only regular non-symlink files. It validates and
+force-removes both labeled probe containers and labeled CIDs recovered from cidfiles;
+unrelated containers, symlinks, and nonmatching files are never cleanup targets.
 
 Only all three wrong-password rejections and all three successful identity proofs
 authorize atomic publication of the staged environment, even when the password
