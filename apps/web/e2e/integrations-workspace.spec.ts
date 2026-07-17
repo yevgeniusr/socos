@@ -98,9 +98,14 @@ const eventPreference = {
 type SyntheticOptions = {
   disabled?: boolean;
   calendarFailures?: number;
+  calendarPatchFailures?: number;
   emptyPixel?: boolean;
   emptyEvents?: boolean;
   holdFirstCalendarPatchFailure?: boolean;
+  failLocationRotation?: boolean;
+  holdLocationRotation?: boolean;
+  pixelAwaitingFirstSample?: boolean;
+  eventErrorOnly?: boolean;
 };
 
 async function json(route: Route, body: unknown, status = 200) {
@@ -144,17 +149,33 @@ async function installSyntheticApi(page: Page, options: SyntheticOptions = {}) {
     calendarConnectPayloads: [] as unknown[],
     calendarSelectionPayloads: [] as unknown[],
     calendarPatchAttempts: 0,
+    calendarPatchFailuresRemaining: options.calendarPatchFailures ?? 0,
     releaseCalendarPatchFailure: undefined as (() => void) | undefined,
     calendarDisconnects: 0,
     locationCreatePayloads: [] as unknown[],
     locationRotations: 0,
+    releaseLocationRotation: undefined as (() => void) | undefined,
     locationRevocations: 0,
     eventCreatePayloads: [] as unknown[],
     eventUpdatePayloads: [] as unknown[],
     eventRemovals: 0,
     preferencePayloads: [] as unknown[],
-    createdDevice: options.emptyPixel ? null : locationDevice,
-    createdEventSource: options.emptyEvents ? null : eventSource,
+    createdDevice: options.emptyPixel
+      ? null
+      : options.pixelAwaitingFirstSample
+        ? { ...locationDevice, lastSeenAt: null }
+        : locationDevice,
+    createdEventSource: options.emptyEvents
+      ? null
+      : options.eventErrorOnly
+        ? {
+            ...eventSource,
+            status: "error",
+            errorCode: "upstream_timeout",
+            lastPolledAt: "2026-07-17T07:00:00.000Z",
+            nextPollAt: "2026-07-17T09:00:00.000Z",
+          }
+        : eventSource,
   };
 
   await page.route("**/api/**", async (route) => {
@@ -246,6 +267,10 @@ async function installSyntheticApi(page: Page, options: SyntheticOptions = {}) {
         });
         return json(route, { message: "Synthetic selection failure" }, 500);
       }
+      if (state.calendarPatchFailuresRemaining > 0) {
+        state.calendarPatchFailuresRemaining -= 1;
+        return json(route, { message: "Synthetic selection failure" }, 500);
+      }
       return noContent(route);
     }
     if (
@@ -278,6 +303,14 @@ async function installSyntheticApi(page: Page, options: SyntheticOptions = {}) {
       method === "POST"
     ) {
       state.locationRotations += 1;
+      if (options.holdLocationRotation) {
+        await new Promise<void>((resolve) => {
+          state.releaseLocationRotation = resolve;
+        });
+      }
+      if (options.failLocationRotation) {
+        return json(route, { message: "Synthetic rotation failure" }, 500);
+      }
       return json(route, {
         device: {
           id: locationDevice.id,
@@ -404,16 +437,19 @@ test.describe("authenticated Integrations workspace", () => {
       name: "Disconnect Google Calendar",
     });
     await expect(dialog).toContainText(
-      "Stops sync and removes Socos' synced Calendar connection and Calendar-derived context. This is not the full personal-context erasure control."
+      "Stops new Calendar sync and starts cleanup of the synced Calendar connection and Calendar-derived context. Provider watch cleanup is best-effort, so cleanup may remain pending. This is not the full personal-context erasure control."
     );
     await expect(api.calendarDisconnects).toBe(0);
     await dialog.getByRole("button", { name: "Disconnect" }).click();
     await expect.poll(() => api.calendarDisconnects).toBe(1);
     const disconnectReceipt = calendar
       .getByRole("status")
-      .filter({ hasText: "removed the synced Calendar connection" });
+      .filter({ hasText: "provider watch cleanup may remain pending" });
     await expect(disconnectReceipt).toBeVisible();
     await expect(disconnectReceipt).toBeFocused();
+    await expect(disconnectReceipt).not.toContainText(
+      "removed the synced Calendar connection"
+    );
   });
 
   test("shows Pixel credentials once and confirms rotation and revocation", async ({
@@ -598,6 +634,82 @@ test.describe("authenticated Integrations workspace", () => {
     ).toBeFocused();
   });
 
+  test("restores focus after a failed Pixel credential rotation", async ({
+    page,
+  }) => {
+    const api = await installSyntheticApi(page, {
+      failLocationRotation: true,
+      holdLocationRotation: true,
+    });
+    await page.goto("/dashboard/integrations");
+    const pixel = page.getByRole("region", { name: "Pixel location" });
+    const rotateButton = pixel.getByRole("button", {
+      name: "Rotate credentials for Synthetic Pixel",
+    });
+
+    await rotateButton.click();
+    await page
+      .getByRole("dialog", { name: "Rotate Pixel credentials" })
+      .getByRole("button", { name: "Rotate credentials" })
+      .click();
+
+    const busyDialog = page.getByRole("dialog", {
+      name: "Rotate Pixel credentials",
+    });
+    await expect.poll(() => api.releaseLocationRotation).toBeDefined();
+    await page.keyboard.press("Tab");
+    const focusStayedInDialog = await busyDialog.evaluate(
+      (dialog) => dialog === document.activeElement
+    );
+    api.releaseLocationRotation?.();
+    expect(focusStayedInDialog).toBe(true);
+
+    await expect.poll(() => api.locationRotations).toBe(1);
+    await expect(
+      pixel.getByRole("alert").filter({ hasText: "Synthetic rotation failure" })
+    ).toBeVisible();
+    await expect(rotateButton).toBeEnabled();
+    await expect(rotateButton).toBeFocused();
+    await expect(
+      page.getByRole("dialog", { name: "One-time Pixel credentials" })
+    ).toHaveCount(0);
+  });
+
+  test("shows truthful Pixel enrollment and Event polling health states", async ({
+    page,
+  }) => {
+    await installSyntheticApi(page, {
+      pixelAwaitingFirstSample: true,
+      eventErrorOnly: true,
+    });
+    await page.goto("/dashboard/integrations");
+
+    const pixel = page.getByRole("region", { name: "Pixel location" });
+    await expect(
+      pixel.getByText("Awaiting first sample", { exact: true }).first()
+    ).toBeVisible();
+    await expect(
+      pixel.getByText("Enrolled / awaiting first sample")
+    ).toBeVisible();
+    await expect(pixel.getByText("No device samples received")).toBeVisible();
+    await expect(
+      pixel.getByText("Visit-derived", { exact: true })
+    ).toBeVisible();
+    await expect(pixel).not.toContainText(/latitude|longitude/i);
+
+    const events = page.getByRole("region", { name: "Event discovery" });
+    await expect(
+      events.getByText("Polling error", { exact: true }).first()
+    ).toBeVisible();
+    await expect(events.getByText("Error: upstream_timeout")).toBeVisible();
+    await expect(events.getByText(/Last poll /)).toBeVisible();
+    await expect(events.getByText(/Next poll /)).toBeVisible();
+    await expect(
+      events.getByText("Ready for sources", { exact: true })
+    ).toHaveCount(0);
+    await expect(events).not.toContainText(FEED_URL);
+  });
+
   test("renders non-active Calendar states and consumes an error callback", async ({
     page,
   }) => {
@@ -716,6 +828,67 @@ test.describe("authenticated Integrations workspace", () => {
     ).toBeVisible();
     await expect(calendar.getByRole("checkbox")).toHaveCount(0);
     await expect(page.getByText("Synthetic selection failure")).toHaveCount(0);
+  });
+
+  test("restores the last server-confirmed Calendar value when queued toggles fail", async ({
+    page,
+  }) => {
+    const api = await installSyntheticApi(page, {
+      holdFirstCalendarPatchFailure: true,
+      calendarPatchFailures: 1,
+    });
+    await page.goto("/dashboard/integrations");
+    const checkbox = page.getByRole("checkbox", {
+      name: "Use Synthetic primary calendar",
+    });
+
+    await checkbox.uncheck();
+    await checkbox.check();
+    await expect.poll(() => api.releaseCalendarPatchFailure).toBeDefined();
+    api.releaseCalendarPatchFailure?.();
+
+    await expect
+      .poll(() => api.calendarSelectionPayloads)
+      .toEqual([{ selected: false }, { selected: true }]);
+    await expect(
+      page.getByRole("alert").filter({ hasText: "Synthetic selection failure" })
+    ).toBeVisible();
+    await expect(checkbox).toBeChecked();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Calendar selection saved" })
+    ).toHaveCount(0);
+  });
+
+  test("clears a stale Calendar success receipt before a failed update", async ({
+    page,
+  }) => {
+    const api = await installSyntheticApi(page);
+    await page.goto("/dashboard/integrations");
+    const calendar = page.getByRole("region", { name: "Google Calendar" });
+    const checkbox = calendar.getByRole("checkbox", {
+      name: "Use Synthetic primary calendar",
+    });
+
+    await checkbox.uncheck();
+    await expect(
+      calendar
+        .getByRole("status")
+        .filter({ hasText: "Calendar selection saved" })
+    ).toBeVisible();
+    api.calendarPatchFailuresRemaining = 1;
+    await checkbox.check();
+
+    await expect(
+      calendar
+        .getByRole("alert")
+        .filter({ hasText: "Synthetic selection failure" })
+    ).toBeVisible();
+    await expect(
+      calendar
+        .getByRole("status")
+        .filter({ hasText: "Calendar selection saved" })
+    ).toHaveCount(0);
+    await expect(checkbox).not.toBeChecked();
   });
 
   test("retries one failed panel without removing ready panels", async ({

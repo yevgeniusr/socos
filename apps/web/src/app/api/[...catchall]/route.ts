@@ -4,6 +4,19 @@ const API_BASE = (
   process.env.API_INTERNAL_URL || "http://localhost:3001"
 ).replace(/\/$/, "");
 const HEADER_FILTER = ["host", "connection", "content-length"];
+const RESPONSE_HEADER_ALLOWLIST = [
+  "cache-control",
+  "content-language",
+  "content-type",
+  "etag",
+  "expires",
+  "last-modified",
+  "location",
+  "pragma",
+  "retry-after",
+  "vary",
+  "www-authenticate",
+];
 const BODYLESS_STATUSES = new Set([204, 205, 304]);
 const METHODS_WITH_BODY = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
@@ -29,18 +42,22 @@ async function proxyRequest(
         headers,
         ...(body ? { body } : {}),
         credentials: "include",
+        redirect: "manual",
       }
     );
-    const responseBody = BODYLESS_STATUSES.has(response.status)
-      ? null
-      : await response.text();
+    const responseBody =
+      BODYLESS_STATUSES.has(response.status) || response.body === null
+        ? null
+        : await response.text();
+    const responseHeaders = new Headers();
+    for (const name of RESPONSE_HEADER_ALLOWLIST) {
+      const value = response.headers.get(name);
+      if (value !== null) responseHeaders.set(name, value);
+    }
 
     return new NextResponse(responseBody, {
       status: response.status,
-      headers: {
-        "Content-Type":
-          response.headers.get("content-type") || "application/json",
-      },
+      headers: responseHeaders,
     });
   } catch {
     return NextResponse.json({ error: "API unavailable" }, { status: 502 });

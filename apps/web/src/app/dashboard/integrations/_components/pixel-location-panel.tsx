@@ -94,6 +94,7 @@ export default function PixelLocationPanel() {
     credentialReturnFocusRef.current = null;
     setBusy(true);
     setActionError(null);
+    setReceipt(null);
     try {
       const response = await apiJson<CreatePixelResponse>(
         "/api/location-devices",
@@ -124,6 +125,7 @@ export default function PixelLocationPanel() {
   }
 
   async function rotate(device: LocationDeviceResponse) {
+    let rotated = false;
     setBusy(true);
     setActionError(null);
     setReceipt(null);
@@ -134,6 +136,7 @@ export default function PixelLocationPanel() {
       );
       setCredentials(response.credentials);
       setReceipt("Pixel credentials rotated. Configure the replacement now.");
+      rotated = true;
     } catch (error) {
       setActionError(
         error instanceof Error ? error.message : "Credential rotation failed."
@@ -141,6 +144,14 @@ export default function PixelLocationPanel() {
     } finally {
       setBusy(false);
       setPendingAction(null);
+      if (!rotated) {
+        requestAnimationFrame(() => {
+          const target = credentialReturnFocusRef.current;
+          if (target?.isConnected && !target.matches(":disabled")) {
+            target.focus();
+          }
+        });
+      }
     }
   }
 
@@ -167,6 +178,26 @@ export default function PixelLocationPanel() {
     }
   }
 
+  const activeDevices =
+    state.status === "ready"
+      ? state.data.devices.filter((device) => device.status === "active")
+      : [];
+  const latestDeviceSeenAt = activeDevices.reduce<string | null>(
+    (latest, device) =>
+      device.lastSeenAt && (!latest || device.lastSeenAt > latest)
+        ? device.lastSeenAt
+        : latest,
+    null
+  );
+  const contextSourceLabel =
+    state.status === "ready"
+      ? {
+          sample: "Device sample",
+          visit: "Visit-derived",
+          calendar: "Calendar-derived",
+          fallback: "Fallback",
+        }[state.data.context.source]
+      : null;
   const status =
     state.status === "loading"
       ? "Loading"
@@ -174,9 +205,13 @@ export default function PixelLocationPanel() {
         ? "Not enabled"
         : state.status === "error"
           ? "Needs attention"
-          : state.data.devices.some((device) => device.status === "active")
-            ? "Ingest active"
-            : "Ready to enroll";
+          : activeDevices.some((device) => device.lastSeenAt)
+            ? "Samples received"
+            : activeDevices.length
+              ? "Awaiting first sample"
+              : state.data.devices.length
+                ? "No active devices"
+                : "Ready to enroll";
 
   return (
     <IntegrationSection
@@ -209,7 +244,7 @@ export default function PixelLocationPanel() {
       ) : null}
       {state.status === "ready" ? (
         <div className="space-y-6">
-          <div className="grid gap-3 border-b border-outline-variant/25 pb-5 sm:grid-cols-3">
+          <div className="grid gap-3 border-b border-outline-variant/25 pb-5 sm:grid-cols-2 lg:grid-cols-5">
             <div>
               <p className="text-xs font-bold uppercase text-on-surface-variant">
                 Current city
@@ -218,6 +253,24 @@ export default function PixelLocationPanel() {
                 {[state.data.context.city, state.data.context.countryCode]
                   .filter(Boolean)
                   .join(", ") || "Unavailable"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-bold uppercase text-on-surface-variant">
+                Context source
+              </p>
+              <p className="mt-1 break-words text-sm font-bold text-on-surface">
+                {contextSourceLabel}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-bold uppercase text-on-surface-variant">
+                Last device sample
+              </p>
+              <p className="mt-1 break-words text-sm font-bold text-on-surface">
+                {latestDeviceSeenAt
+                  ? new Date(latestDeviceSeenAt).toLocaleString()
+                  : "No device samples received"}
               </p>
             </div>
             <div>
@@ -262,7 +315,11 @@ export default function PixelLocationPanel() {
                       <p className="mt-1 text-xs font-bold uppercase text-secondary">
                         {device.status === "revoked"
                           ? "Revoked"
-                          : device.status}
+                          : device.status === "active" && !device.lastSeenAt
+                            ? "Enrolled / awaiting first sample"
+                            : device.status === "active" && device.lastSeenAt
+                              ? `Active / last sample ${new Date(device.lastSeenAt).toLocaleString()}`
+                              : device.status}
                       </p>
                     </div>
                     {device.status === "active" ? (

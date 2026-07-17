@@ -48,6 +48,10 @@ export default function ConfirmationDialog({
     };
   }, [restoreFocus, restoreFocusRef]);
 
+  useEffect(() => {
+    if (busy) dialogRef.current?.focus();
+  }, [busy]);
+
   function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape" && !busy) {
       event.preventDefault();
@@ -61,7 +65,11 @@ export default function ConfirmationDialog({
         'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
       ) ?? []
     );
-    if (!focusable.length) return;
+    if (!focusable.length) {
+      event.preventDefault();
+      dialogRef.current?.focus();
+      return;
+    }
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
     if (event.shiftKey && document.activeElement === first) {
@@ -79,7 +87,9 @@ export default function ConfirmationDialog({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
+        aria-busy={busy}
         aria-label={title}
+        tabIndex={-1}
         onKeyDown={handleKeyDown}
         className="flex h-full w-full flex-col justify-between bg-surface-container p-5 sm:h-auto sm:max-w-md sm:border sm:border-outline-variant/40"
       >

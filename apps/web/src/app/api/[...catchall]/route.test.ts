@@ -39,6 +39,37 @@ describe("API catchall proxy bodyless responses", () => {
 });
 
 describe("API catchall proxy request forwarding", () => {
+  it("preserves a manual OAuth redirect and only safe response headers", async () => {
+    const upstreamFetch = vi.fn().mockResolvedValue(
+      new Response(null, {
+        status: 303,
+        headers: {
+          location: "https://accounts.example.test/oauth/authorize",
+          "cache-control": "no-store, private",
+          "set-cookie": "upstream_session=secret; HttpOnly; Secure",
+        },
+      })
+    );
+    vi.stubGlobal("fetch", upstreamFetch);
+
+    const response = await GET(
+      new NextRequest("http://localhost/api/synthetic-oauth"),
+      params
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.body).toBeNull();
+    expect(response.headers.get("location")).toBe(
+      "https://accounts.example.test/oauth/authorize"
+    );
+    expect(response.headers.get("cache-control")).toBe("no-store, private");
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(upstreamFetch).toHaveBeenCalledWith(
+      "http://localhost:3001/api/synthetic",
+      expect.objectContaining({ redirect: "manual" })
+    );
+  });
+
   it("forwards a DELETE body, query, and safe headers", async () => {
     const upstreamFetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ removed: true }), {

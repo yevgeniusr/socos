@@ -31,6 +31,14 @@ type PendingEventAction =
 const inputClass =
   "min-h-11 w-full min-w-0 border border-outline-variant/50 bg-surface-container-lowest px-3 text-sm text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary";
 
+function formatTimestamp(value: string | null) {
+  if (!value) return "Never";
+  const timestamp = new Date(value);
+  return Number.isNaN(timestamp.getTime())
+    ? "Unavailable"
+    : timestamp.toLocaleString();
+}
+
 export default function EventDiscoveryPanel() {
   const [state, setState] = useState<LoadableIntegration<EventPanelData>>({
     status: "loading",
@@ -85,6 +93,7 @@ export default function EventDiscoveryPanel() {
     event.preventDefault();
     setBusy(true);
     setActionError(null);
+    setReceipt(null);
     try {
       const source = await apiJson<EventSourceResponse>("/api/event-sources", {
         method: "POST",
@@ -128,6 +137,7 @@ export default function EventDiscoveryPanel() {
     event.preventDefault();
     setBusy(true);
     setActionError(null);
+    setReceipt(null);
     const tags = Array.from(
       new Set(
         interestTags
@@ -253,9 +263,15 @@ export default function EventDiscoveryPanel() {
         ? "Not enabled"
         : state.status === "error"
           ? "Needs attention"
-          : state.data.sources.some((source) => source.status === "active")
-            ? "Polling active"
-            : "Ready for sources";
+          : state.data.sources.some(
+                (source) => source.status === "error" || source.errorCode
+              )
+            ? "Polling error"
+            : state.data.sources.some((source) => source.status === "active")
+              ? "Polling active"
+              : state.data.sources.length
+                ? "Polling paused"
+                : "Ready for sources";
 
   return (
     <IntegrationSection
@@ -319,6 +335,15 @@ export default function EventDiscoveryPanel() {
                       </p>
                       <p className="mt-1 text-xs font-bold uppercase text-secondary">
                         {source.status}
+                      </p>
+                      {source.errorCode ? (
+                        <p className="mt-1 break-words text-xs text-error">
+                          Error: {source.errorCode}
+                        </p>
+                      ) : null}
+                      <p className="mt-1 break-words text-xs text-on-surface-variant">
+                        Last poll {formatTimestamp(source.lastPolledAt)} / Next
+                        poll {formatTimestamp(source.nextPollAt)}
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">

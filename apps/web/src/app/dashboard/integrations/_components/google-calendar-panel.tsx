@@ -34,11 +34,13 @@ export default function GoogleCalendarPanel({
   const calendarEpochRef = useRef(0);
   const sourceVersionsRef = useRef(new Map<string, number>());
   const sourceQueuesRef = useRef(new Map<string, Promise<void>>());
+  const sourceConfirmedRef = useRef(new Map<string, boolean>());
 
   const loadCalendar = useCallback(async (signal?: AbortSignal) => {
     const epoch = ++calendarEpochRef.current;
     sourceVersionsRef.current.clear();
     sourceQueuesRef.current.clear();
+    sourceConfirmedRef.current.clear();
     setState({ status: "loading" });
     try {
       const [connection, sources] = await Promise.all([
@@ -52,6 +54,9 @@ export default function GoogleCalendarPanel({
         ),
       ]);
       if (calendarEpochRef.current === epoch) {
+        sourceConfirmedRef.current = new Map(
+          sources.map((source) => [source.id, source.selected])
+        );
         setState({ status: "ready", data: { connection, sources } });
       }
     } catch (error) {
@@ -93,7 +98,12 @@ export default function GoogleCalendarPanel({
     const epoch = calendarEpochRef.current;
     const version = (sourceVersionsRef.current.get(sourceId) ?? 0) + 1;
     sourceVersionsRef.current.set(sourceId, version);
+    if (!sourceConfirmedRef.current.has(sourceId)) {
+      const source = state.data.sources.find((item) => item.id === sourceId);
+      if (source) sourceConfirmedRef.current.set(sourceId, source.selected);
+    }
     setActionError(null);
+    setReceipt(null);
     setState((current) =>
       current.status === "ready" && current.data.connection?.status === "active"
         ? {
@@ -121,6 +131,9 @@ export default function GoogleCalendarPanel({
               body: JSON.stringify({ selected }),
             }
           );
+          if (calendarEpochRef.current === epoch) {
+            sourceConfirmedRef.current.set(sourceId, selected);
+          }
           if (
             calendarEpochRef.current === epoch &&
             sourceVersionsRef.current.get(sourceId) === version
@@ -143,7 +156,12 @@ export default function GoogleCalendarPanel({
                     ...current.data,
                     sources: current.data.sources.map((source) =>
                       source.id === sourceId
-                        ? { ...source, selected: !selected }
+                        ? {
+                            ...source,
+                            selected:
+                              sourceConfirmedRef.current.get(sourceId) ??
+                              source.selected,
+                          }
                         : source
                     ),
                   },
@@ -168,6 +186,7 @@ export default function GoogleCalendarPanel({
     calendarEpochRef.current += 1;
     sourceVersionsRef.current.clear();
     sourceQueuesRef.current.clear();
+    sourceConfirmedRef.current.clear();
     setBusy(true);
     setActionError(null);
     setReceipt(null);
@@ -180,7 +199,7 @@ export default function GoogleCalendarPanel({
         data: { connection: null, sources: [] },
       });
       setReceipt(
-        "Google Calendar disconnected. Socos removed the synced Calendar connection and Calendar-derived context. Other personal context is unchanged."
+        "Google Calendar sync stopped. Socos started cleanup of Calendar-derived context and the synced connection; provider watch cleanup may remain pending. Other personal context is unchanged."
       );
     } catch (error) {
       setActionError(
@@ -343,7 +362,7 @@ export default function GoogleCalendarPanel({
       {confirmingDisconnect ? (
         <ConfirmationDialog
           title="Disconnect Google Calendar"
-          description="Stops sync and removes Socos' synced Calendar connection and Calendar-derived context. This is not the full personal-context erasure control."
+          description="Stops new Calendar sync and starts cleanup of the synced Calendar connection and Calendar-derived context. Provider watch cleanup is best-effort, so cleanup may remain pending. This is not the full personal-context erasure control."
           confirmLabel="Disconnect"
           busy={busy}
           restoreFocusRef={receiptRef}
