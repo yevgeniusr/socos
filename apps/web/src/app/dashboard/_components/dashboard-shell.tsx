@@ -227,7 +227,11 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
       icon: "approval",
       href: "/dashboard/approvals",
     },
-    { label: "Calendar", icon: "calendar_month", disabled: true },
+    {
+      label: "Integrations",
+      icon: "hub",
+      href: "/dashboard/integrations",
+    },
     { label: "Gamification", icon: "military_tech", disabled: true },
     { label: "Settings", icon: "settings", disabled: true },
   ];
@@ -339,9 +343,9 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
           </div>
           <nav
             aria-label="Mobile dashboard"
-            className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-3 border-t border-outline-variant/30 bg-surface/98 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
+            className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-4 border-t border-outline-variant/30 bg-surface/98 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
           >
-            {navItems.slice(0, 3).map((item) => {
+            {navItems.slice(0, 4).map((item) => {
               const active = item.href ? pathname.startsWith(item.href) : false;
               return (
                 <Link
