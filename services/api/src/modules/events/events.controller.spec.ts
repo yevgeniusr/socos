@@ -1,6 +1,7 @@
 import { HttpStatus } from "@nestjs/common";
 import { HTTP_CODE_METADATA } from "@nestjs/common/constants";
 import {
+  EventCatalogController,
   EventPreferencesController,
   EventSourcesController,
 } from "./events.controller.js";
@@ -55,5 +56,23 @@ describe("events controllers", () => {
     expect(preferences.get).toHaveBeenCalledWith("jwt-owner");
     expect(preferences.upsert).toHaveBeenCalledWith("jwt-owner", input);
     expect(preferences.remove).toHaveBeenCalledWith("jwt-owner");
+  });
+
+  it("derives catalog follow state only from the authenticated request", async () => {
+    const catalog = {
+      search: jest.fn().mockResolvedValue({ items: [], nextCursor: null }),
+      getBySlug: jest.fn().mockResolvedValue({}),
+    };
+    const controller = new EventCatalogController(catalog as never);
+    const query = { q: "holidays", limit: 10 };
+
+    await controller.search(request, query);
+    await controller.getBySlug(request, "uae-public-holidays");
+
+    expect(catalog.search).toHaveBeenCalledWith("jwt-owner", query);
+    expect(catalog.getBySlug).toHaveBeenCalledWith(
+      "jwt-owner",
+      "uae-public-holidays"
+    );
   });
 });

@@ -44,6 +44,14 @@ const humanIdempotencyMigrationPath = resolve(
   root,
   "services/api/prisma/migrations/20260717190000_human_idempotency/migration.sql",
 );
+const interactionReceiptsMigrationPath = resolve(
+  root,
+  "services/api/prisma/migrations/20260717200000_interaction_receipts/migration.sql",
+);
+const eventCatalogMigrationPath = resolve(
+  root,
+  "services/api/prisma/migrations/20260718120000_event_catalog/migration.sql",
+);
 const expectedBriefTables = [
   "BriefBatch",
   "BriefItem",
@@ -1025,6 +1033,46 @@ test("event discovery schema declares the exact public and encrypted persistence
   assert.doesNotMatch(migration, /"(?:id|updatedAt)"[^,\n]+DEFAULT/);
 });
 
+test("event catalog migration is transactional, owner-scoped, and seeds deterministic metadata", () => {
+  const schema = readFileSync(
+    resolve(root, "services/api/prisma/schema.prisma"),
+    "utf8",
+  );
+  assert.equal(
+    existsSync(eventCatalogMigrationPath),
+    true,
+    "event catalog migration file is missing",
+  );
+  const migration = existsSync(eventCatalogMigrationPath)
+    ? readFileSync(eventCatalogMigrationPath, "utf8")
+    : "";
+
+  assert.match(migration, /^BEGIN;\n[\s\S]*\nCOMMIT;\n?$/);
+  assert.match(schema, /model EventCatalogListing \{/);
+  assert.match(schema, /model EventCatalogFollow \{/);
+  assert.match(migration, /CREATE TABLE "EventCatalogListing"/);
+  assert.match(migration, /CREATE TABLE "EventCatalogFollow"/);
+  assert.match(
+    migration,
+    /FOREIGN KEY \("sourceId", "ownerId"\)[\s\S]*REFERENCES "EventSource"\("id", "ownerId"\) ON DELETE CASCADE/,
+  );
+  assert.match(
+    migration,
+    /CREATE UNIQUE INDEX "EventCatalogFollow_ownerId_listingId_key"/,
+  );
+  assert.match(
+    migration,
+    /CREATE INDEX "EventCatalogListing_search_idx"[\s\S]*USING GIN/,
+  );
+  assert.match(
+    migration,
+    /CREATE INDEX "EventCatalogListing_tags_idx"[\s\S]*USING GIN/,
+  );
+  assert.match(migration, /catalog-uae-public-holidays/);
+  assert.match(migration, /catalog-un-international-days/);
+  assert.doesNotMatch(migration, /ON CONFLICT[\s\S]*DO UPDATE/);
+});
+
 test("event brief snapshot schema declares public event time and coarse city snapshots", () => {
   const schema = readFileSync(
     resolve(root, "services/api/prisma/schema.prisma"),
@@ -1378,6 +1426,59 @@ if (!databaseUrl) {
     assert.match(
       definitions.get("HumanIdempotencyRecord_ownerId_fkey") ?? "",
       /FOREIGN KEY \(ownerId\) REFERENCES User\(id\) ON UPDATE CASCADE ON DELETE CASCADE/,
+    );
+  }
+
+  async function assertEventCatalogSchema(client) {
+    assert.equal(await tableExists(client, "EventCatalogListing"), true);
+    assert.equal(await tableExists(client, "EventCatalogFollow"), true);
+
+    const seed = await client.query(
+      `SELECT "id", "slug", "contentHash" FROM "EventCatalogListing" ORDER BY "slug"`,
+    );
+    assert.equal(seed.rowCount, 6);
+    assert.deepEqual(
+      seed.rows.map(({ id, slug }) => ({ id, slug })),
+      [
+        { id: "catalog-ai-everything-global", slug: "ai-everything-global" },
+        { id: "catalog-gitex-global", slug: "gitex-global" },
+        { id: "catalog-jewish-holidays-diaspora", slug: "jewish-holidays-diaspora" },
+        { id: "catalog-jewish-holidays-israel", slug: "jewish-holidays-israel" },
+        { id: "catalog-uae-public-holidays", slug: "uae-public-holidays" },
+        { id: "catalog-un-international-days", slug: "un-international-days" },
+      ],
+    );
+    for (const { contentHash } of seed.rows) {
+      assert.match(contentHash, /^[a-f0-9]{64}$/);
+    }
+
+    const constraints = await client.query(
+      `SELECT conname, pg_get_constraintdef(oid) AS definition
+         FROM pg_constraint
+        WHERE conname = ANY($1::text[])`,
+      [[
+        "EventCatalogFollow_sourceId_ownerId_fkey",
+        "EventCatalogFollow_status_check",
+        "EventCatalogListing_contentHash_check",
+      ]],
+    );
+    const definitions = new Map(
+      constraints.rows.map(({ conname, definition }) => [
+        conname,
+        definition.replaceAll('"', ""),
+      ]),
+    );
+    assert.match(
+      definitions.get("EventCatalogFollow_sourceId_ownerId_fkey") ?? "",
+      /FOREIGN KEY \(sourceId, ownerId\) REFERENCES EventSource\(id, ownerId\)/,
+    );
+    assert.match(
+      definitions.get("EventCatalogFollow_status_check") ?? "",
+      /status.*active.*paused/,
+    );
+    assert.match(
+      definitions.get("EventCatalogListing_contentHash_check") ?? "",
+      /contentHash.*\[a-f0-9\].*64/,
     );
   }
 
@@ -2730,6 +2831,9 @@ if (!databaseUrl) {
       await assertEventBriefSnapshotSchema(client);
       await client.query(readFileSync(humanIdempotencyMigrationPath, "utf8"));
       await assertHumanIdempotencySchema(client);
+      await client.query(readFileSync(interactionReceiptsMigrationPath, "utf8"));
+      await client.query(readFileSync(eventCatalogMigrationPath, "utf8"));
+      await assertEventCatalogSchema(client);
 
       const after = await client.query(
         `SELECT
@@ -2813,6 +2917,7 @@ if (!databaseUrl) {
     await withClient(assertEventDiscoveryBehavior);
     await withClient(assertEventBriefSnapshotSchema);
     await withClient(assertHumanIdempotencySchema);
+    await withClient(assertEventCatalogSchema);
 
     execFileSync(
       "pnpm",

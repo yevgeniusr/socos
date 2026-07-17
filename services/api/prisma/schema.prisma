@@ -58,6 +58,7 @@ model User {
   eventPreferences          EventPreference[]
   eventSources              EventSource[]
   discoveredEvents          DiscoveredEvent[]
+  eventCatalogFollows       EventCatalogFollow[]
 }
 
 // ==================== CALENDAR AND LOCATION ====================
@@ -365,10 +366,10 @@ model EventPreference {
 }
 
 model EventSource {
-  id                  String            @id @default(cuid())
+  id                  String              @id @default(cuid())
   ownerId             String
-  owner               User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  provider            String            @default("ics")
+  owner               User                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  provider            String              @default("ics")
   externalSourceId    String
   name                String
   feedUrlMac          String
@@ -379,21 +380,77 @@ model EventSource {
   allowedHost         String
   city                String?
   countryCode         String?
-  socialWeight        Int               @default(5)
-  status              String            @default("active")
-  pollIntervalMinutes Int               @default(60)
+  socialWeight        Int                 @default(5)
+  status              String              @default("active")
+  pollIntervalMinutes Int                 @default(60)
   nextPollAt          DateTime
   leaseUntil          DateTime?
   lastPolledAt        DateTime?
   errorCode           String?
-  createdAt           DateTime          @default(now())
-  updatedAt           DateTime          @updatedAt
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
   events              DiscoveredEvent[]
+  catalogFollow       EventCatalogFollow?
 
   @@unique([ownerId, provider, externalSourceId])
   @@unique([ownerId, feedUrlMac])
   @@unique([id, ownerId])
   @@index([status, nextPollAt, leaseUntil])
+}
+
+model EventCatalogListing {
+  id                 String               @id
+  slug               String               @unique
+  title              String
+  summary            String
+  aliases            String[]             @default([])
+  tags               String[]             @default([])
+  kind               String
+  status             String               @default("active")
+  geographicScope    String
+  countries          String[]             @default([])
+  subdivisions       String[]             @default([])
+  city               String?
+  online             Boolean              @default(false)
+  trustTier          String
+  dateCertainty      String
+  provenanceUrl      String
+  sourceRevision     String
+  checkedAt          DateTime
+  freshnessSlaHours  Int
+  license            String
+  attribution        String
+  connectorType      String
+  connectorReference String
+  contentHash        String
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  follows            EventCatalogFollow[]
+
+  @@index([status, kind, trustTier, slug])
+  @@index([city, status, slug])
+  @@index([aliases], type: Gin)
+  @@index([tags], type: Gin)
+  @@index([countries], type: Gin)
+}
+
+model EventCatalogFollow {
+  id           String              @id @default(cuid())
+  ownerId      String
+  owner        User                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  listingId    String
+  listing      EventCatalogListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  sourceId     String
+  source       EventSource         @relation(fields: [sourceId, ownerId], references: [id, ownerId], onDelete: Cascade)
+  status       String              @default("active")
+  socialWeight Int                 @default(5)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  @@unique([ownerId, listingId])
+  @@unique([sourceId, ownerId])
+  @@unique([id, ownerId])
+  @@index([ownerId, status, updatedAt])
 }
 
 model DiscoveredEvent {

@@ -9,12 +9,15 @@ import {
   Patch,
   Post,
   Put,
+  Query,
   Request,
   UseGuards,
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { AuthGuard } from "../auth/auth.guard.js";
 import { EventPreferenceService } from "./event-preference.service.js";
+import { EventCatalogService } from "./event-catalog.service.js";
+import { EventCatalogQueryDto } from "./event-catalog.dto.js";
 import { EventSourceService } from "./event-source.service.js";
 import {
   type AuthenticatedEventRequest,
@@ -86,5 +89,29 @@ export class EventPreferencesController {
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(@Request() request: AuthenticatedEventRequest): Promise<void> {
     return this.preferences.remove(request.user.userId);
+  }
+}
+
+@ApiTags("event-catalog")
+@ApiBearerAuth()
+@Controller("event-catalog")
+@UseGuards(AuthGuard)
+export class EventCatalogController {
+  constructor(private readonly catalog: EventCatalogService) {}
+
+  @Get()
+  search(
+    @Request() request: AuthenticatedEventRequest,
+    @Query() query: EventCatalogQueryDto
+  ) {
+    return this.catalog.search(request.user.userId, query);
+  }
+
+  @Get(":slug")
+  getBySlug(
+    @Request() request: AuthenticatedEventRequest,
+    @Param("slug") slug: string
+  ) {
+    return this.catalog.getBySlug(request.user.userId, slug);
   }
 }

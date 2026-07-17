@@ -18,11 +18,16 @@ import {
 } from "./event-preference.service.js";
 import { EventRecommendationService } from "./event-recommendation.service.js";
 import {
+  EVENT_CATALOG_CLOCK,
+  EventCatalogService,
+} from "./event-catalog.service.js";
+import {
   EVENT_EXTERNAL_SOURCE_ID_GENERATOR,
   EVENT_SOURCE_ID_GENERATOR,
   EventSourceService,
 } from "./event-source.service.js";
 import {
+  EventCatalogController,
   EventPreferencesController,
   EventSourcesController,
 } from "./events.controller.js";
@@ -30,7 +35,11 @@ import { IcsEventDiscoveryAdapter } from "./ics-event-discovery.adapter.js";
 
 @Module({
   imports: [ConfigModule, PersonalDataModule, LocationModule],
-  controllers: [EventSourcesController, EventPreferencesController],
+  controllers: [
+    EventSourcesController,
+    EventPreferencesController,
+    EventCatalogController,
+  ],
   providers: [
     PrismaService,
     JwtService,
@@ -41,11 +50,13 @@ import { IcsEventDiscoveryAdapter } from "./ics-event-discovery.adapter.js";
     IcsEventDiscoveryAdapter,
     EventDiscoveryService,
     EventRecommendationService,
+    EventCatalogService,
     { provide: EVENT_SOURCE_ID_GENERATOR, useValue: randomUUID },
     { provide: EVENT_EXTERNAL_SOURCE_ID_GENERATOR, useValue: randomUUID },
     { provide: EVENT_PREFERENCE_ID_GENERATOR, useValue: randomUUID },
     { provide: DISCOVERED_EVENT_ID_GENERATOR, useValue: randomUUID },
     { provide: EVENT_DISCOVERY_CLOCK, useValue: () => new Date() },
+    { provide: EVENT_CATALOG_CLOCK, useValue: () => new Date() },
   ],
   exports: [
     EventSourceService,
