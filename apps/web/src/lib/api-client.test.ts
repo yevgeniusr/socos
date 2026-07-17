@@ -34,21 +34,26 @@ describe("apiJson errors", () => {
     [{ message: ["First", "Second"] }, "First, Second"],
     ["Plain failure", "Plain failure"],
     [{ message: "Structured failure", code: 42 }, "Structured failure"],
-  ])("keeps existing messages without inventing a code", async (body, message) => {
-    mockedAuthFetch.mockResolvedValue(
-      new Response(typeof body === "string" ? body : JSON.stringify(body), {
-        status: 400,
-        headers:
-          typeof body === "string"
-            ? undefined
-            : { "content-type": "application/json" },
-      })
-    );
+  ])(
+    "keeps existing messages without inventing a code",
+    async (body, message) => {
+      mockedAuthFetch.mockResolvedValue(
+        new Response(typeof body === "string" ? body : JSON.stringify(body), {
+          status: 400,
+          headers:
+            typeof body === "string"
+              ? undefined
+              : { "content-type": "application/json" },
+        })
+      );
 
-    const failure = await apiJson("/api/test").catch((error: unknown) => error);
-    expect(failure).toMatchObject({ name: "ApiError", status: 400, message });
-    expect((failure as ApiError).code).toBeUndefined();
-  });
+      const failure = await apiJson("/api/test").catch(
+        (error: unknown) => error
+      );
+      expect(failure).toMatchObject({ name: "ApiError", status: 400, message });
+      expect((failure as ApiError).code).toBeUndefined();
+    }
+  );
 
   it("wraps malformed JSON errors with the HTTP status", async () => {
     mockedAuthFetch.mockResolvedValue(
@@ -63,5 +68,15 @@ describe("apiJson errors", () => {
       status: 502,
       message: "Request failed with status 502",
     });
+  });
+});
+
+describe("apiJson empty responses", () => {
+  beforeEach(() => mockedAuthFetch.mockReset());
+
+  it("returns undefined for a successful 204 response", async () => {
+    mockedAuthFetch.mockResolvedValue(new Response(null, { status: 204 }));
+
+    await expect(apiJson<void>("/api/test")).resolves.toBeUndefined();
   });
 });

@@ -36,6 +36,8 @@ export async function apiJson<T>(
   options: RequestInit = {}
 ): Promise<T> {
   const response = await authFetch(path, options);
+  if (response.status === 204) return undefined as T;
+
   const contentType = response.headers.get("content-type") ?? "";
   let body: unknown;
   try {
