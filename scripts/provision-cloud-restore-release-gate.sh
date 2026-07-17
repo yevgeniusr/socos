@@ -10,6 +10,8 @@ readonly COOLIFY_URL='https://qed.quest'
 readonly REMOTE_URL='https://github.com/yevgeniusr/socos.git'
 readonly NETWORK='coolify'
 readonly RUNTIME_IMAGE='socos-release-gate-runtime:node22-pnpm10.10.0-pg16-v2'
+readonly ACL_QUIESCENCE_ATTEMPTS=60
+readonly ACL_QUIESCENCE_SLEEP_SECONDS=2
 
 ROOT_PREFIX=${SOCOS_PROVISION_TEST_ROOT:-}
 TEST_BIN=${SOCOS_PROVISION_TEST_BIN:-}
@@ -245,6 +247,7 @@ then
 fi
 
 if ! docker exec -i "$DATABASE_CONTAINER" psql -X --set=ON_ERROR_STOP=1 --username=postgres --dbname=socos >/dev/null 2>&1 <<SQL
+BEGIN;
 REVOKE CREATE ON DATABASE socos FROM PUBLIC;
 DO \$app_privileges\$
 DECLARE
@@ -264,6 +267,42 @@ GRANT USAGE ON SCHEMA public TO socos_release_gate_read;
 ALTER DEFAULT PRIVILEGES FOR ROLE socos_app REVOKE EXECUTE ON ROUTINES FROM PUBLIC;
 ALTER DEFAULT PRIVILEGES FOR ROLE socos_app IN SCHEMA public GRANT SELECT ON TABLES TO socos_release_gate_read;
 ALTER DEFAULT PRIVILEGES FOR ROLE socos_app IN SCHEMA public GRANT SELECT ON SEQUENCES TO socos_release_gate_read;
+COMMIT;
+SQL
+then
+  fail
+fi
+
+acl_cutoff=$(docker exec "$DATABASE_CONTAINER" psql -X --set=ON_ERROR_STOP=1 --tuples-only --no-align \
+  --username=postgres --dbname=socos \
+  --command='SELECT floor(extract(epoch FROM clock_timestamp()) * 1000000)::bigint;' \
+  2>/dev/null) || fail
+[[ "$acl_cutoff" =~ ^[0-9]{10,20}$ ]] || fail
+
+acl_quiescent=0
+for ((acl_attempt = 1; acl_attempt <= ACL_QUIESCENCE_ATTEMPTS; acl_attempt += 1)); do
+  acl_quiescence=$(docker exec "$DATABASE_CONTAINER" psql -X --set=ON_ERROR_STOP=1 --tuples-only --no-align \
+    --username=postgres --dbname=socos \
+    --command="SELECT NOT EXISTS (SELECT 1 FROM pg_stat_activity WHERE usename = 'socos_app' AND xact_start IS NOT NULL AND xact_start <= to_timestamp($acl_cutoff / 1000000.0)) AND NOT EXISTS (SELECT 1 FROM pg_prepared_xacts WHERE owner = 'socos_app');" \
+    2>/dev/null) || fail
+  case "$acl_quiescence" in
+    t)
+      acl_quiescent=1
+      break
+      ;;
+    f)
+      ;;
+    *)
+      fail
+      ;;
+  esac
+  [[ "$acl_attempt" -eq "$ACL_QUIESCENCE_ATTEMPTS" ]] || quiet sleep "$ACL_QUIESCENCE_SLEEP_SECONDS"
+done
+[[ "$acl_quiescent" -eq 1 ]] || fail
+unset acl_cutoff acl_quiescence
+
+if ! docker exec -i "$DATABASE_CONTAINER" psql -X --set=ON_ERROR_STOP=1 --username=postgres --dbname=socos >/dev/null 2>&1 <<SQL
+BEGIN;
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON ALL TABLES IN SCHEMA public FROM PUBLIC;
 REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM socos_release_gate_read;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO socos_release_gate_read;
@@ -271,6 +310,7 @@ REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM socos_release_gate_
 GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO socos_release_gate_read;
 REVOKE EXECUTE ON ALL ROUTINES IN SCHEMA public FROM PUBLIC;
 REVOKE ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA public FROM socos_release_gate_read;
+COMMIT;
 SQL
 then
   fail

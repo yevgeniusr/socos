@@ -202,8 +202,9 @@ Set `SOCOS_RELEASE_GATE_CLUSTER_ID` to the PostgreSQL system identifier from
 `pg_control_system()`. Production read, administration, and restore URLs must
 use three distinct rotating gate roles on that exact cluster. The production
 URL uses `socos_release_gate_read`, never the application runtime credential.
-The read role cannot connect to `template1`; the gate proves that connection is
-blocked in addition to validating the production query boundary.
+The read role cannot connect to `template1`. The production boundary SQL
+requires `NOT has_database_privilege(current_user,'template1','CONNECT')`, and a
+separate connection attempt proves the same restriction in defense in depth.
 The gate positively verifies public-schema `USAGE` and `SELECT` on every current
 public table, view, materialized view, foreign table, and sequence. It also
 verifies the read role has no database `CREATE` or `TEMPORARY`, schema `CREATE`,
@@ -214,8 +215,18 @@ fail closed even when a schema has no objects. The provisioner grants the read
 role `SELECT` by default on future public tables and sequences owned by
 `socos_app`, and globally revokes the owner's default `PUBLIC` execution for
 future app-owned routines. These owner defaults are installed before the
-current-object table, sequence, and routine sweep so a concurrent app migration
-cannot create an object between the sweep and its future-object protection. It
+current-object table, sequence, and routine sweep in a separate committed Phase
+A transaction. After that commit, the provisioner obtains a validated numeric
+cutoff from PostgreSQL's server clock. For up to 60 attempts separated by two
+seconds, it waits for every pre-cutoff `socos_app` transaction in
+`pg_stat_activity` to finish. Because `pg_prepared_xacts` exposes prepare time
+rather than original transaction start, every current prepared transaction
+owned by `socos_app` blocks the sweep conservatively. Phase B then sweeps current
+objects in a second transaction. An object committed by an old transaction is
+therefore visible to the sweep, while a new transaction sees the committed
+defaults. The wait does not terminate sessions or require downtime. Query
+failures, malformed boolean/cutoff output, or wait exhaustion stop provisioning
+with only the fixed failure marker and no queried rows. Provisioning also
 revokes production `PUBLIC` `TEMPORARY` and current public-routine execution
 while preserving any effective `TEMPORARY` privilege that `socos_app` had before
 provisioning. The gate separately verifies

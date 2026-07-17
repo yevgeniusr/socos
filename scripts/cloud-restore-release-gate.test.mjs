@@ -203,6 +203,7 @@ test('production boundary query proves current read access and rejects every dur
   assert.match(production, /NOT EXISTS \(SELECT 1 FROM pg_roles inherited WHERE inherited\.rolname <> current_user AND pg_has_role\(current_user, inherited\.rolname, 'MEMBER'\)\)/);
   assert.doesNotMatch(production, /inherited\.rolsuper/);
   assert.match(production, /NOT has_database_privilege\(current_user,current_database\(\),'TEMPORARY'\)/);
+  assert.match(production, /NOT has_database_privilege\(current_user,'template1','CONNECT'\)/);
   assert.match(production, /has_schema_privilege\(current_user,'public','USAGE'\)/);
   assert.match(production, /pg_proc p JOIN pg_namespace n ON n\.oid=p\.pronamespace/);
   assert.match(production, /has_function_privilege\(current_user,p\.oid,'EXECUTE'\)/);

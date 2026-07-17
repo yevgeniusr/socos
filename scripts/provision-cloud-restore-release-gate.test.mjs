@@ -35,6 +35,7 @@ function fixture() {
   mkdirSync(bin);
   mkdirSync(state);
   writeFileSync(join(state, 'production-role-sql'), '');
+  writeFileSync(join(state, 'acl-events'), '');
 
   execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-C', 'synthetic@test', '-f', join(dir, 'key')]);
   const authorizedKey = readFileSync(join(dir, 'key.pub'), 'utf8').trim();
@@ -94,9 +95,30 @@ case "$name" in
       else
         printf '%s\\n' 't'
       fi
+    elif [[ " $* " == *' exec '* && " $* " == *'clock_timestamp'* ]]; then
+      printf '%s\\n' 'cutoff' >> "$SHIM_STATE/acl-events"
+      printf '%s\\n' "\${SHIM_ACL_CUTOFF_OUTPUT:-1784289600000000}"
+    elif [[ " $* " == *' exec '* && " $* " == *'pg_stat_activity'* ]]; then
+      printf '%s\\n' 'poll' >> "$SHIM_STATE/acl-events"
+      poll_count=0
+      [[ -f "$SHIM_STATE/acl-poll-count" ]] && poll_count=$(<"$SHIM_STATE/acl-poll-count")
+      printf '%s' "$((poll_count + 1))" > "$SHIM_STATE/acl-poll-count"
+      if [[ -n "\${SHIM_ACL_QUIESCENCE_OUTPUT:-}" ]]; then
+        printf '%s\\n' "$SHIM_ACL_QUIESCENCE_OUTPUT"
+      elif [[ "\${SHIM_ACL_QUIESCENCE_FAIL:-0}" == '1' ]]; then
+        printf '%s\\n' 'f'
+      else
+        printf '%s\\n' 't'
+      fi
     elif [[ " $* " == *' exec '* && " $* " == *' psql '* ]]; then
       if [[ " $* " == *' --dbname=socos '* ]]; then
-        cat >> "$SHIM_STATE/production-role-sql"
+        phase_count=0
+        [[ -f "$SHIM_STATE/production-role-sql-count" ]] && phase_count=$(<"$SHIM_STATE/production-role-sql-count")
+        phase_count=$((phase_count + 1))
+        printf '%s' "$phase_count" > "$SHIM_STATE/production-role-sql-count"
+        cat > "$SHIM_STATE/production-role-sql-$phase_count"
+        cat "$SHIM_STATE/production-role-sql-$phase_count" >> "$SHIM_STATE/production-role-sql"
+        printf 'phase_%s\\n' "$phase_count" >> "$SHIM_STATE/acl-events"
       else
         cat >> "$SHIM_STATE/role-sql"
       fi
@@ -108,13 +130,15 @@ case "$name" in
     shift
     exec "$@"
     ;;
+  sleep)
+    ;;
   sudo)
     [[ "\${1:-}" == '-n' ]] && shift
     exec "$@"
     ;;
 esac
 `);
-  for (const name of ['getent', 'useradd', 'usermod', 'passwd', 'visudo', 'id', 'openssl', 'git', 'docker', 'flock', 'chown', 'timeout', 'sudo']) {
+  for (const name of ['getent', 'useradd', 'usermod', 'passwd', 'visudo', 'id', 'openssl', 'git', 'docker', 'flock', 'chown', 'timeout', 'sudo', 'sleep']) {
     execFileSync('ln', ['-s', shim, join(bin, name)]);
   }
 
@@ -218,6 +242,19 @@ test('provisioner renders the locked account, exact resources, database boundary
 
   const sql = readFileSync(join(f.state, 'role-sql'), 'utf8');
   const productionSql = readFileSync(join(f.state, 'production-role-sql'), 'utf8');
+  const productionPhaseA = readFileSync(join(f.state, 'production-role-sql-1'), 'utf8');
+  const productionPhaseB = readFileSync(join(f.state, 'production-role-sql-2'), 'utf8');
+  assert.equal(readFileSync(join(f.state, 'acl-events'), 'utf8'), 'phase_1\ncutoff\npoll\nphase_2\n');
+  const calls = readFileSync(f.log, 'utf8');
+  assert.match(calls, /xact_start <= to_timestamp\(1784289600000000 \/ 1000000\.0\)/);
+  assert.match(calls, /pg_prepared_xacts WHERE owner = 'socos_app'/);
+  assert.doesNotMatch(calls, /pg_prepared_xacts WHERE[^;]*prepared/);
+  assert.match(productionPhaseA, /^BEGIN;[\s\S]*ALTER DEFAULT PRIVILEGES FOR ROLE socos_app/);
+  assert.match(productionPhaseA, /COMMIT;\n$/);
+  assert.doesNotMatch(productionPhaseA, /ON ALL (?:TABLES|SEQUENCES|ROUTINES)/);
+  assert.match(productionPhaseB, /^BEGIN;[\s\S]*ON ALL TABLES[\s\S]*ON ALL SEQUENCES[\s\S]*ON ALL ROUTINES/);
+  assert.match(productionPhaseB, /COMMIT;\n$/);
+  assert.doesNotMatch(productionPhaseB, /ALTER DEFAULT PRIVILEGES/);
   assert.match(sql, /CREATE ROLE socos_release_gate_read LOGIN/);
   assert.match(sql, /ALTER ROLE socos_release_gate_admin .* CREATEDB /);
   assert.match(sql, /ALTER ROLE socos_release_gate_restore .* NOINHERIT NOCREATEDB /);
@@ -269,7 +306,6 @@ test('provisioner renders the locked account, exact resources, database boundary
   assert.ok(currentObjectSweepStart > defaultAclEnd);
   assert.doesNotMatch(`${sql}\n${productionSql}`, /ALTER ROLE socos_app|ALTER FUNCTION|REVOKE [^;]+ FROM socos_app/);
 
-  const calls = readFileSync(f.log, 'utf8');
   assert.match(calls, /usermod .*<--shell> <\/bin\/sh>/);
   assert.match(calls, /usermod .*<--groups> <>/);
   assert.match(calls, /passwd .*<--lock> <socos-release-gate>/);
@@ -305,6 +341,34 @@ test('provisioner rejects a shared database container before broad PUBLIC ACL ch
   assert.equal(existsSync(join(f.state, 'role-sql')), false);
   assert.equal(readFileSync(join(f.state, 'production-role-sql'), 'utf8'), '');
   assert.doesNotMatch(`${result.stdout}${result.stderr}`, /rolname|unexpected|socos_app/);
+});
+
+test('provisioner bounds ACL quiescence and never sweeps when pre-cutoff app transactions remain', () => {
+  const f = fixture();
+  const result = run(f.input, { ...f.env, SHIM_ACL_QUIESCENCE_FAIL: '1' });
+  assert.notEqual(result.status, 0);
+  assert.equal(result.stdout, '');
+  assert.equal(result.stderr, 'provision_status=failed\n');
+  assert.equal(readFileSync(join(f.state, 'acl-poll-count'), 'utf8'), '60');
+  assert.equal(existsSync(join(f.state, 'production-role-sql-2')), false);
+  const phaseA = readFileSync(join(f.state, 'production-role-sql-1'), 'utf8');
+  assert.match(phaseA, /ALTER DEFAULT PRIVILEGES/);
+  assert.doesNotMatch(phaseA, /ON ALL (?:TABLES|SEQUENCES|ROUTINES)/);
+});
+
+test('provisioner rejects malformed ACL cutoff and quiescence results without sweeping', () => {
+  for (const extraEnv of [
+    { SHIM_ACL_CUTOFF_OUTPUT: 'not-a-timestamp' },
+    { SHIM_ACL_CUTOFF_OUTPUT: '1784289600\n000000' },
+    { SHIM_ACL_QUIESCENCE_OUTPUT: 'unexpected-row' },
+  ]) {
+    const f = fixture();
+    const result = run(f.input, { ...f.env, ...extraEnv });
+    assert.notEqual(result.status, 0);
+    assert.equal(result.stdout, '');
+    assert.equal(result.stderr, 'provision_status=failed\n');
+    assert.equal(existsSync(join(f.state, 'production-role-sql-2')), false);
+  }
 });
 
 test('package wiring and runbook cover secure provisioning, audits, rotation, stale locks, and the exact candidate', () => {
@@ -347,6 +411,9 @@ test('package wiring and runbook cover secure provisioning, audits, rotation, st
     /unexpected `LOGIN` role/i,
     /read role cannot connect to `template1`/i,
     /template1.*`PUBLIC CONNECT`/is,
+    /pre-cutoff `socos_app` transaction/i,
+    /pg_prepared_xacts/,
+    /60 attempts.*two\s+seconds/is,
     /token and role rotation/i,
     /rmdir \/var\/lock\/socos-release-gate\/gate\.lock/,
     /084b7addb0ccc765aa343c5412ed8f5fe5f6da0b.*ancestor/s,
