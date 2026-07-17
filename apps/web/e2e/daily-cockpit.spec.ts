@@ -106,6 +106,7 @@ interface ApiState {
   failFirstKeep: boolean;
   failFirstSnooze: boolean;
   reminderBodies: Array<Record<string, unknown>>;
+  reminderRawBodies: string[];
   reminderKeys: string[];
   generateCalls: number;
   releaseFeedback: () => void;
@@ -165,6 +166,7 @@ async function installApi(
     failFirstKeep: true,
     failFirstSnooze: true,
     reminderBodies: [],
+    reminderRawBodies: [],
     reminderKeys: [],
     generateCalls: 0,
     releaseFeedback,
@@ -407,17 +409,17 @@ async function installApi(
       state.reminderBodies.push(
         request.postDataJSON() as Record<string, unknown>
       );
+      state.reminderRawBodies.push(request.postData() ?? "");
       state.reminderKeys.push(request.headers()["idempotency-key"] ?? "");
       if (options.holdReminderCreate) await reminderCreateGate;
       if (
         options.loseFirstReminderCreateResponse &&
         state.reminderBodies.length === 1
-      )
-        return json(
-          route,
-          { message: "Synthetic lost reminder response" },
-          503
-        );
+      ) {
+        // The synthetic backend has recorded the committed request above; only
+        // its response is lost.
+        return route.abort("failed");
+      }
       return json(route, { id: "created-reminder" });
     }
     const feedback = url.pathname.match(
@@ -953,23 +955,29 @@ test("retries lost committed cockpit POST responses with stable intent keys", as
   await person.getByRole("button", { name: "Create reminder" }).click();
   const reminderDialog = page.getByRole("dialog", { name: "Create reminder" });
   await reminderDialog.getByRole("button", { name: "Create reminder" }).click();
-  await expect(reminderDialog.getByRole("alert")).toContainText(
-    "Synthetic lost reminder response"
-  );
+  await expect.poll(() => api.reminderBodies).toHaveLength(1);
+  await expect.poll(() => api.reminderRawBodies).toHaveLength(1);
+  await expect.poll(() => api.reminderKeys).toHaveLength(1);
+  const committedBody = api.reminderBodies[0];
+  const committedRawBody = api.reminderRawBodies[0];
+  const committedKey = api.reminderKeys[0];
+  expect(committedKey).toMatch(/^[A-Za-z0-9._:-]{8,128}$/);
+  await expect(reminderDialog.getByRole("alert")).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Reminder created" })
   ).toHaveCount(0);
   await reminderDialog.getByRole("button", { name: "Create reminder" }).click();
   await expect(reminderDialog).toBeHidden();
   expect(api.reminderBodies).toHaveLength(2);
-  expect(api.reminderBodies[1]).toEqual(api.reminderBodies[0]);
-  expect(api.reminderKeys[1]).toBe(api.reminderKeys[0]);
-  await expect(
-    page.getByRole("heading", { name: "Reminder created" })
-  ).toHaveCount(1);
-  await expect(
-    page.getByRole("heading", { name: "Reminder created" })
-  ).toBeFocused();
+  expect(api.reminderRawBodies).toHaveLength(2);
+  expect(api.reminderBodies[1]).toEqual(committedBody);
+  expect(api.reminderRawBodies[1]).toBe(committedRawBody);
+  expect(api.reminderKeys[1]).toBe(committedKey);
+  const receiptHeading = page.getByRole("heading", {
+    name: "Reminder created",
+  });
+  await expect(receiptHeading).toHaveCount(1);
+  await expect(receiptHeading).toBeFocused();
 
   const quest = page
     .locator("li")
