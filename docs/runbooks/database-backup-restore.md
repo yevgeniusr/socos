@@ -284,6 +284,7 @@ locked account, empty supplemental groups, and one-command sudo boundary:
 sudo passwd -S socos-release-gate
 sudo id socos-release-gate
 sudo stat -c '%U:%G %a %n' \
+  /var/lib/socos-release-gate/.ssh \
   /var/lib/socos-release-gate/.ssh/authorized_keys \
   /etc/sudoers.d/socos-release-gate /etc/socos-release-gate.env \
   /usr/local/sbin/socos-release-gate-dispatch \
@@ -291,6 +292,24 @@ sudo stat -c '%U:%G %a %n' \
 sudo awk 'END { print NR }' /var/lib/socos-release-gate/.ssh/authorized_keys
 sudo visudo -cf /etc/sudoers.d/socos-release-gate
 sudo -l -U socos-release-gate
+
+if auth_output=$(
+  printf '%s\n' 'invalid-candidate' |
+    timeout 10 ssh -o BatchMode=yes -o RequestTTY=no socos-release-gate 2>&1
+); then
+  auth_status=0
+else
+  auth_status=$?
+fi
+case "$auth_status" in
+  0) printf '%s\n' 'auth_status=unexpected_success' >&2; exit 1 ;;
+  124) printf '%s\n' 'auth_status=timeout' >&2; exit 1 ;;
+esac
+[ "$auth_output" = 'launcher_status=failed' ] || {
+  printf '%s\n' 'auth_status=unexpected_output' >&2
+  exit 1
+}
+printf '%s\n' 'auth_status=launcher_reached'
 
 audit_rejected() {
   label=$1
@@ -315,10 +334,15 @@ printf '%s\n' "$audit_candidate" | audit_rejected forwarding \
     -L 15432:127.0.0.1:5432 socos-release-gate id
 ```
 
-Modes must be `600`, `440`, `600`, `755`, and `755`; the key count must be one;
-sudo must allow only the launcher. Each transport audit must report rejection;
-success or timeout is an audit failure. The dispatcher rejects the remote
-command while it is still unprivileged, before sudo clears the SSH environment.
+The `.ssh` directory and key must be root-owned, grouped to
+`socos-release-gate`, non-writable by that group, and mode `750` and `640`.
+Remaining modes must be `440`, `600`, `755`, and `755`; the key count must be
+one; sudo must allow only the launcher. The no-command probe must reach the
+launcher and return exactly its fixed failure marker; `Permission denied`,
+timeout, success, or any other output fails the audit. Only after that proof may
+each nonzero transport result count as rejection. The dispatcher rejects the
+remote command while it is still unprivileged, before sudo clears the SSH
+environment.
 Audit role flags, memberships, and database ACLs without selecting passwords or
 application rows:
 

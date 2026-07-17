@@ -52,6 +52,9 @@ case "$name" in
     ;;
   usermod|passwd|visudo)
     ;;
+  id)
+    [[ " $* " == *' -gn socos-release-gate '* ]] && printf '%s\n' 'socos-release-gate'
+    ;;
   openssl)
     count_file="$SHIM_STATE/random-count"
     count=0
@@ -99,7 +102,7 @@ case "$name" in
     ;;
 esac
 `);
-  for (const name of ['getent', 'useradd', 'usermod', 'passwd', 'visudo', 'openssl', 'git', 'docker', 'flock', 'chown', 'timeout', 'sudo']) {
+  for (const name of ['getent', 'useradd', 'usermod', 'passwd', 'visudo', 'id', 'openssl', 'git', 'docker', 'flock', 'chown', 'timeout', 'sudo']) {
     execFileSync('ln', ['-s', shim, join(bin, name)]);
   }
 
@@ -156,7 +159,8 @@ test('provisioner renders the locked account, exact resources, database boundary
     keyLines[0],
     `restrict,command="/usr/local/sbin/socos-release-gate-dispatch" ${f.authorizedKey}`,
   );
-  assert.equal(statSync(keyFile).mode & 0o777, 0o600);
+  assert.equal(statSync(join(f.root, 'var/lib/socos-release-gate/.ssh')).mode & 0o777, 0o750);
+  assert.equal(statSync(keyFile).mode & 0o777, 0o640);
 
   const sudoers = readFileSync(join(f.root, 'etc/sudoers.d/socos-release-gate'), 'utf8');
   assert.match(sudoers, /^Defaults:socos-release-gate env_reset,!setenv,/m);
@@ -205,6 +209,10 @@ test('provisioner renders the locked account, exact resources, database boundary
   );
   assert.doesNotMatch(runtimeDockerfile, /corepack enable(?:\s*\\)?\s*&&/);
   assert.match(calls, /^chown <root:root> .*socos-release-gate-dispatch> <.*socos-release-gate-launcher>$/m);
+  assert.match(
+    calls,
+    /^chown <root:socos-release-gate> <.*\/\.ssh> <.*\/\.ssh\/authorized_keys>$/m,
+  );
   assert.match(calls, /flock <-x>/);
   assert.doesNotMatch(calls, new RegExp(`${token}|synthetic-production-password`));
 });
@@ -226,6 +234,12 @@ test('package wiring and runbook cover secure provisioning, audits, rotation, st
     /audit_rejected sftp sftp/,
     /audit_rejected\(\)/,
     /124\) printf '%s\\n' 'audit_status=timeout'/,
+    /printf '%s\\n' 'invalid-candidate' \|\s*timeout 10 ssh[\s\S]*socos-release-gate 2>&1/,
+    /\[ "\$auth_output" = 'launcher_status=failed' \]/,
+    /auth_status=timeout/,
+    /Permission denied/,
+    /\/var\/lib\/socos-release-gate\/\.ssh \\/,
+    /mode `750` and `640`/,
     /printf '%s\\n' "\$audit_candidate" \| audit_rejected remote-command/,
     /git fetch --no-tags --prune origin \+refs\/heads\/main:refs\/remotes\/origin\/main >\/dev\/null 2>&1/,
     /git checkout --detach refs\/remotes\/origin\/main >\/dev\/null 2>&1/,
@@ -237,6 +251,7 @@ test('package wiring and runbook cover secure provisioning, audits, rotation, st
     /rmdir \/var\/lock\/socos-release-gate\/gate\.lock/,
     /084b7addb0ccc765aa343c5412ed8f5fe5f6da0b.*ancestor/s,
   ]) assert.match(runbook, expected);
+  assert.ok(runbook.indexOf("'launcher_status=failed'") < runbook.indexOf('audit_rejected()'));
   assert.doesNotMatch(runbook, /exact trusted `origin\/main` is currently\s*`[0-9a-f]{40}`/);
   assert.doesNotMatch(runbook, /&& exit 1 \|\| true/);
 });

@@ -86,12 +86,14 @@ else
 fi
 quiet usermod --home /var/lib/socos-release-gate --shell /bin/sh --groups '' "$ACCOUNT"
 quiet passwd --lock "$ACCOUNT"
+account_group=$(id -gn "$ACCOUNT" 2>/dev/null) || fail
+[[ "$account_group" =~ ^[a-z_][a-z0-9_-]*\$?$ ]] || fail
 
 quiet install -d -m 0755 "$home"
-quiet install -d -m 0700 "$ssh_dir"
+quiet install -d -m 0750 "$ssh_dir"
 key_tmp=$(mktemp "$ssh_dir/authorized-keys.XXXXXX")
 printf 'restrict,command="/usr/local/sbin/socos-release-gate-dispatch" %s\n' "$authorized_key" > "$key_tmp"
-quiet chmod 0600 "$key_tmp"
+quiet chmod 0640 "$key_tmp"
 quiet mv -f -- "$key_tmp" "$authorized_keys"
 
 quiet install -d -m 0755 "$etc_dir" "$sudoers_dir" "$(dirname "$launcher_path")"
@@ -370,7 +372,10 @@ quiet chmod 0755 "$launcher_tmp"
 quiet mv -f -- "$launcher_tmp" "$launcher_path"
 
 quiet chown -R root:root "$(root_path '/opt/socos-release-gate')" "$home" "$work_root" "$lock_root"
-quiet chown root:root "$authorized_keys" "$sudoers_dir/socos-release-gate" "$env_path" "$dispatcher_path" "$launcher_path"
+quiet chown root:"$account_group" "$ssh_dir" "$authorized_keys"
+quiet chmod 0750 "$ssh_dir"
+quiet chmod 0640 "$authorized_keys"
+quiet chown root:root "$sudoers_dir/socos-release-gate" "$env_path" "$dispatcher_path" "$launcher_path"
 
 finished=1
 printf '%s\n' 'provision_status=ready'
