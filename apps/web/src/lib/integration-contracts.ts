@@ -45,31 +45,6 @@ export interface LocationDeviceResponse {
 
 export type LocationDevicesResponse = LocationDeviceResponse[];
 
-export interface LocationDevicePublicResponse {
-  id: string;
-  status: string;
-  rawRetentionDays: number;
-  derivedRetentionDays: number;
-  lastSeenAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface LocationDeviceCredentialsResponse {
-  username: string;
-  password: string;
-}
-
-export interface CreateLocationDeviceResponse {
-  device: LocationDeviceResponse;
-  credentials: LocationDeviceCredentialsResponse;
-}
-
-export interface RotateLocationDeviceResponse {
-  device: LocationDevicePublicResponse;
-  credentials: LocationDeviceCredentialsResponse;
-}
-
 export interface LocationContextResponse {
   source: "sample" | "visit" | "calendar" | "fallback";
   city: string | null;

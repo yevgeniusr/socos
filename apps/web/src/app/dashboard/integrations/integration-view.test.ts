@@ -17,6 +17,31 @@ describe("integrationFailure", () => {
     ).toEqual({ status: "disabled" });
   });
 
+  it("keeps a 503 with another error code in the error state", () => {
+    expect(
+      integrationFailure(
+        new ApiError("Service unavailable", 503, "service_unavailable"),
+        "fallback"
+      )
+    ).toEqual({ status: "error", message: "Service unavailable" });
+  });
+
+  it("keeps integration_not_configured at another status in the error state", () => {
+    expect(
+      integrationFailure(
+        new ApiError(
+          "Integration is not configured",
+          400,
+          "integration_not_configured"
+        ),
+        "fallback"
+      )
+    ).toEqual({
+      status: "error",
+      message: "Integration is not configured",
+    });
+  });
+
   it("retains a safe message for a generic failure", () => {
     expect(integrationFailure(new Error("Request failed"), "fallback")).toEqual(
       { status: "error", message: "Request failed" }
