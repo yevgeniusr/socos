@@ -337,7 +337,7 @@ async function deploy(api, input, attempts, pollMs) {
   fail('deployment_timeout');
 }
 
-async function smoke(baseUrl, flags) {
+async function smokeOnce(baseUrl, flags) {
   const checks = [
     ['health_status', '/api/health-check', 'GET', 200],
     ['calendar_guard_status', '/api/integrations/google-calendar', 'GET', 401],
@@ -356,11 +356,12 @@ async function smoke(baseUrl, flags) {
     try {
       response = await fetch(`${baseUrl}${path}`, { method, redirect: 'error' });
     } catch {
-      fail('smoke_failed');
+      return undefined;
     }
     statuses[name] = response.status;
     if (response.status !== expected) {
       await response.body?.cancel();
+      if ([502, 503, 504].includes(response.status)) return undefined;
       fail('smoke_failed');
     }
     if (expectedCode) {
@@ -376,6 +377,15 @@ async function smoke(baseUrl, flags) {
     }
   }
   return statuses;
+}
+
+async function smoke(baseUrl, flags, attempts, pollMs) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const statuses = await smokeOnce(baseUrl, flags);
+    if (statuses) return statuses;
+    if (attempt + 1 < attempts) await sleep(pollMs);
+  }
+  fail('smoke_failed');
 }
 
 function flags(values) {
@@ -404,6 +414,8 @@ try {
   const baseUrl = validateBaseUrl(process.env.COOLIFY_BASE_URL ?? 'https://qed.quest');
   const attempts = fixedInteger('COOLIFY_ACTIVATION_POLL_ATTEMPTS', 120, 1);
   const pollMs = fixedInteger('COOLIFY_ACTIVATION_POLL_MS', 5_000, 0);
+  const smokeAttempts = fixedInteger('COOLIFY_ACTIVATION_SMOKE_ATTEMPTS', 12, 1);
+  const smokePollMs = fixedInteger('COOLIFY_ACTIVATION_SMOKE_POLL_MS', 5_000, 0);
   const startedAt = Date.now();
   api = createApi(baseUrl, token);
 
@@ -433,7 +445,12 @@ try {
   verifyValues(parseEnvironment(await api(envPath)), targets);
   const deployment = await deploy(api, input, attempts, pollMs);
   const finalValues = { ...snapshot, ...targets };
-  const smokeStatuses = await smoke(input.publicBaseUrl, flags(finalValues));
+  const smokeStatuses = await smoke(
+    input.publicBaseUrl,
+    flags(finalValues),
+    smokeAttempts,
+    smokePollMs,
+  );
 
   writeReceipt(process.stdout, {
     activation_status: 'succeeded',
@@ -463,7 +480,12 @@ try {
         fixedInteger('COOLIFY_ACTIVATION_POLL_ATTEMPTS', 120, 1),
         fixedInteger('COOLIFY_ACTIVATION_POLL_MS', 5_000, 0),
       );
-      await smoke(input.publicBaseUrl, flags(snapshot));
+      await smoke(
+        input.publicBaseUrl,
+        flags(snapshot),
+        fixedInteger('COOLIFY_ACTIVATION_SMOKE_ATTEMPTS', 12, 1),
+        fixedInteger('COOLIFY_ACTIVATION_SMOKE_POLL_MS', 5_000, 0),
+      );
     } catch {
       rollbackStatus = 'failed';
     }

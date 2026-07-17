@@ -125,6 +125,9 @@ async function startFake(options = {}) {
     backupExecutions: [{ uuid: 'backup-old', status: 'success', size: 100, created_at: '2020-01-01T00:00:00.000Z' }],
     deployments: [],
     envBulkCalls: 0,
+    healthChecks: 0,
+    healthChecksByDeployment: {},
+    webhookChecksByDeployment: {},
     ...options.state,
   };
 
@@ -203,7 +206,25 @@ async function startFake(options = {}) {
     } else if (/^\/api\/v1\/deployments\/deployment-\d+$/.test(path) && request.method === 'GET') {
       json(200, { status: 'finished', commit: expectedCommit });
     } else if (path === '/api/health-check' && request.method === 'GET') {
-      json(200, { status: 'ok' });
+      state.healthChecks += 1;
+      const deploymentNumber = state.deployments.length;
+      state.healthChecksByDeployment[deploymentNumber] = (
+        state.healthChecksByDeployment[deploymentNumber] ?? 0
+      ) + 1;
+      const deploymentChecks = state.healthChecksByDeployment[deploymentNumber];
+      const activationStatus = options.smokePersistent
+        ? 503
+        : options.smokeNonRetryable
+          ? 500
+          : options.smokeTransient && deploymentChecks === 1
+            ? 503
+            : 200;
+      const status = deploymentNumber === 1
+        ? activationStatus
+        : options.rollbackSmokeTransient && deploymentChecks === 1
+          ? 503
+          : 200;
+      json(status, { status: 'ok' });
     } else if (path === '/api/integrations/google-calendar' && request.method === 'GET') {
       json(401, { code: 'unauthorized' });
     } else if (path === '/api/location/owntracks' && request.method === 'POST') {
@@ -211,6 +232,10 @@ async function startFake(options = {}) {
       const status = options.smokeFailure && state.deployments.length === 1 && enabled ? 500 : enabled ? 401 : 503;
       json(status, {});
     } else if (path === '/api/integrations/google-calendar/webhook' && request.method === 'POST') {
+      const deploymentNumber = state.deployments.length;
+      state.webhookChecksByDeployment[deploymentNumber] = (
+        state.webhookChecksByDeployment[deploymentNumber] ?? 0
+      ) + 1;
       const enabled = effectiveValue(state.envs.find((record) => record.key === 'CALENDAR_SYNC_ENABLED' && !record.is_preview)) === 'true';
       json(
         enabled ? 404 : 503,
@@ -242,6 +267,8 @@ function runCli(document, baseUrl, env = {}) {
         COOLIFY_BASE_URL: baseUrl,
         COOLIFY_ACTIVATION_POLL_ATTEMPTS: '2',
         COOLIFY_ACTIVATION_POLL_MS: '0',
+        COOLIFY_ACTIVATION_SMOKE_ATTEMPTS: '2',
+        COOLIFY_ACTIVATION_SMOKE_POLL_MS: '0',
         NODE_TLS_REJECT_UNAUTHORIZED: '0',
         ...env,
       },
@@ -591,6 +618,59 @@ test('rejects a generic enabled Calendar webhook 404 and restores the snapshot',
     assert.match(result.stderr, /"rollback_status":"succeeded"/);
     assert.equal(state.envBulkCalls, 2);
     assert.equal(state.deployments.length, 2);
+    assert.equal(state.webhookChecksByDeployment[1], 1);
+  });
+});
+
+test('retries a transient post-deploy readiness response before succeeding', async () => {
+  await withFake({ smokeTransient: true }, async ({ baseUrl, state }) => {
+    const result = await runCli(input(baseUrl), baseUrl);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(state.healthChecks, 2);
+    assert.equal(state.envBulkCalls, 1);
+    assert.equal(state.deployments.length, 1);
+  });
+});
+
+test('does not retry a non-readiness 500 smoke response', async () => {
+  await withFake({ smokeNonRetryable: true }, async ({ baseUrl, state }) => {
+    const result = await runCli(input(baseUrl), baseUrl);
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /"error_code":"smoke_failed"/);
+    assert.match(result.stderr, /"rollback_status":"succeeded"/);
+    assert.equal(state.healthChecksByDeployment[1], 1);
+  });
+});
+
+test('stops persistent readiness retries at the configured bound', async () => {
+  await withFake({ smokePersistent: true }, async ({ baseUrl, state }) => {
+    const result = await runCli(input(baseUrl), baseUrl);
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /"error_code":"smoke_failed"/);
+    assert.match(result.stderr, /"rollback_status":"succeeded"/);
+    assert.equal(state.healthChecksByDeployment[1], 2);
+  });
+});
+
+test('retries transient readiness while verifying a rollback', async () => {
+  const prior = valueMap({
+    GOOGLE_CALENDAR_CLIENT_ID: 'existing-client-id',
+    GOOGLE_CALENDAR_CLIENT_SECRET: calendarSecret,
+    CALENDAR_SYNC_ENABLED: 'true',
+  });
+  await withFake({
+    values: prior,
+    smokeFailure: true,
+    rollbackSmokeTransient: true,
+  }, async ({ baseUrl, state }) => {
+    const result = await runCli(input(baseUrl, 'location-enable', {}), baseUrl);
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /"rollback_status":"succeeded"/);
+    assert.equal(state.healthChecksByDeployment[2], 2);
   });
 });
 
