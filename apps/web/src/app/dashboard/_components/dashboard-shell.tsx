@@ -222,6 +222,7 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
   const navItems = [
     { label: "Today", icon: "today", href: "/dashboard/today" },
     { label: "Contacts", icon: "contacts", href: "/dashboard/contacts" },
+    { label: "Discover", icon: "explore", href: "/dashboard/discover" },
     {
       label: "Approvals",
       icon: "approval",
@@ -343,9 +344,9 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
           </div>
           <nav
             aria-label="Mobile dashboard"
-            className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-4 border-t border-outline-variant/30 bg-surface/98 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
+            className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-outline-variant/30 bg-surface/98 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
           >
-            {navItems.slice(0, 4).map((item) => {
+            {navItems.slice(0, 5).map((item) => {
               const active = item.href ? pathname.startsWith(item.href) : false;
               return (
                 <Link
