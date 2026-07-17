@@ -73,6 +73,7 @@ case "$name" in
     if [[ " $* " == *' image inspect '* ]]; then
       [[ -f "$SHIM_STATE/runtime-image" ]]
     elif [[ " $* " == *' build '* ]]; then
+      cp "\${!#}/Dockerfile" "$SHIM_STATE/runtime.Dockerfile"
       : > "$SHIM_STATE/runtime-image"
     elif [[ " $* " == *' run '* && " $* " == *' pnpm install --frozen-lockfile '* && "\${SHIM_FAIL_INSTALL:-0}" == '1' ]]; then
       exit 1
@@ -197,6 +198,12 @@ test('provisioner renders the locked account, exact resources, database boundary
   assert.match(calls, /docker .*<build> .*<socos-release-gate-runtime:node22-pnpm10\.10\.0-pg16-v2>/);
   assert.match(calls, /docker .*<run> .*pg_dump psql pg_restore createdb dropdb.*16\./s);
   assert.match(calls, /docker .*<psql> .*<--username=postgres>/);
+  const runtimeDockerfile = readFileSync(join(f.state, 'runtime.Dockerfile'), 'utf8');
+  assert.match(
+    runtimeDockerfile,
+    /rm -f \/usr\/local\/bin\/yarn \/usr\/local\/bin\/yarnpkg[\s\\]+&& corepack enable pnpm/,
+  );
+  assert.doesNotMatch(runtimeDockerfile, /corepack enable(?:\s*\\)?\s*&&/);
   assert.match(calls, /^chown <root:root> .*socos-release-gate-dispatch> <.*socos-release-gate-launcher>$/m);
   assert.match(calls, /flock <-x>/);
   assert.doesNotMatch(calls, new RegExp(`${token}|synthetic-production-password`));

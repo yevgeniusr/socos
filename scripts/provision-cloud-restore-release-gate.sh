@@ -134,7 +134,8 @@ COPY --from=node-runtime /usr/local/ /usr/local/
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends bash ca-certificates git util-linux \
  && rm -rf /var/lib/apt/lists/* \
- && corepack enable \
+ && rm -f /usr/local/bin/yarn /usr/local/bin/yarnpkg \
+ && corepack enable pnpm \
  && corepack prepare pnpm@10.10.0 --activate
 WORKDIR /gate/repository
 ENTRYPOINT []
