@@ -48,7 +48,21 @@ backup_executions() {
 }
 
 backup_executions | jq -r '.[].uuid' | sort > "$before"
-coolify database backup trigger "$database_uuid" "$backup_uuid" --format json >/dev/null
+COOLIFY_TRIGGER_URL="$COOLIFY_BASE_URL/api/v1/databases/$database_uuid/backups/$backup_uuid" \
+  node <<'NODE'
+const response = await fetch(process.env.COOLIFY_TRIGGER_URL, {
+  method: 'PATCH',
+  headers: {
+    authorization: `Bearer ${process.env.COOLIFY_TOKEN}`,
+    accept: 'application/json',
+    'content-type': 'application/json',
+  },
+  body: '{"backup_now":true}',
+  redirect: 'error',
+});
+await response.body?.cancel();
+if (!response.ok) process.exit(1);
+NODE
 
 for _ in $(seq 1 120); do
   executions=$(backup_executions)
@@ -607,8 +621,8 @@ sudo rmdir /var/lock/socos-release-gate/gate.lock
 ```
 
 If `rmdir` reports nonempty state, stop; never use recursive removal. Repository
-tests use command shims and do not constitute live recovery evidence. Do not
-deploy migration 12 until the live fixed receipt succeeds.
+tests use command shims and do not constitute live recovery evidence. Every new
+schema candidate still requires a fresh exact-SHA live receipt before deploy.
 
 ## Deleted Encrypted Data Recovery Window
 
@@ -624,6 +638,19 @@ local and off-host generations that may contain ciphertext for that key have
 expired and a restore drill no longer requires it.
 
 ## Current Operational Gate
+
+On 2026-07-17, the provisioned forced-command runner returned a wrapper-accepted
+exit-0 receipt for exact SHA
+`5f333b532c57f524d3154be744579b320794d5fb`. Fresh Coolify execution
+`byqffbkdlontwey3i7etidx9` completed at 173450 bytes; the independent dump
+covered 47 pre-migration public tables. The runner restored the dump into a
+random disposable database owned by the isolated restore role, applied all 12
+candidate migrations, validated Prisma, reported zero schema statements,
+preserved aggregate counts, and verified database/worktree/workspace/lock
+cleanup. Coolify deployment `daja6f9lj41ddg9ch93xxp94` then finished at the
+same SHA. Production reported 12 completed migrations, 48 public tables, 106
+non-demo contacts, 7 demo contacts, and 2/2 healthy application containers.
+This proof is valid only for that exact SHA.
 
 On 2026-07-16, the corrected `socos` backup execution was restored entirely on
 the Coolify server. All 16 preexisting public tables and their aggregate row

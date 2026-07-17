@@ -23,19 +23,18 @@ The final Google account grant is a second unavoidable user-confirmed action.
 Pixel location, event discovery, and event briefs remain disabled so activation
 still follows dependency order.
 
-P1 source changes and the agent-safety hardening slice are implemented and
-independently reviewed but are not deployed. The candidate now includes a
+P1 source changes and the agent-safety hardening slice are implemented,
+independently reviewed, restore-gated, and deployed. The release includes a
 durable interaction receipt, truthful compact integration status/mobile cues,
 the cloud-only disposable restore release gate, removal of direct human-JWT CRM
 hard-delete routes, scope-aware MCP discovery/metadata, and first-class
 read-only Codex and Claude plugin packages. The receipt adds migration 12, so
-the candidate must not be deployed until the forced-command runner is
-provisioned and produces a live restore receipt for action-time exact trusted
-`origin/main`. The reviewed application-code SHA
-`084b7addb0ccc765aa343c5412ed8f5fe5f6da0b` is an ancestor, not an independently
-valid exact gate or deploy candidate. Production remains on
-`1b25328de683e5b7923d4219d0401a1f93f168b2`. Repository tests are evidence for
-the implementation, not a substitute for that live proof.
+the dedicated forced-command runner was provisioned with isolated rotating
+read/admin/restore roles and audited before deployment. The exact wrapper-level
+restore gate passed for `5f333b532c57f524d3154be744579b320794d5fb`, and
+Coolify deployment `daja6f9lj41ddg9ch93xxp94` finished at that same SHA.
+Production is healthy with 12 applied migrations, 48 public tables, 106
+non-demo contacts, 7 isolated demos, and the migration-12 receipt table.
 
 The tracked Hermes `socos-social-loop` skill is installed and attached to the
 active 09:00 Asia/Dubai Discord cron. The gateway is supervised. Today's
@@ -48,12 +47,12 @@ Snapshot taken in `/Users/mac/Desktop/projects/personal/socos`.
 
 | Area | State |
 | --- | --- |
-| Reviewed application SHA | `1b25328de683e5b7923d4219d0401a1f93f168b2` |
-| Exact source candidate SHA | Resolve action-time with `git rev-parse origin/main` |
+| Reviewed application SHA | `5f333b532c57f524d3154be744579b320794d5fb` |
+| Latest reviewed source commit before this handoff | `2d087816b7a85485408634cabbf5227331421a7c`; activation tooling only, no application deployment required |
 | Reviewed application-code ancestor | `084b7addb0ccc765aa343c5412ed8f5fe5f6da0b` |
 | Pre-activation-tooling baseline SHA | `69e6ac0444a50ae92d811155493fcff559774a86` |
-| Production application SHA | `1b25328de683e5b7923d4219d0401a1f93f168b2` |
-| Current source branch | `main`; application candidate is the SHA above; later documentation-only commits may follow |
+| Production application SHA | `5f333b532c57f524d3154be744579b320794d5fb` |
+| Current source branch | `main`; this handoff may be a later documentation-only commit; resolve any future candidate action-time |
 | Production status | `running:healthy` |
 | Production URL | `https://socos.rachkovan.com` |
 | Real contacts | 106 non-demo, cloud-only |
@@ -66,9 +65,9 @@ Snapshot taken in `/Users/mac/Desktop/projects/personal/socos`.
 | Event briefs | disabled |
 | Hermes | installed, gateway supervised, cron active |
 | Live Discord reply proof | pending |
-| P1 source hardening | implemented, independently reviewed, not deployed |
-| Agent/plugin safety | implemented, independently reviewed, not deployed |
-| Cloud restore gate | 20/20 mocked/isolated tests; live runner not provisioned |
+| P1 source hardening | implemented, independently reviewed, restore-gated, deployed |
+| Agent/plugin safety | implemented, independently reviewed, deployed |
+| Cloud restore gate | dedicated runner provisioned and audited; exact live wrapper receipt passed |
 
 This handoff itself may be a later documentation-only commit than the reviewed
 production SHA. Re-run `git status`, `git log -1`, and `git ls-remote`
@@ -77,8 +76,8 @@ before changing or deploying anything.
 Recommended restart order:
 
 1. Verify the worktree and exact local, remote, and production SHAs.
-2. Provision and prove the live cloud restore gate before deploying migration
-   12 or adding another migration.
+2. Treat the live restore gate as required for every later schema deployment;
+   do not reuse the prior receipt for a different SHA.
 3. Resume Google, Pixel, events, briefs, and the controlled Discord proof only
    at their documented user-action gates.
 4. Build relationship memory and weekly social planning as separate bounded
@@ -143,9 +142,13 @@ The resulting product direction is:
   the Coolify token and Calendar credentials from exact macOS Keychain
   account/service pairs and sends secrets only through child stdin/environment.
 - The client pins `main` to the exact commit, disables automatic deploys,
-  requires one fresh successful positive-size backup, verifies equal
-  production/preview records, enforces dependency order, performs one paired
-  bulk update, deploys, and checks fixed health/auth/status smokes.
+  triggers the current Coolify backup configuration with exact PATCH JSON,
+  requires one fresh successful canonical positive-size execution, verifies
+  equal production/preview records, enforces dependency order, performs one
+  paired bulk update, deploys, and checks fixed health/auth/status smokes.
+- Literal environment parsing conservatively unwraps only an exact
+  single-quoted wrapper around the same literal `value`; secret `real_value`
+  strings remain authoritative when the public value is masked.
 - Any failure after a mutation attempt restores every managed value from the
   in-memory snapshot, verifies the restore, redeploys the same commit, and
   smoke-checks the prior feature state. Receipts are fixed and redacted.
@@ -155,10 +158,10 @@ The resulting product direction is:
   `coolify-cli-qed-token`, verified it, and removed its field from the local
   Coolify config. The `qed` instance entry now retains only non-secret metadata;
   the config is mode `0600`.
-- Independent review approved the boundary after two test-first correction
-  rounds. Focused activation/ops/wrapper tests pass 31/31; syntax, executable
-  mode, and diff checks pass. No production feature value was changed by this
-  tooling work.
+- Independent review approved the boundary after test-first correction and the
+  current-Coolify compatibility pass. Focused activation/ops/wrapper tests pass
+  37/37; syntax, executable mode, diff checks, and the security scan pass. No
+  production feature value was changed by this tooling work.
 
 ### Personal CRM
 
@@ -176,7 +179,7 @@ The resulting product direction is:
 - Graph introductions fail closed with `INSUFFICIENT_GRAPH_DATA` when evidence
   is too sparse.
 
-### Reviewed Source Pending Deployment
+### Interaction Receipt And Release Gate
 
 - Added one owner-scoped `InteractionReceipt` per interaction in migration 12.
   The receipt is written atomically with the interaction, chronology update,
@@ -203,9 +206,9 @@ The resulting product direction is:
   verification. Child/SSH/HTTP/cleanup work is deadline-bounded with process
   group termination, repeated-signal handling, and continued cleanup after a
   hung phase. Receipts and failures are fixed and redacted.
-- Independent CRM review and restore-gate review both returned `APPROVE` after
-  their findings were corrected. None of this source work accessed production,
-  real personal rows, or secrets.
+- Independent CRM and restore-gate reviews returned `APPROVE` after all
+  Important findings were corrected. The exact live gate and deployment are
+  recorded below; validation used only fixed receipts and aggregate evidence.
 
 ### Agent And MCP Surface
 
@@ -299,13 +302,13 @@ Infrastructure/security: 166 passed, 1 expected skip
 Security scanner: 579 tracked files
 PostgreSQL migration safety: 10/10
 Database operations: 36/36
-Cloud restore release gate: 20/20
+Restore/provision/database focused suite: 91/91
 Calendar/location PostgreSQL integration: passed
 Human-idempotency PostgreSQL integration: passed
 Agent-interface PostgreSQL integration: 6/6
 Independent Integrations review: APPROVE
 Independent Hermes review: APPROVE
-Activation/ops/wrapper tests: 31/31
+Activation/ops/wrapper tests: 37/37
 Independent activation-tooling review: APPROVE
 Independent interaction/integration review: APPROVE
 Independent cloud restore-gate review: APPROVE
@@ -316,7 +319,7 @@ Claude plugin validator: passed
 Plugin skill quick validation: 2/2
 API typecheck: passed
 API lint: 0 errors; pre-existing warnings only
-Agent/plugin security scanner: 592 tracked files
+Agent/plugin security scanner: 594 tracked files
 Independent safety/plugin review: APPROVE
 ```
 
@@ -376,7 +379,15 @@ release gate: PASS
 Application UUID: swwcg80gkw4k0k4oco8w8wgw
 Database UUID: zwkk0scogckskkwss8oo48k4
 Backup configuration UUID: b85nxfljaz0xpo9xqa57lfr4
-Reviewed/deployed SHA: 1b25328de683e5b7923d4219d0401a1f93f168b2
+Reviewed/deployed SHA: 5f333b532c57f524d3154be744579b320794d5fb
+Current deployment: daja6f9lj41ddg9ch93xxp94
+Live restore-gate backup: byqffbkdlontwey3i7etidx9
+Live restore-gate backup size: 173450 bytes
+Live restore-gate dump SHA-256: 10f918c62f19a054fc627b1219943d567592b95d9947b7929e843f1833b0d68a
+Live restore-gate aggregate tables before migration 12: 47
+Live restore-gate result: passed; schema statements 0; counts preserved; cleanup verified
+Post-deploy migrations: 12
+Post-deploy public tables: 48
 Disabled-first deployment: jstocddvahtq2ptk159krd6e
 Calendar activation deployment: y113fr76fqqod7wq8uatmgzx
 Calendar activation backup: mnqo384k8e83wtmxl0a7x7lq
@@ -396,7 +407,7 @@ EVENT_DISCOVERY_ENABLED=false
 EVENT_BRIEF_ENABLED=false
 ```
 
-Disabled-first production smoke passed:
+Current production smoke passed:
 
 ```text
 GET  /                                      200
@@ -406,13 +417,15 @@ GET  authenticated CRM/integration routes  401
 POST /api/mcp                               401
 POST /api/location/owntracks                503
 POST destructive admin routes              404
+Contact aggregates                         106 non-demo / 7 demo
+Application containers                     2 running / 2 healthy
 ```
 
-After Calendar activation, health remained `200`, the authenticated Calendar
-route remained `401`, and disabled OwnTracks remained `503`.
-
-A successful backup is not restore proof. No restore was performed for this
-schema-neutral release.
+The dedicated runner restored an independent dump into a disposable database,
+applied the exact candidate migrations, validated Prisma, proved zero drift and
+preserved aggregates, dropped the disposable database, removed all worktrees,
+and returned a wrapper-accepted exit-0 receipt. This is live restore proof only
+for the exact SHA above; later schema candidates require a new receipt.
 
 ## In Progress
 
@@ -453,8 +466,6 @@ schema-neutral release.
 - This document is the current transfer artifact.
 - It should be updated again after Calendar, Pixel, events, briefs, and the live
   Discord reply are proven.
-- It should also be updated after the first live cloud restore receipt and the
-  migration-12 deployment are proven.
 
 ## Known Gaps And Audit Findings
 
@@ -540,19 +551,18 @@ stage-local smoke, and restore the prior flag plus redeploy on failure.
    evidence CRM mutation occurred exactly once. Replay the exact immutable plan
    or tool input and verify no second mutation. Do not test outbound execution.
 
-### P1: Operational Hardening
+### Release Baseline: Completed
 
-- Provision the restricted `socos-release-gate` forced-SSH account, root-owned
-  environment launcher, trusted-mirror updater, private work/lock directories,
-  exact PostgreSQL system identifier, dedicated rotating read/admin/restore roles/ACLs,
-  private networking, and secret rotation described in the restore runbook.
-- Run the first live cloud-only restore gate for the exact reviewed candidate.
-  Mocked tests and a successful backup are not restore proof.
-- Only after that live receipt, deploy migration 12 and the reviewed P1 source,
-  then smoke the durable receipt, compact Calendar summary, mobile cues, and
-  health/auth boundaries using aggregate or synthetic evidence only.
+- The restricted `socos-release-gate` account, forced launcher, trusted mirror,
+  rotating isolated PostgreSQL roles, private work/lock paths, and exact cleanup
+  proofs are live. Preserve this boundary and rerun provisioning after any
+  interrupted credential rotation.
+- Migration 12 and the reviewed P1 source are deployed at exact gated SHA
+  `5f333b532c57f524d3154be744579b320794d5fb`.
+- Every later schema candidate still requires its own exact-SHA live receipt,
+  exact deployment, and aggregate smoke; the current receipt is not reusable.
 
-### P2: Relationship Memory And Social Planning
+### P1: Relationship Memory And Social Planning
 
 - First add an append-only owner-scoped relationship-memory ledger with
   confidence, provenance, canonical deduplication, review state, idempotent
@@ -573,7 +583,7 @@ stage-local smoke, and restore the prior flag plus redeploy on failure.
 - Add provider executors only behind exact payload review, durable outbox,
   replay protection, audit, and explicit approval.
 
-### P3: Gamification And Generalization
+### P2: Gamification And Generalization
 
 - Tune anti-grind rules, accountability, meaningful rewards, campaigns, and
   variable reinforcement from actual personal usage.
@@ -627,32 +637,29 @@ SHA, feature flags, Hermes gateway/cron state, and the final Betabot verifier.
 Trust current evidence over any stale snapshot. Do not reset, clean, stash,
 rewrite history, switch branches, or discard existing/user changes.
 
-The exact live gate and deploy candidate is the action-time trusted
-`git rev-parse origin/main`. The reviewed application-code SHA
-084b7addb0ccc765aa343c5412ed8f5fe5f6da0b is its ancestor, not an independently
-valid exact candidate. That application-code ancestor adds migration 12 InteractionReceipt,
-exact/compact receipt UX, strict Calendar scope summaries/mobile cues, the
-cloud-only disposable restore gate, removal of direct human-JWT
-contact/interaction/reminder hard-delete routes, scope-aware MCP discovery and
-destructive metadata, a default Hermes profile without approvals:execute, and
-tracked read-only Codex/Claude plugin packages using environment-backed tokens.
-These changes are reviewed but not deployed. Before any schema deployment,
-provision the forced-command runner exactly as documented and run
-`scripts/run-cloud-restore-release-gate.mjs` for the exact trusted origin/main
-SHA. Require its fixed success receipt. Never treat repository tests, a Coolify
-backup, or an older drill as live restore proof. Then deploy that exact SHA and
-verify the new receipt/UI/MCP behavior without exposing personal rows.
+Production is deployed and healthy at exact reviewed SHA
+5f333b532c57f524d3154be744579b320794d5fb through Coolify deployment
+daja6f9lj41ddg9ch93xxp94. The dedicated forced-command runner returned an
+exit-0 live restore receipt for that exact SHA: fresh backup
+byqffbkdlontwey3i7etidx9, 47 pre-migration aggregate tables, zero schema drift,
+preserved counts, and verified cleanup. Production has 12 completed migrations,
+48 public tables, 106 non-demo contacts, 7 demos, and 2/2 healthy application
+containers. Root/health are 200; guarded CRM/Calendar/MCP/Notifications routes
+are 401; disabled OwnTracks is 503; the removed admin route is 404.
+
+Do not redeploy merely because this handoff adds a documentation-only commit.
+For the next schema change, resolve the new action-time trusted origin/main,
+reprovision if required, run scripts/run-cloud-restore-release-gate.mjs for that
+exact SHA, require a wrapper-accepted success receipt, and deploy only the same
+SHA. Never reuse the current receipt for a different candidate.
 
 Do not add a merge/delete executor in the next slice. If an approved deletion
 executor is introduced later, make interaction deletion transactional with any
 XP adjustment before enabling it. Never commit a token.
 
-The reviewed application SHA is
-1b25328de683e5b7923d4219d0401a1f93f168b2. It is deployed and healthy at
-https://socos.rachkovan.com. The exact disabled-first deployment is
-jstocddvahtq2ptk159krd6e; the Calendar activation deployment is
-y113fr76fqqod7wq8uatmgzx. Fresh backup mnqo384k8e83wtmxl0a7x7lq succeeded with
-positive size. Do not claim restore proof.
+The prior disabled-first and Calendar deployments remain historical rollback
+context, not the current release. Trust the exact current gate/deployment facts
+above and re-read Coolify before any later mutation.
 
 All 106 real Monica contacts plus 7 isolated demos are cloud-only. Calendar code
 is currently enabled; location, event discovery, and event briefs are false in
@@ -690,9 +697,11 @@ Populate them only with the runbook's non-echoing prompts. Never pass a value
 after `-w`. The wrapper accepts no secret arguments. It pins the exact commit,
 disables auto deploy, proves a fresh positive-size backup, updates the exact
 production/preview pair, enforces dependencies, deploys, smoke-checks, and
-automatically restores the prior in-memory snapshot on failure. Its focused
-tests pass 31/31 and independent review approved it. No real activation was run
-while the Google legal-consent gate remained closed.
+automatically restores the prior in-memory snapshot on failure. It uses the
+current Coolify PATCH backup trigger, handles the observed mixed literal value
+shape conservatively, and its focused tests pass 37/37 with independent review
+approval. No real activation was run while the Google legal-consent gate
+remained closed.
 
 For every stage below, take fresh backup evidence, update both environment
 profiles, deploy the exact reviewed SHA, require health/stage smoke, and restore
