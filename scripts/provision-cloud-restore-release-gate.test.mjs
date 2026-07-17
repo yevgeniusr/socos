@@ -65,6 +65,8 @@ case "$name" in
       printf '%s\\n' 'https://github.com/yevgeniusr/socos.git'
     elif [[ " $* " == *' rev-parse refs/remotes/origin/main '* || " $* " == *' rev-parse HEAD '* ]]; then
       printf '%s\\n' '${trustedSha}'
+    elif [[ " $* " == *' status --porcelain --untracked-files=no '* && "\${SHIM_DIRTY:-0}" == '1' ]]; then
+      printf '%s\\n' ' M package.json'
     fi
     ;;
   docker)
@@ -72,6 +74,8 @@ case "$name" in
       [[ -f "$SHIM_STATE/runtime-image" ]]
     elif [[ " $* " == *' build '* ]]; then
       : > "$SHIM_STATE/runtime-image"
+    elif [[ " $* " == *' run '* && " $* " == *' pnpm install --frozen-lockfile '* && "\${SHIM_FAIL_INSTALL:-0}" == '1' ]]; then
+      exit 1
     elif [[ " $* " == *' ps '* ]]; then
       printf '%s\\n' 'api-swwcg80gkw4k0k4oco8w8wgw-current'
     elif [[ " $* " == *' exec '* && " $* " == *'DATABASE_URL'* ]]; then
@@ -84,9 +88,13 @@ case "$name" in
       printf '%s\\n' '{"gate":"socos-cloud-restore-release","version":1,"status":"passed"}'
     fi
     ;;
+  timeout)
+    shift
+    exec "$@"
+    ;;
 esac
 `);
-  for (const name of ['getent', 'useradd', 'usermod', 'passwd', 'visudo', 'openssl', 'git', 'docker', 'flock', 'chown']) {
+  for (const name of ['getent', 'useradd', 'usermod', 'passwd', 'visudo', 'openssl', 'git', 'docker', 'flock', 'chown', 'timeout']) {
     execFileSync('ln', ['-s', shim, join(bin, name)]);
   }
 
@@ -147,6 +155,7 @@ test('provisioner renders the locked account, exact resources, database boundary
 
   const sudoers = readFileSync(join(f.root, 'etc/sudoers.d/socos-release-gate'), 'utf8');
   assert.match(sudoers, /^Defaults:socos-release-gate env_reset,!setenv,/m);
+  assert.match(sudoers, /^Defaults:socos-release-gate env_keep \+= "SSH_ORIGINAL_COMMAND"$/m);
   assert.match(sudoers, /^socos-release-gate ALL=\(root\) NOPASSWD: \/usr\/local\/sbin\/socos-release-gate-launcher$/m);
   assert.equal(statSync(join(f.root, 'etc/sudoers.d/socos-release-gate')).mode & 0o777, 0o440);
 
@@ -167,13 +176,15 @@ test('provisioner renders the locked account, exact resources, database boundary
   assert.match(sql, /GRANT CONNECT ON DATABASE socos TO postgres, socos_app/);
   assert.match(sql, /REVOKE CONNECT ON DATABASE socos FROM socos_release_gate_admin, socos_release_gate_restore/);
   assert.match(sql, /REVOKE CREATE ON SCHEMA public FROM PUBLIC/);
+  assert.match(sql, /REVOKE TEMPORARY ON DATABASE postgres FROM PUBLIC/);
 
   const calls = readFileSync(f.log, 'utf8');
   assert.match(calls, /usermod .*<--shell> <\/bin\/sh>/);
   assert.match(calls, /usermod .*<--groups> <>/);
   assert.match(calls, /passwd .*<--lock> <socos-release-gate>/);
   assert.match(calls, /git .*<fetch> <--no-tags> <--prune> <origin> <\+refs\/heads\/main:refs\/remotes\/origin\/main>/);
-  assert.match(calls, /docker .*<build> .*<socos-release-gate-runtime:node22-pnpm10\.10\.0-v1>/);
+  assert.match(calls, /docker .*<build> .*<socos-release-gate-runtime:node22-pnpm10\.10\.0-pg16-v2>/);
+  assert.match(calls, /docker .*<run> .*pg_dump psql pg_restore createdb dropdb.*16\./s);
   assert.match(calls, /docker .*<psql> .*<--username=postgres>/);
   assert.match(calls, /chown .*<root:root>/);
   assert.match(calls, /flock <-x>/);
@@ -189,16 +200,21 @@ test('package wiring and runbook cover secure provisioning, audits, rotation, st
     /security find-generic-password -w -a socos -s coolify-cli-qed-token/,
     /jq -cn --arg authorized_key "\$authorized_key" --arg coolify_token "\$coolify_token"/,
     /StrictHostKeyChecking=yes/,
-    /unset authorized_key coolify_token/,
+    /trap clear_provision_secrets EXIT\n/,
+    /git fetch --no-tags --prune origin \+refs\/heads\/main:refs\/remotes\/origin\/main/,
+    /git checkout --detach refs\/remotes\/origin\/main/,
+    /git status --porcelain --untracked-files=no/,
+    /timeout 10 ssh/,
+    /timeout 10 sftp/,
     /sudo -l -U socos-release-gate/,
     /socos_release_gate_admin/,
     /socos_release_gate_restore/,
     /pg_auth_members/,
     /token and role rotation/i,
     /rmdir \/var\/lock\/socos-release-gate\/gate\.lock/,
-    /1b15d1a239fa5fdf992d2ee49deb6e191733ef0d/,
     /084b7addb0ccc765aa343c5412ed8f5fe5f6da0b.*ancestor/s,
   ]) assert.match(runbook, expected);
+  assert.doesNotMatch(runbook, /exact trusted `origin\/main` is currently\s*`[0-9a-f]{40}`/);
 });
 
 test('provisioner is idempotent and its launcher rejects command/input abuse before exact-ref execution', () => {
@@ -231,6 +247,37 @@ test('provisioner is idempotent and its launcher rejects command/input abuse bef
   assert.match(launcherCalls, /git .*<rev-parse> <refs\/remotes\/origin\/main>/);
   assert.match(launcherCalls, /docker .*<run> .*<--network> <coolify>/);
   assert.match(launcherCalls, /docker .*<run> .*<--cap-drop> <ALL> .*<no-new-privileges:true>/);
-  assert.match(launcherCalls, /docker .*<run> .*<pnpm> <install> <--frozen-lockfile>/);
+  const installCall = launcherCalls.split('\n').find((line) => line.includes('<pnpm> <install> <--frozen-lockfile>'));
+  assert.ok(installCall);
+  assert.match(installCall, /dst=\/gate\/runner/);
+  assert.doesNotMatch(installCall, /dst=\/gate\/repository|<--env-file>/);
   assert.match(launcherCalls, /docker .*<run> <-i> .*<scripts\/cloud-restore-release-gate\.mjs>/);
+  assert.match(launcherCalls, /git .*<worktree> <add> <--detach>/);
+  assert.match(launcherCalls, /git .*<worktree> <remove> <--force>/);
+});
+
+test('dirty trusted checkout fails closed and runner worktree cleanup runs after install failure', () => {
+  const f = fixture();
+  assert.equal(run(f.input, f.env).status, 0);
+  assert.notEqual(run(f.input, { ...f.env, SHIM_DIRTY: '1' }).status, 0);
+  const launcher = join(f.root, 'usr/local/sbin/socos-release-gate-launcher');
+
+  const dirty = spawnSync(launcher, {
+    encoding: 'utf8',
+    input: `${trustedSha}\n`,
+    env: { ...f.env, SHIM_DIRTY: '1' },
+  });
+  assert.notEqual(dirty.status, 0);
+
+  const beforeFailure = readFileSync(f.log, 'utf8').length;
+  const installFailure = spawnSync(launcher, {
+    encoding: 'utf8',
+    input: `${trustedSha}\n`,
+    env: { ...f.env, SHIM_FAIL_INSTALL: '1' },
+  });
+  assert.notEqual(installFailure.status, 0);
+  const failureCalls = readFileSync(f.log, 'utf8').slice(beforeFailure);
+  assert.match(failureCalls, /git .*<worktree> <add> <--detach>/);
+  assert.match(failureCalls, /timeout <120> <git> .*<worktree> <remove> <--force>/);
+  assert.doesNotMatch(failureCalls, /scripts\/cloud-restore-release-gate\.mjs/);
 });

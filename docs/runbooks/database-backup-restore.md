@@ -174,11 +174,11 @@ candidate_sha=$(git rev-parse origin/main)
 node scripts/run-cloud-restore-release-gate.mjs "$candidate_sha"
 ```
 
-The exact trusted `origin/main` is currently
-`1b15d1a239fa5fdf992d2ee49deb6e191733ef0d`. The reviewed application-code SHA
-`084b7addb0ccc765aa343c5412ed8f5fe5f6da0b` is its ancestor, not a valid exact
-gate candidate while main is at `1b15d1a`. Gate, deploy, and smoke checks must
-all use the same exact full `origin/main` SHA.
+The only valid live candidate is the action-time exact
+`git rev-parse origin/main`. The reviewed application-code SHA
+`084b7addb0ccc765aa343c5412ed8f5fe5f6da0b` is an ancestor, not an independently
+valid gate candidate. Gate, deploy, and smoke checks must all use the same exact
+full `origin/main` SHA resolved immediately before the operation.
 
 The local wrapper accepts one lowercase 40-character SHA, connects only to the
 `socos-release-gate` SSH config host with `BatchMode=yes`, and sends only that
@@ -247,20 +247,27 @@ Host socos-release-gate
 ```
 
 On the host, `/root/socos` must be a trusted checkout whose `origin` is exactly
-`https://github.com/yevgeniusr/socos.git`, fetched and detached at exact
-`origin/main`. Retrieve both inputs locally without echoing, build the only JSON
-document with `jq`, stream it to the remote root script, then clear both shell
-variables immediately:
+`https://github.com/yevgeniusr/socos.git`. The remote command below rejects
+tracked/index changes, fetches only fixed `origin/main`, detaches at that exact
+ref, verifies `HEAD`, and rechecks tracked/index state before it executes the
+provisioner. Retrieve both inputs locally without echoing, build the only JSON
+document with `jq`, stream it to the remote root script, and use an EXIT trap so
+both shell variables are cleared even if the pipeline fails:
 
 ```bash
+clear_provision_secrets() {
+  unset authorized_key coolify_token
+}
+trap clear_provision_secrets EXIT
 IFS= read -r authorized_key < "$HOME/.ssh/socos-release-gate.pub"
 coolify_token=$(security find-generic-password -w -a socos -s coolify-cli-qed-token)
 jq -cn --arg authorized_key "$authorized_key" --arg coolify_token "$coolify_token" \
   '{authorized_key:$authorized_key,coolify_token:$coolify_token}' \
   | ssh -o BatchMode=yes -o RequestTTY=no -o StrictHostKeyChecking=yes \
       socos-coolify-root \
-      'cd /root/socos && test "$(git remote get-url origin)" = "https://github.com/yevgeniusr/socos.git" && exec bash scripts/provision-cloud-restore-release-gate.sh'
-unset authorized_key coolify_token
+      'set -e; cd /root/socos; test "$(git remote get-url origin)" = "https://github.com/yevgeniusr/socos.git"; test -z "$(git status --porcelain --untracked-files=no)"; git fetch --no-tags --prune origin +refs/heads/main:refs/remotes/origin/main; candidate=$(git rev-parse refs/remotes/origin/main); git checkout --detach refs/remotes/origin/main; test "$(git rev-parse HEAD)" = "$candidate"; test -z "$(git status --porcelain --untracked-files=no)"; exec bash scripts/provision-cloud-restore-release-gate.sh'
+clear_provision_secrets
+trap - EXIT
 ```
 
 Success is exactly `provision_status=ready` followed by the trusted SHA. Stop on
@@ -281,10 +288,11 @@ sudo stat -c '%U:%G %a %n' \
 sudo awk 'END { print NR }' /var/lib/socos-release-gate/.ssh/authorized_keys
 sudo visudo -cf /etc/sudoers.d/socos-release-gate
 sudo -l -U socos-release-gate
-ssh -o BatchMode=yes -o RequestTTY=no socos-release-gate id && exit 1 || true
-sftp -o BatchMode=yes socos-release-gate && exit 1 || true
-ssh -o BatchMode=yes -o RequestTTY=force socos-release-gate && exit 1 || true
-ssh -o BatchMode=yes -o ExitOnForwardFailure=yes -L 15432:127.0.0.1:5432 \
+sudo grep -F 'env_keep += "SSH_ORIGINAL_COMMAND"' /etc/sudoers.d/socos-release-gate
+timeout 10 ssh -o BatchMode=yes -o RequestTTY=no socos-release-gate id && exit 1 || true
+timeout 10 sftp -o BatchMode=yes socos-release-gate && exit 1 || true
+timeout 10 ssh -o BatchMode=yes -o RequestTTY=force socos-release-gate && exit 1 || true
+timeout 10 ssh -o BatchMode=yes -o ExitOnForwardFailure=yes -L 15432:127.0.0.1:5432 \
   socos-release-gate && exit 1 || true
 ```
 
@@ -316,7 +324,19 @@ Both roles must be non-superuser, `NOINHERIT`, non-createrole,
 non-replication, and non-bypass-RLS. Only `socos_release_gate_admin` may have
 `CREATEDB`, and its only membership is `socos_release_gate_restore`. Restore
 must have no memberships. Production connect remains explicit for `postgres`
-and `socos_app` and denied to both gate roles.
+and `socos_app` and denied to both gate roles. `PUBLIC` has neither `TEMPORARY`
+on the maintenance database nor `CREATE` on its public schema, so restore cannot
+write maintenance temp tables.
+
+The immutable runtime tag is
+`socos-release-gate-runtime:node22-pnpm10.10.0-pg16-v2`. Provisioning verifies
+Node 22, pnpm 10.10.0, and PostgreSQL client major 16 for `pg_dump`, `psql`,
+`pg_restore`, `createdb`, and `dropdb`. The launcher installs dependencies only
+in a private exact-candidate runner worktree; that install receives no secret
+environment and does not mount the trusted checkout. It re-verifies the runner
+HEAD and tracked/index state after install and removes the worktree through a
+bounded EXIT cleanup. Only the later gate container mounts the trusted checkout
+for the gate's controlled candidate worktrees.
 
 ### Token and role rotation
 
@@ -335,7 +355,7 @@ host and stop if any launcher, gate container, or updater lock is live:
 
 ```bash
 sudo pgrep -af 'socos-release-gate-launcher|cloud-restore-release-gate.mjs' || true
-sudo docker ps --filter ancestor=socos-release-gate-runtime:node22-pnpm10.10.0-v1 \
+sudo docker ps --filter ancestor=socos-release-gate-runtime:node22-pnpm10.10.0-pg16-v2 \
   --format '{{.ID}} {{.Status}} {{.Names}}'
 sudo flock -n /var/lock/socos-release-gate/updater.lock -c true
 sudo test -d /var/lock/socos-release-gate/gate.lock

@@ -30,10 +30,10 @@ the cloud-only disposable restore release gate, removal of direct human-JWT CRM
 hard-delete routes, scope-aware MCP discovery/metadata, and first-class
 read-only Codex and Claude plugin packages. The receipt adds migration 12, so
 the candidate must not be deployed until the forced-command runner is
-provisioned and produces a live restore receipt for exact trusted `origin/main`,
-currently `1b15d1a239fa5fdf992d2ee49deb6e191733ef0d`. The reviewed application-code
-SHA `084b7addb0ccc765aa343c5412ed8f5fe5f6da0b` is its ancestor, not a valid exact
-gate or deploy candidate while main is at `1b15d1a`. Production remains on
+provisioned and produces a live restore receipt for action-time exact trusted
+`origin/main`. The reviewed application-code SHA
+`084b7addb0ccc765aa343c5412ed8f5fe5f6da0b` is an ancestor, not an independently
+valid exact gate or deploy candidate. Production remains on
 `1b25328de683e5b7923d4219d0401a1f93f168b2`. Repository tests are evidence for
 the implementation, not a substitute for that live proof.
 
@@ -49,7 +49,7 @@ Snapshot taken in `/Users/mac/Desktop/projects/personal/socos`.
 | Area | State |
 | --- | --- |
 | Reviewed application SHA | `1b25328de683e5b7923d4219d0401a1f93f168b2` |
-| Exact source candidate SHA | `1b15d1a239fa5fdf992d2ee49deb6e191733ef0d` |
+| Exact source candidate SHA | Resolve action-time with `git rev-parse origin/main` |
 | Reviewed application-code ancestor | `084b7addb0ccc765aa343c5412ed8f5fe5f6da0b` |
 | Pre-activation-tooling baseline SHA | `69e6ac0444a50ae92d811155493fcff559774a86` |
 | Production application SHA | `1b25328de683e5b7923d4219d0401a1f93f168b2` |
@@ -627,10 +627,10 @@ SHA, feature flags, Hermes gateway/cron state, and the final Betabot verifier.
 Trust current evidence over any stale snapshot. Do not reset, clean, stash,
 rewrite history, switch branches, or discard existing/user changes.
 
-The exact live gate and deploy candidate is trusted `origin/main`, currently
-1b15d1a239fa5fdf992d2ee49deb6e191733ef0d. The reviewed application-code SHA
-084b7addb0ccc765aa343c5412ed8f5fe5f6da0b is its ancestor, not a valid exact
-candidate while main remains at 1b15d1a. That application-code ancestor adds migration 12 InteractionReceipt,
+The exact live gate and deploy candidate is the action-time trusted
+`git rev-parse origin/main`. The reviewed application-code SHA
+084b7addb0ccc765aa343c5412ed8f5fe5f6da0b is its ancestor, not an independently
+valid exact candidate. That application-code ancestor adds migration 12 InteractionReceipt,
 exact/compact receipt UX, strict Calendar scope summaries/mobile cues, the
 cloud-only disposable restore gate, removal of direct human-JWT
 contact/interaction/reminder hard-delete routes, scope-aware MCP discovery and

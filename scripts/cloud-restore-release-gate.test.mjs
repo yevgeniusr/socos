@@ -170,12 +170,12 @@ test('database boundary proof rejects a privileged restore role', () => {
   const proof = {
     production: '7493810472398012345|prod|socos|t\n',
     administration: '7493810472398012345|admin|postgres|f\n',
-    restore: '7493810472398012345|restore|postgres|t\n',
+    restore: '7493810472398012345|restore|postgres|t|t\n',
     restoreProductionBlocked: true,
   };
   assert.doesNotThrow(() => validateDatabaseBoundaryProofs(config, proof));
   assert.throws(
-    () => validateDatabaseBoundaryProofs(config, { ...proof, restore: '7493810472398012345|restore|postgres|f\n' }),
+    () => validateDatabaseBoundaryProofs(config, { ...proof, restore: '7493810472398012345|restore|postgres|t|f\n' }),
     /invalid_configuration/,
   );
 });

@@ -9,7 +9,7 @@ readonly BACKUP_UUID='b85nxfljaz0xpo9xqa57lfr4'
 readonly COOLIFY_URL='https://qed.quest'
 readonly REMOTE_URL='https://github.com/yevgeniusr/socos.git'
 readonly NETWORK='coolify'
-readonly RUNTIME_IMAGE='socos-release-gate-runtime:node22-pnpm10.10.0-v1'
+readonly RUNTIME_IMAGE='socos-release-gate-runtime:node22-pnpm10.10.0-pg16-v2'
 
 ROOT_PREFIX=${SOCOS_PROVISION_TEST_ROOT:-}
 TEST_BIN=${SOCOS_PROVISION_TEST_BIN:-}
@@ -97,6 +97,7 @@ quiet install -d -m 0755 "$etc_dir" "$sudoers_dir" "$(dirname "$launcher_path")"
 sudoers_tmp=$(mktemp "$sudoers_dir/socos-release-gate.XXXXXX")
 cat > "$sudoers_tmp" <<'SUDOERS'
 Defaults:socos-release-gate env_reset,!setenv,secure_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Defaults:socos-release-gate env_keep += "SSH_ORIGINAL_COMMAND"
 socos-release-gate ALL=(root) NOPASSWD: /usr/local/sbin/socos-release-gate-launcher
 SUDOERS
 quiet chmod 0440 "$sudoers_tmp"
@@ -114,27 +115,43 @@ if [[ ! -d "$repository/.git" ]]; then
 fi
 configured_remote=$(git -C "$repository" remote get-url origin 2>/dev/null) || fail
 [[ "$configured_remote" == "$REMOTE_URL" ]] || fail
+tracked_state=$(git -C "$repository" status --porcelain --untracked-files=no 2>/dev/null) || fail
+[[ -z "$tracked_state" ]] || fail
 quiet git -C "$repository" fetch --no-tags --prune origin +refs/heads/main:refs/remotes/origin/main
 trusted_sha=$(git -C "$repository" rev-parse refs/remotes/origin/main 2>/dev/null) || fail
 [[ "$trusted_sha" =~ ^[0-9a-f]{40}$ ]] || fail
 quiet git -C "$repository" checkout --detach refs/remotes/origin/main
 checked_out_sha=$(git -C "$repository" rev-parse HEAD 2>/dev/null) || fail
 [[ "$checked_out_sha" == "$trusted_sha" ]] || fail
+tracked_state=$(git -C "$repository" status --porcelain --untracked-files=no 2>/dev/null) || fail
+[[ -z "$tracked_state" ]] || fail
 
 build_context=$(mktemp -d "$tmp_root/runtime-build.XXXXXX")
 cat > "$build_context/Dockerfile" <<'DOCKERFILE'
-FROM node:22-bookworm-slim
+FROM node:22-bookworm-slim AS node-runtime
+FROM postgres:16-bookworm
+COPY --from=node-runtime /usr/local/ /usr/local/
 RUN apt-get update \
- && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends bash ca-certificates git postgresql-client util-linux \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends bash ca-certificates git util-linux \
  && rm -rf /var/lib/apt/lists/* \
  && corepack enable \
  && corepack prepare pnpm@10.10.0 --activate
 WORKDIR /gate/repository
+ENTRYPOINT []
+CMD ["node"]
 DOCKERFILE
 if ! quiet docker image inspect "$RUNTIME_IMAGE"; then
   quiet docker build --pull --tag "$RUNTIME_IMAGE" "$build_context"
 fi
 quiet docker image inspect "$RUNTIME_IMAGE"
+quiet docker run --rm --network none --entrypoint /bin/bash "$RUNTIME_IMAGE" -ceu '
+for tool in pg_dump psql pg_restore createdb dropdb; do
+  version=$($tool --version)
+  case "$version" in *" 16."*) ;; *) exit 1 ;; esac
+done
+test "$(pnpm --version)" = "10.10.0"
+case "$(node --version)" in v22.*) ;; *) exit 1 ;; esac
+'
 rm -rf -- "$build_context"
 build_context=''
 
@@ -195,6 +212,7 @@ GRANT CONNECT ON DATABASE socos TO postgres, socos_app;
 REVOKE CONNECT ON DATABASE socos FROM socos_release_gate_admin, socos_release_gate_restore;
 REVOKE ALL PRIVILEGES ON DATABASE postgres FROM socos_release_gate_admin, socos_release_gate_restore;
 GRANT CONNECT ON DATABASE postgres TO socos_release_gate_admin, socos_release_gate_restore;
+REVOKE TEMPORARY ON DATABASE postgres FROM PUBLIC;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 REVOKE ALL PRIVILEGES ON SCHEMA public FROM socos_release_gate_admin, socos_release_gate_restore;
 REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM socos_release_gate_admin, socos_release_gate_restore;
@@ -239,14 +257,34 @@ LAUNCHER_HEAD
   cat <<'LAUNCHER_BODY'
 export PATH
 readonly REMOTE_URL='https://github.com/yevgeniusr/socos.git'
-readonly RUNTIME_IMAGE='socos-release-gate-runtime:node22-pnpm10.10.0-v1'
+readonly RUNTIME_IMAGE='socos-release-gate-runtime:node22-pnpm10.10.0-pg16-v2'
 readonly NETWORK='coolify'
 readonly REPOSITORY="$ROOT_PREFIX/opt/socos-release-gate/repository"
 readonly WORK_ROOT="$ROOT_PREFIX/var/lib/socos-release-gate/work"
 readonly LOCK_ROOT="$ROOT_PREFIX/var/lock/socos-release-gate"
 readonly ENV_FILE="$ROOT_PREFIX/etc/socos-release-gate.env"
 complete=0
-trap '[[ "$complete" -eq 1 ]] || printf "%s\n" "launcher_status=failed" >&2' EXIT
+runner_root=''
+runner_worktree=''
+cleanup() {
+  original_status=$?
+  trap - EXIT
+  cleanup_failed=0
+  if [[ -n "$runner_worktree" ]]; then
+    timeout 120 git -C "$REPOSITORY" worktree remove --force "$runner_worktree" >/dev/null 2>&1 || cleanup_failed=1
+  fi
+  if [[ -n "$runner_root" ]]; then
+    timeout 120 rm -rf -- "$runner_root" >/dev/null 2>&1 || cleanup_failed=1
+  fi
+  if [[ "$complete" -ne 1 || "$cleanup_failed" -ne 0 ]]; then
+    printf "%s\n" "launcher_status=failed" >&2
+  fi
+  if [[ "$cleanup_failed" -ne 0 ]]; then
+    exit 1
+  fi
+  exit "$original_status"
+}
+trap cleanup EXIT
 
 [[ "$#" -eq 0 ]] || exit 1
 [[ -z "${SSH_ORIGINAL_COMMAND:-}" ]] || exit 1
@@ -262,26 +300,42 @@ exec 9>"$LOCK_ROOT/updater.lock"
 flock -n 9 || exit 1
 configured_remote=$(git -C "$REPOSITORY" remote get-url origin 2>/dev/null) || exit 1
 [[ "$configured_remote" == "$REMOTE_URL" ]] || exit 1
+tracked_state=$(git -C "$REPOSITORY" status --porcelain --untracked-files=no 2>/dev/null) || exit 1
+[[ -z "$tracked_state" ]] || exit 1
 git -C "$REPOSITORY" fetch --no-tags --prune origin +refs/heads/main:refs/remotes/origin/main >/dev/null 2>&1
 trusted_sha=$(git -C "$REPOSITORY" rev-parse refs/remotes/origin/main 2>/dev/null) || exit 1
 [[ "$trusted_sha" == "$candidate" ]] || exit 1
 git -C "$REPOSITORY" checkout --detach refs/remotes/origin/main >/dev/null 2>&1
 checked_out_sha=$(git -C "$REPOSITORY" rev-parse HEAD 2>/dev/null) || exit 1
 [[ "$checked_out_sha" == "$candidate" ]] || exit 1
+tracked_state=$(git -C "$REPOSITORY" status --porcelain --untracked-files=no 2>/dev/null) || exit 1
+[[ -z "$tracked_state" ]] || exit 1
+
+runner_root=$(mktemp -d "$WORK_ROOT/runner.XXXXXX")
+runner_worktree="$runner_root/candidate"
+git -C "$REPOSITORY" worktree add --detach "$runner_worktree" "$candidate" >/dev/null 2>&1
+runner_sha=$(git -C "$runner_worktree" rev-parse HEAD 2>/dev/null) || exit 1
+[[ "$runner_sha" == "$candidate" ]] || exit 1
+runner_state=$(git -C "$runner_worktree" status --porcelain --untracked-files=no 2>/dev/null) || exit 1
+[[ -z "$runner_state" ]] || exit 1
 
 docker run --rm --network "$NETWORK" --cap-drop ALL --security-opt no-new-privileges:true \
-  --mount "type=bind,src=$REPOSITORY,dst=/gate/repository" \
-  --mount "type=bind,src=$WORK_ROOT,dst=/gate/work" \
-  --mount "type=bind,src=$LOCK_ROOT,dst=/gate/locks" \
-  --workdir /gate/repository \
+  --mount "type=bind,src=$runner_worktree,dst=/gate/runner" \
+  --workdir /gate/runner \
   "$RUNTIME_IMAGE" pnpm install --frozen-lockfile >/dev/null 2>&1
+
+runner_sha=$(git -C "$runner_worktree" rev-parse HEAD 2>/dev/null) || exit 1
+[[ "$runner_sha" == "$candidate" ]] || exit 1
+runner_state=$(git -C "$runner_worktree" status --porcelain --untracked-files=no 2>/dev/null) || exit 1
+[[ -z "$runner_state" ]] || exit 1
 
 docker run -i --rm --network "$NETWORK" --cap-drop ALL --security-opt no-new-privileges:true \
   --env-file "$ENV_FILE" \
   --mount "type=bind,src=$REPOSITORY,dst=/gate/repository" \
+  --mount "type=bind,src=$runner_worktree,dst=/gate/runner" \
   --mount "type=bind,src=$WORK_ROOT,dst=/gate/work" \
   --mount "type=bind,src=$LOCK_ROOT,dst=/gate/locks" \
-  --workdir /gate/repository \
+  --workdir /gate/runner \
   "$RUNTIME_IMAGE" node scripts/cloud-restore-release-gate.mjs <<<"$candidate"
 complete=1
 LAUNCHER_BODY

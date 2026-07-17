@@ -62,7 +62,7 @@ export function validateDatabaseBoundaryProofs(config, proof) {
   if (
     proof.production !== `${config.clusterId}|${config.productionRole}|${config.productionDatabase}|t\n`
     || proof.administration !== `${config.clusterId}|${config.adminRole}|${config.adminDatabase}|f\n`
-    || proof.restore !== `${config.clusterId}|${config.restoreRole}|${config.restoreBaseDatabase}|t\n`
+    || proof.restore !== `${config.clusterId}|${config.restoreRole}|${config.restoreBaseDatabase}|t|t\n`
     || proof.restoreProductionBlocked !== true
   ) throw new GateFailure('invalid_configuration');
 }
@@ -498,7 +498,7 @@ function createDependencies(config, signal) {
       try {
         const prod = await q(config.productionPg, `SELECT ${cluster}, current_user, current_database(), (${roleSafe} AND ${noDangerousMembership} AND NOT pg_has_role(current_user, ${literal(config.restoreRole)}, 'MEMBER') AND NOT has_database_privilege(current_user,current_database(),'CREATE') AND NOT has_schema_privilege(current_user,'public','CREATE') AND ${noPublicWrites}) FROM pg_roles r WHERE r.rolname=current_user;`);
         const admin = await q(config.adminPg, `SELECT ${cluster}, current_user, current_database(), has_database_privilege(${literal(config.restoreRole)}, ${literal(config.productionDatabase)}, 'CONNECT');`);
-        const restore = await q(pgEnvironment(config.restoreBaseUrl), `SELECT ${cluster}, current_user, current_database(), (${roleSafe} AND r.rolname NOT IN (${dangerousRoles}) AND ${noMembership} AND NOT has_database_privilege(current_user,current_database(),'CREATE') AND NOT has_schema_privilege(current_user,'public','CREATE') AND ${noPublicWrites}) FROM pg_roles r WHERE r.rolname=current_user;`);
+        const restore = await q(pgEnvironment(config.restoreBaseUrl), `SELECT ${cluster}, current_user, current_database(), (${roleSafe} AND r.rolname NOT IN (${dangerousRoles}) AND ${noMembership} AND NOT has_database_privilege(current_user,current_database(),'CREATE') AND NOT has_schema_privilege(current_user,'public','CREATE') AND ${noPublicWrites}), NOT has_database_privilege(current_user,current_database(),'TEMPORARY') FROM pg_roles r WHERE r.rolname=current_user;`);
         let blocked = false;
         try {
           await q({ ...pgEnvironment(config.restoreBaseUrl), PGDATABASE: config.productionDatabase }, 'SELECT 1;');
