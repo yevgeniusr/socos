@@ -1,8 +1,9 @@
 import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards, Request, Headers } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiHeader } from '@nestjs/swagger';
 import { InteractionsService } from './interactions.service.js';
 import { CreateInteractionDto, InteractionQueryDto } from './interactions.dto.js';
 import { AuthGuard } from '../auth/auth.guard.js';
+import { requireHumanIdempotencyKey } from '../../common/human-idempotency.service.js';
 
 @ApiTags('interactions')
 @Controller('interactions')
@@ -13,14 +14,17 @@ export class InteractionsController {
 
   @Post()
   @ApiOperation({ summary: 'Log a new interaction' })
+  @ApiHeader({ name: 'Idempotency-Key', required: true })
   async create(
     @Request() req: { user: { userId: string } },
     @Body() dto: CreateInteractionDto,
     @Headers('idempotency-key') idempotencyKey?: string,
   ) {
-    return idempotencyKey
-      ? this.interactionsService.create(req.user.userId, dto, idempotencyKey)
-      : this.interactionsService.create(req.user.userId, dto);
+    return this.interactionsService.create(
+      req.user.userId,
+      dto,
+      requireHumanIdempotencyKey(idempotencyKey),
+    );
   }
 
   @Get()
@@ -49,6 +53,15 @@ export class InteractionsController {
     @Query('limit') limit?: number,
   ) {
     return this.interactionsService.findByContact(req.user.userId, contactId, limit);
+  }
+
+  @Get(':id/receipt')
+  @ApiOperation({ summary: 'Get the durable receipt for an interaction' })
+  async getReceipt(
+    @Request() req: { user: { userId: string } },
+    @Param('id') id: string,
+  ) {
+    return this.interactionsService.getReceipt(req.user.userId, id);
   }
 
   @Delete(':id')

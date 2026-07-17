@@ -41,8 +41,13 @@ function harness(
         contactId,
         type: InteractionType.CALL,
         title: "Catch up",
+        content: "Discussed project status",
+        summary: null,
         occurredAt: now,
+        duration: null,
+        location: null,
         xpEarned: 10,
+        createdAt: now,
       }),
       count: jest.fn().mockResolvedValue(2),
     },
@@ -61,9 +66,33 @@ function harness(
     user: {
       update: jest.fn().mockResolvedValue({ xp: 110, level: 2 }),
     },
+    interactionReceipt: {
+      create: jest.fn().mockImplementation(({ data }) =>
+        Promise.resolve({
+          ...data,
+          id: "receipt-synthetic",
+          createdAt: now,
+          interaction: {
+            id: "interaction-synthetic",
+            contactId,
+            type: InteractionType.CALL,
+            title: "Catch up",
+            content: "Discussed project status",
+            summary: null,
+            occurredAt: now,
+            duration: null,
+            location: null,
+            xpEarned: 10,
+            createdAt: now,
+          },
+        })
+      ),
+      findFirst: jest.fn(),
+    },
   };
   const prisma = {
     $transaction: jest.fn().mockImplementation((callback) => callback(tx)),
+    interactionReceipt: tx.interactionReceipt,
   };
   const gamification = {
     calculateInteractionXp: jest.fn().mockResolvedValue(10),
@@ -98,15 +127,19 @@ describe("InteractionsService agent commands", () => {
 
     await expect(
       service.createForAgent(ownerId, input, tx as never)
-    ).resolves.toEqual({
-      interactionId: "interaction-synthetic",
-      contactId,
-      type: InteractionType.CALL,
-      occurredAt: now,
-      xpAwarded: 10,
-      totalXp: 110,
-      level: 2,
-    });
+    ).resolves.toEqual(
+      expect.objectContaining({
+        interaction: expect.objectContaining({
+          id: "interaction-synthetic",
+          contactId,
+        }),
+        xp: expect.objectContaining({
+          interactionDelta: 10,
+          totalAfter: 110,
+          levelAfter: 2,
+        }),
+      })
+    );
 
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(tx.contact.findFirst).toHaveBeenCalledWith({
@@ -115,6 +148,7 @@ describe("InteractionsService agent commands", () => {
         id: true,
         ownerId: true,
         isDemo: true,
+        lastContactedAt: true,
       },
     });
     expect(gamification.calculateInteractionXp).toHaveBeenCalledWith(
@@ -133,8 +167,13 @@ describe("InteractionsService agent commands", () => {
         contactId: true,
         type: true,
         title: true,
+        content: true,
+        summary: true,
         occurredAt: true,
+        duration: true,
+        location: true,
         xpEarned: true,
+        createdAt: true,
       },
     });
     expect(tx.contact.updateMany).toHaveBeenCalledWith({
@@ -164,6 +203,60 @@ describe("InteractionsService agent commands", () => {
     expect(gamification.notifyInteractionRewards).not.toHaveBeenCalled();
   });
 
+  it("persists and returns the exact durable interaction receipt", async () => {
+    const { service, tx } = harness();
+
+    await expect(
+      service.createForAgent(ownerId, input, tx as never)
+    ).resolves.toEqual({
+      interaction: {
+        id: "interaction-synthetic",
+        contactId,
+        type: InteractionType.CALL,
+        title: "Catch up",
+        content: "Discussed project status",
+        summary: null,
+        occurredAt: now.toISOString(),
+        duration: null,
+        location: null,
+        xpEarned: 10,
+        createdAt: now.toISOString(),
+      },
+      lastContact: {
+        previousAt: null,
+        resultingAt: now.toISOString(),
+        advanced: true,
+      },
+      xp: {
+        interactionDelta: 10,
+        achievementDelta: 0,
+        totalDelta: 10,
+        totalAfter: 110,
+        levelAfter: 2,
+      },
+      outcome: "Recorded only; nothing sent",
+      createdAt: now.toISOString(),
+    });
+
+    expect(tx.interactionReceipt.create).toHaveBeenCalledWith({
+      data: {
+        interactionId: "interaction-synthetic",
+        ownerId,
+        previousLastContactedAt: null,
+        resultingLastContactedAt: now,
+        lastContactAdvanced: true,
+        interactionXpDelta: 10,
+        achievementXpDelta: 0,
+        totalXpDelta: 10,
+        totalXpAfter: 110,
+        levelAfter: 2,
+      },
+      select: expect.objectContaining({
+        interaction: { select: expect.any(Object) },
+      }),
+    });
+  });
+
   it("unlocks first_interaction and awards its XP with distinct evidence", async () => {
     const { service, tx } = harness();
     tx.interaction.count.mockResolvedValue(1);
@@ -177,7 +270,14 @@ describe("InteractionsService agent commands", () => {
     await expect(
       service.createForAgent(ownerId, input, tx as never)
     ).resolves.toEqual(
-      expect.objectContaining({ xpAwarded: 10, totalXp: 160, level: 2 })
+      expect.objectContaining({
+        xp: expect.objectContaining({
+          interactionDelta: 10,
+          achievementDelta: 50,
+          totalAfter: 160,
+          levelAfter: 2,
+        }),
+      })
     );
 
     expect(tx.interaction.count).toHaveBeenCalledWith({
@@ -239,7 +339,11 @@ describe("InteractionsService agent commands", () => {
 
     await expect(
       service.createForAgent(ownerId, input, tx as never)
-    ).resolves.toEqual(expect.objectContaining({ totalXp: 5410, level: 8 }));
+    ).resolves.toEqual(
+      expect.objectContaining({
+        xp: expect.objectContaining({ totalAfter: 5410, levelAfter: 8 }),
+      })
+    );
 
     expect(tx.achievement.upsert).toHaveBeenNthCalledWith(
       2,
@@ -330,7 +434,11 @@ describe("InteractionsService agent commands", () => {
 
     await expect(
       service.createForAgent(ownerId, input, tx as never)
-    ).resolves.toEqual(expect.objectContaining({ totalXp: 400, level: 3 }));
+    ).resolves.toEqual(
+      expect.objectContaining({
+        xp: expect.objectContaining({ totalAfter: 400, levelAfter: 3 }),
+      })
+    );
 
     expect(tx.user.update).toHaveBeenNthCalledWith(1, {
       where: { id: ownerId },
@@ -399,7 +507,15 @@ describe("InteractionsService agent commands", () => {
         { ...input, occurredAt: occurredAt.toISOString() },
         tx as never
       )
-    ).resolves.toEqual(expect.objectContaining({ occurredAt }));
+    ).resolves.toEqual(
+      expect.objectContaining({
+        lastContact: {
+          previousAt: existingContactAt.toISOString(),
+          resultingAt: existingContactAt.toISOString(),
+          advanced: false,
+        },
+      })
+    );
 
     expect(tx.contact.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -415,6 +531,15 @@ describe("InteractionsService agent commands", () => {
     expect(tx.user.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: { xp: { increment: 10 }, lastActiveAt: now },
+      })
+    );
+    expect(tx.interactionReceipt.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          previousLastContactedAt: existingContactAt,
+          resultingLastContactedAt: existingContactAt,
+          lastContactAdvanced: false,
+        }),
       })
     );
   });
@@ -464,7 +589,11 @@ describe("InteractionsService agent commands", () => {
 
     await expect(
       service.createForAgent(ownerId, input, tx as never)
-    ).resolves.toEqual(expect.objectContaining({ totalXp: 400, level: 3 }));
+    ).resolves.toEqual(
+      expect.objectContaining({
+        xp: expect.objectContaining({ totalAfter: 400, levelAfter: 3 }),
+      })
+    );
 
     expect(tx.user.update).toHaveBeenNthCalledWith(2, {
       where: { id: ownerId },
@@ -488,6 +617,21 @@ describe("InteractionsService agent commands", () => {
     expect(tx.xpTransaction.create).toHaveBeenCalledTimes(1);
     expect(gamification.checkLevelUp).not.toHaveBeenCalled();
     expect(gamification.checkAchievements).not.toHaveBeenCalled();
+  });
+
+  it("rejects a receipt write so the surrounding transaction rolls back all deltas", async () => {
+    const { service, tx } = harness();
+    tx.interactionReceipt.create.mockRejectedValue(
+      new Error("receipt insert failed")
+    );
+
+    await expect(service.createForAgent(ownerId, input)).rejects.toThrow(
+      "receipt insert failed"
+    );
+    expect(tx.interaction.create).toHaveBeenCalledTimes(1);
+    expect(tx.contact.updateMany).toHaveBeenCalledTimes(1);
+    expect(tx.xpTransaction.create).toHaveBeenCalledTimes(1);
+    expect(tx.user.update).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -541,21 +685,16 @@ describe("InteractionsService human commands", () => {
   it("uses the serializable interaction transaction and preserves the REST response", async () => {
     const { gamification, prisma, service, tx } = harness();
 
-    await expect(service.create(ownerId, input)).resolves.toEqual({
-      interaction: {
-        id: "interaction-synthetic",
-        type: InteractionType.CALL,
-        title: "Catch up",
-        occurredAt: now,
-        xpEarned: 10,
-      },
-      user: {
-        xp: 110,
-        level: 2,
-        xpToNextLevel: 400,
-      },
-      newAchievements: [],
-    });
+    await expect(service.create(ownerId, input)).resolves.toEqual(
+      expect.objectContaining({
+        interaction: expect.objectContaining({
+          id: "interaction-synthetic",
+          contactId,
+        }),
+        xp: expect.objectContaining({ totalAfter: 110, levelAfter: 2 }),
+        outcome: "Recorded only; nothing sent",
+      })
+    );
 
     expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
@@ -587,7 +726,60 @@ describe("InteractionsService human commands", () => {
     expect(tx.interaction.create).toHaveBeenCalledTimes(1);
     expect(tx.xpTransaction.create).toHaveBeenCalledTimes(1);
     expect(tx.user.update).toHaveBeenCalledTimes(1);
+    expect(tx.interactionReceipt.create).toHaveBeenCalledTimes(1);
     expect(gamification.notifyInteractionRewards).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns an owner-scoped durable receipt joined to exact interaction fields", async () => {
+    const { service, tx } = harness();
+    tx.interactionReceipt.findFirst.mockResolvedValue({
+      id: "receipt-synthetic",
+      interactionId: "interaction-synthetic",
+      ownerId,
+      previousLastContactedAt: null,
+      resultingLastContactedAt: now,
+      lastContactAdvanced: true,
+      interactionXpDelta: 10,
+      achievementXpDelta: 50,
+      totalXpDelta: 60,
+      totalXpAfter: 160,
+      levelAfter: 2,
+      createdAt: now,
+      interaction: {
+        id: "interaction-synthetic",
+        contactId,
+        type: InteractionType.CALL,
+        title: "Catch up",
+        content: "Discussed project status",
+        summary: null,
+        occurredAt: now,
+        duration: null,
+        location: null,
+        xpEarned: 10,
+        createdAt: now,
+      },
+    });
+
+    await expect(
+      service.getReceipt(ownerId, "interaction-synthetic")
+    ).resolves.toEqual(
+      expect.objectContaining({
+        interaction: expect.objectContaining({ id: "interaction-synthetic" }),
+        xp: {
+          interactionDelta: 10,
+          achievementDelta: 50,
+          totalDelta: 60,
+          totalAfter: 160,
+          levelAfter: 2,
+        },
+        outcome: "Recorded only; nothing sent",
+      })
+    );
+    expect(tx.interactionReceipt.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { interactionId: "interaction-synthetic", ownerId },
+      })
+    );
   });
 
   it("notifies from committed achievement metadata and the actual level transition", async () => {
@@ -604,21 +796,16 @@ describe("InteractionsService human commands", () => {
       .mockResolvedValueOnce({ xp: 400, level: 2 })
       .mockResolvedValueOnce({ xp: 400, level: 3 });
 
-    await expect(service.create(ownerId, input)).resolves.toEqual({
-      interaction: {
-        id: "interaction-synthetic",
-        type: InteractionType.CALL,
-        title: "Catch up",
-        occurredAt: now,
-        xpEarned: 10,
-      },
-      user: {
-        xp: 400,
-        level: 3,
-        xpToNextLevel: 900,
-      },
-      newAchievements: ["First Interaction"],
-    });
+    await expect(service.create(ownerId, input)).resolves.toEqual(
+      expect.objectContaining({
+        interaction: expect.objectContaining({ id: "interaction-synthetic" }),
+        xp: expect.objectContaining({
+          achievementDelta: 50,
+          totalAfter: 400,
+          levelAfter: 3,
+        }),
+      })
+    );
 
     expect(gamification.notifyInteractionRewards).toHaveBeenCalledWith(
       ownerId,

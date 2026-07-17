@@ -62,7 +62,7 @@ EOF
 # Hold one repeatable-read transaction open while both the dump and aggregate
 # query import its snapshot. This makes the metadata describe the dump exactly.
 SOCOS_SNAPSHOT_FILE="$snapshot_file" SOCOS_SNAPSHOT_READY="$snapshot_ready" \
-  psql -X "$DATABASE_URL" --set=ON_ERROR_STOP=1 --tuples-only --no-align \
+  PGDATABASE="$DATABASE_URL" psql -X --set=ON_ERROR_STOP=1 --tuples-only --no-align \
     --file="$snapshot_sql" >/dev/null 2>&1 &
 snapshot_pid=$!
 
@@ -88,13 +88,13 @@ case "$snapshot_id" in
     ;;
 esac
 
-pg_dump --format=custom --no-owner --no-privileges \
-  --snapshot="$snapshot_id" --file "$work_backup" "$DATABASE_URL" >/dev/null
+PGDATABASE="$DATABASE_URL" pg_dump --format=custom --no-owner --no-privileges \
+  --snapshot="$snapshot_id" --file "$work_backup" >/dev/null
 chmod 0600 "$work_backup"
 
 # query_to_xml lets PostgreSQL calculate exact counts for every public table
 # without selecting or serializing row values.
-psql -X "$DATABASE_URL" \
+PGDATABASE="$DATABASE_URL" psql -X \
   --set=ON_ERROR_STOP=1 \
   --quiet \
   --no-align \

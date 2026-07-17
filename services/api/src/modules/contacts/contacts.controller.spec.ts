@@ -145,6 +145,11 @@ describe("ContactsController route ordering", () => {
           type: InteractionType.NOTE,
         }),
       });
+      const missingKeyResponse = await fetch(baseUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: InteractionType.NOTE }),
+      });
 
       expect(validResponse.status).toBe(201);
       expect(interactionsService.create).toHaveBeenCalledWith(
@@ -157,6 +162,7 @@ describe("ContactsController route ordering", () => {
         "intent-key-interaction-001"
       );
       expect(callerOwnedContactResponse.status).toBe(400);
+      expect(missingKeyResponse.status).toBe(400);
       expect(interactionsService.create).toHaveBeenCalledTimes(1);
     } finally {
       await app.close();

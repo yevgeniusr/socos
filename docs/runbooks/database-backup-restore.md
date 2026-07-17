@@ -163,6 +163,61 @@ introduced during the drill to be present at zero rows. Drop the disposable
 database before declaring the drill successful. If any command fails, stop the
 deployment and retain only redacted schema metadata logs.
 
+## Cloud-Only Release Restore Gate
+
+Schema and data releases must use the repository gate instead of moving a dump
+to an operator workstation:
+
+```bash
+git fetch origin main
+candidate_sha=$(git rev-parse origin/main)
+node scripts/run-cloud-restore-release-gate.mjs "$candidate_sha"
+```
+
+The local wrapper accepts one lowercase 40-character SHA, connects only to the
+`socos-release-gate` SSH config host with `BatchMode=yes`, and sends only that
+SHA on standard input. The remote account must have a forced command pointing
+to `scripts/cloud-restore-release-gate.mjs`; it must expose neither a shell nor
+a public endpoint. The wrapper accepts only the fixed redacted JSON receipt and
+rejects extra fields, paths, changed SHAs, remote stderr, or malformed output.
+
+The forced command requires root-managed configuration for its trusted Git
+mirror, private work root, single-flight lock directory, Coolify URL/token and
+database/backup UUIDs, production read URL, database-admin URL, and a separate
+restricted restore-role URL. Use the `SOCOS_RELEASE_GATE_*` variable names in
+the runner source. A root-managed updater must fetch `origin/main` into the
+trusted mirror before the gate runs; the candidate must equal that exact remote
+head, not merely be an ancestor. The updater and forced-command account must
+not allow the caller to change the remote or refs.
+
+Set `SOCOS_RELEASE_GATE_CLUSTER_ID` to the PostgreSQL system identifier from
+`pg_control_system()`. Production, administration, and restore URLs must use
+three distinct roles on that exact cluster. The gate verifies the production
+role has no write/schema/database-create capability, verifies the restore role
+has no elevated role flags, inherited memberships, maintenance-database write
+capabilities, or production access, rejects reuse of the administration
+credential, and uses the restricted role only for the randomly named
+disposable database.
+
+For the exact candidate SHA, the runner proves one fresh positive-size Coolify
+backup, creates an independent consistent dump with `backup-postgres.sh`,
+restores it to a randomly named restricted-role database, deploys candidate
+migrations, validates Prisma, requires zero schema drift and preserved
+aggregate invariants, and deletes the database, worktree, temporary artifacts,
+and lock before emitting success. `KEEP_RESTORE_DB` is forbidden in release
+mode. Child stderr, URLs, dump paths, and rows never appear in the receipt.
+SSH, HTTP, child commands, polling, termination escalation, and cleanup all
+have bounded deadlines. Signal handlers remain installed and idempotent through
+cleanup, and each cleanup phase has an independent deadline so a stuck phase
+cannot prevent later temp and lock cleanup. PostgreSQL URLs stay in child
+environments, never CLI arguments; schema drift uses Prisma's supported
+`--from-schema-datasource` mode with `DATABASE_URL` in the environment.
+
+Provisioning the forced-command account and key restriction, root-owned
+environment launcher, restricted database role, private-network access, and
+secret rotation remains an operator gate. Repository tests are mocked and do
+not constitute live recovery evidence.
+
 ## Deleted Encrypted Data Recovery Window
 
 Application deletion removes live calendar, location, event, OAuth, and

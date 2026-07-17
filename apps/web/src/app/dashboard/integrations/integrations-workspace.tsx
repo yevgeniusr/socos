@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import EventDiscoveryPanel from "./_components/event-discovery-panel";
 import GoogleCalendarPanel from "./_components/google-calendar-panel";
 import PixelLocationPanel from "./_components/pixel-location-panel";
-import { parseCalendarResult } from "./integration-view";
+import {
+  calendarAccessSummary,
+  parseCalendarResult,
+  type CalendarAccessSummary,
+} from "./integration-view";
 
 export default function IntegrationsWorkspace() {
   const router = useRouter();
@@ -14,6 +18,19 @@ export default function IntegrationsWorkspace() {
   const calendarResult = parseCalendarResult(searchParams.get("calendar"));
   const [calendarReceipt, setCalendarReceipt] = useState<string | null>(null);
   const [calendarRefresh, setCalendarRefresh] = useState(0);
+  const [calendarSummary, setCalendarSummary] = useState<CalendarAccessSummary>(
+    () => calendarAccessSummary({ status: "loading" })
+  );
+
+  const updateCalendarSummary = useCallback((next: CalendarAccessSummary) => {
+    setCalendarSummary((current) =>
+      current.state === next.state &&
+      current.accessLabel === next.accessLabel &&
+      current.sourceLabel === next.sourceLabel
+        ? current
+        : next
+    );
+  }, []);
 
   useEffect(() => {
     if (!calendarResult) return;
@@ -28,8 +45,42 @@ export default function IntegrationsWorkspace() {
   }, [calendarResult, router]);
 
   return (
-    <main className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
-      <div className="mb-8 border-b border-outline-variant/30 pb-5">
+    <main className="mx-auto w-full max-w-6xl px-4 pb-6 sm:px-6 sm:pb-8">
+      <div
+        role="status"
+        aria-label="Calendar access"
+        aria-live="polite"
+        className="sticky top-14 z-20 -mx-4 flex min-w-0 items-center gap-3 border-y border-outline-variant/30 bg-surface px-4 py-3 sm:-mx-6 sm:px-6 lg:top-0 lg:mx-0 lg:border-x"
+      >
+        <span
+          className={`material-symbols-outlined shrink-0 text-[21px] ${
+            calendarSummary.state === "active"
+              ? "text-secondary"
+              : calendarSummary.state === "review" ||
+                  calendarSummary.state === "error"
+                ? "text-error"
+                : "text-on-surface-variant"
+          }`}
+          aria-hidden="true"
+        >
+          {calendarSummary.state === "active"
+            ? "lock"
+            : calendarSummary.state === "review" ||
+                calendarSummary.state === "error"
+              ? "warning"
+              : "calendar_month"}
+        </span>
+        <div className="min-w-0 sm:flex sm:flex-1 sm:items-baseline sm:justify-between sm:gap-4">
+          <p className="break-words text-sm font-extrabold text-on-surface">
+            {calendarSummary.accessLabel}
+          </p>
+          <p className="break-words text-xs text-on-surface-variant">
+            {calendarSummary.sourceLabel}
+          </p>
+        </div>
+      </div>
+
+      <div className="mb-8 border-b border-outline-variant/30 pb-5 pt-6 sm:pt-8">
         <p className="mb-1 text-xs font-bold uppercase text-secondary">
           Activation workspace
         </p>
@@ -54,7 +105,10 @@ export default function IntegrationsWorkspace() {
       </div>
 
       <div className="space-y-6">
-        <GoogleCalendarPanel refreshToken={calendarRefresh} />
+        <GoogleCalendarPanel
+          refreshToken={calendarRefresh}
+          onSummaryChange={updateCalendarSummary}
+        />
         <PixelLocationPanel />
         <EventDiscoveryPanel />
       </div>

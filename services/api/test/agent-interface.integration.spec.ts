@@ -122,13 +122,16 @@ describe("Agent interface PostgreSQL integrity", () => {
         registry.call("socos_log_interaction", scenario.principalA, request)
       )
     );
-    const [storedInteractions, ledger, user, records, initialAudits] =
+    const [storedInteractions, receipts, ledger, user, records, initialAudits] =
       await Promise.all([
         prisma.interaction.findMany({
           where: {
             ownerId: synthetic.ownerA,
             title: "Synthetic concurrent interaction",
           },
+        }),
+        prisma.interactionReceipt.findMany({
+          where: { ownerId: synthetic.ownerA },
         }),
         prisma.xpTransaction.findMany({
           where: { ownerId: synthetic.ownerA, sourceType: "interaction" },
@@ -154,7 +157,18 @@ describe("Agent interface PostgreSQL integrity", () => {
     expect(successful).toEqual(
       expect.objectContaining({
         ok: true,
-        data: expect.objectContaining({ xpEarned: 10 }),
+        data: expect.objectContaining({
+          interaction: expect.objectContaining({
+            contactId: synthetic.contactA,
+            xpEarned: 10,
+          }),
+          xp: expect.objectContaining({
+            interactionDelta: 10,
+            totalDelta: 10,
+            totalAfter: 17,
+          }),
+          outcome: "Recorded only; nothing sent",
+        }),
       })
     );
     for (const result of results) {
@@ -172,6 +186,17 @@ describe("Agent interface PostgreSQL integrity", () => {
       }
     }
     expect(storedInteractions).toHaveLength(1);
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0]).toEqual(
+      expect.objectContaining({
+        interactionId: storedInteractions[0].id,
+        ownerId: synthetic.ownerA,
+        interactionXpDelta: 10,
+        achievementXpDelta: 0,
+        totalXpDelta: 10,
+        totalXpAfter: 17,
+      })
+    );
     expect(ledger).toHaveLength(1);
     expect(ledger[0].amount).toBe(10);
     expect(user.xp).toBe(17);

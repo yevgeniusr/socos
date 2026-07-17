@@ -69,8 +69,21 @@ second deployment reported no pending migrations.
 
 ## Deployment
 
+For every future candidate with schema or data changes, first run the
+cloud-only release restore gate in `database-backup-restore.md` and require a
+receipt bound to the exact candidate SHA. It covers the fresh Coolify backup,
+independent consistent dump, restricted disposable restore, candidate
+migration, Prisma validation, zero drift, aggregate invariants, and verified
+cleanup. An older drill or mocked test is not a receipt for the current SHA.
+
+The fixed SSH host, forced command, trusted mirror, restricted restore role,
+root-owned secret environment, private work/lock directories, and network
+policy must be provisioned and audited separately. Until that is complete and
+the first live receipt succeeds, the automated gate is implemented but not
+operationally attested.
+
 `services/api/start.sh` fails closed: it runs `prisma migrate deploy` and starts
-NestJS only after migration success. The current repository has seven checked-in
+NestJS only after migration success. The current repository has twelve checked-in
 migrations. After the cloud restore proof and credential rotation are complete,
 set the expected full commit SHA, run the read-only source preflight, deploy, and
 perform read-only smoke checks:

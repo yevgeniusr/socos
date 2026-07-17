@@ -4,7 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useDashboard } from "../../_components/dashboard-shell";
 import { ApiError, apiJson } from "@/lib/api-client";
-import type { ContactDetail, InteractionType } from "@/lib/contact-contracts";
+import type {
+  ContactDetail,
+  InteractionReceiptEnvelope,
+  InteractionType,
+} from "@/lib/contact-contracts";
+import InteractionReceipt from "@/components/interaction-receipt";
 import ContactEditor from "./contact-editor";
 import type { ContactQuickAction } from "./contact-list";
 import InteractionForm from "./interaction-form";
@@ -75,8 +80,11 @@ export default function ContactProfile({
     useState<InteractionType>("note");
   const [completingId, setCompletingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState("");
+  const [interactionReceipt, setInteractionReceipt] =
+    useState<InteractionReceiptEnvelope | null>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const interactionReceiptRef = useRef<HTMLHeadingElement>(null);
 
   const loadDetail = useCallback(async () => {
     setLoading(true);
@@ -106,6 +114,7 @@ export default function ContactProfile({
     setContact(null);
     setEditing(false);
     setActionError("");
+    setInteractionReceipt(null);
     if (initialAction === "reminder") {
       setActiveForm("reminder");
     } else if (initialAction === "call" || initialAction === "message") {
@@ -153,13 +162,15 @@ export default function ContactProfile({
     showToast("Contact updated.", "success");
   }
 
-  async function afterInteraction() {
+  async function afterInteraction(receipt: InteractionReceiptEnvelope) {
+    setInteractionReceipt(receipt);
+    setActiveForm(null);
     await Promise.allSettled([
       loadDetail(),
       onMutation(),
       refreshDashboardStats(),
     ]);
-    showToast("Interaction logged.", "success");
+    window.requestAnimationFrame(() => interactionReceiptRef.current?.focus());
   }
 
   async function afterReminder() {
@@ -373,6 +384,12 @@ export default function ContactProfile({
                   initialType={interactionType}
                   onSuccess={afterInteraction}
                   onCancel={() => setActiveForm(null)}
+                />
+              ) : null}
+              {interactionReceipt ? (
+                <InteractionReceipt
+                  receipt={interactionReceipt}
+                  headingRef={interactionReceiptRef}
                 />
               ) : null}
               {activeForm === "reminder" ? (

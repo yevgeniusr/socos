@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import { apiJson } from "@/lib/api-client";
 import type { DailyBrief, QuestAction } from "@/lib/cockpit-contracts";
+import type { InteractionReceiptEnvelope } from "@/lib/contact-contracts";
+import InteractionReceipt from "@/components/interaction-receipt";
 import { getFocusLoopTarget } from "../../contacts/_components/dialog-focus";
 import {
   buildQuestReceipt,
@@ -13,9 +15,6 @@ import {
 import { IntentRegistry } from "../intent-registry";
 
 type Quest = DailyBrief["quests"][number];
-interface InteractionResponse {
-  interaction: { id: string };
-}
 
 function localNow() {
   const date = new Date();
@@ -30,8 +29,11 @@ export default function QuestCompletionDialog({
   onSuccess,
 }: {
   quest: Quest;
-  onClose: (focusTarget?: "trigger" | "receipt") => void;
-  onSuccess: (receipt: QuestReceipt) => Promise<void>;
+  onClose: (focusTarget?: "trigger" | "receipt" | "none") => void;
+  onSuccess: (
+    receipt: QuestReceipt,
+    interactionReceipt: InteractionReceiptEnvelope | null
+  ) => void | Promise<void>;
 }) {
   const [action, setAction] = useState<QuestAction | null>(null);
   const [loading, setLoading] = useState(true);
@@ -42,6 +44,8 @@ export default function QuestCompletionDialog({
   const [notes, setNotes] = useState("");
   const [occurredAt, setOccurredAt] = useState(localNow());
   const [evidenceId, setEvidenceId] = useState<string | null>(null);
+  const [interactionReceipt, setInteractionReceipt] =
+    useState<InteractionReceiptEnvelope | null>(null);
   const registry = useRef(new IntentRegistry());
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -130,6 +134,7 @@ export default function QuestCompletionDialog({
     setError("");
     try {
       let id = evidenceId;
+      let recordedReceipt = interactionReceipt;
       if (!id) {
         const body = {
           type,
@@ -142,7 +147,7 @@ export default function QuestCompletionDialog({
           "interaction:create",
           body
         );
-        const created = await apiJson<InteractionResponse>(
+        const created = await apiJson<InteractionReceiptEnvelope>(
           `/api/contacts/${encodeURIComponent(action.contact.id)}/interactions`,
           {
             method: "POST",
@@ -151,12 +156,15 @@ export default function QuestCompletionDialog({
           }
         );
         registry.current.resolve(action.contact.id, "interaction:create", body);
+        setInteractionReceipt(created);
+        recordedReceipt = created;
         id = created.interaction.id;
         setEvidenceId(id);
       }
       const receipt = await completeQuest(id);
-      await onSuccess(receipt);
-      onClose("receipt");
+      onClose("none");
+      await nextAnimationFrame();
+      await onSuccess(receipt, recordedReceipt);
     } catch (reason) {
       setError(
         reason instanceof Error
@@ -191,8 +199,9 @@ export default function QuestCompletionDialog({
         setEvidenceId(id);
       }
       const receipt = await completeQuest(id);
-      await onSuccess(receipt);
-      onClose("receipt");
+      onClose("none");
+      await nextAnimationFrame();
+      await onSuccess(receipt, null);
     } catch (reason) {
       setError(
         reason instanceof Error
@@ -312,6 +321,9 @@ export default function QuestCompletionDialog({
                 Interaction saved. Retrying quest verification only.
               </p>
             ) : null}
+            {interactionReceipt ? (
+              <InteractionReceipt receipt={interactionReceipt} />
+            ) : null}
             <button
               type="submit"
               disabled={busy || !title.trim() || !notes.trim()}
@@ -366,4 +378,8 @@ export default function QuestCompletionDialog({
       </div>
     </div>
   );
+}
+
+function nextAnimationFrame(): Promise<void> {
+  return new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
 }

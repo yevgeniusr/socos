@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 
 import { apiJson } from "@/lib/api-client";
 import type {
   CreateInteractionPayload,
+  InteractionReceiptEnvelope,
   InteractionType,
 } from "@/lib/contact-contracts";
+import { IntentRegistry } from "../../today/intent-registry";
 
 function localDateTimeValue(date = new Date()) {
   const offset = date.getTimezoneOffset() * 60_000;
@@ -21,7 +23,7 @@ export default function InteractionForm({
 }: {
   contactId: string;
   initialType?: InteractionType;
-  onSuccess: () => Promise<void>;
+  onSuccess: (receipt: InteractionReceiptEnvelope) => Promise<void>;
   onCancel: () => void;
 }) {
   const [type, setType] = useState<InteractionType>(initialType);
@@ -30,6 +32,7 @@ export default function InteractionForm({
   const [occurredAt, setOccurredAt] = useState(localDateTimeValue());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const intents = useRef(new IntentRegistry());
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -39,19 +42,22 @@ export default function InteractionForm({
     }
     setSaving(true);
     setError("");
-    const payload: CreateInteractionPayload = {
+    const payload = {
       contactId,
       type,
       title: title.trim(),
       content: content.trim(),
       occurredAt: new Date(occurredAt).toISOString(),
-    };
+    } satisfies CreateInteractionPayload;
     try {
-      await apiJson("/api/interactions", {
+      const key = intents.current.keyFor(contactId, "interaction:create", payload);
+      const receipt = await apiJson<InteractionReceiptEnvelope>("/api/interactions", {
         method: "POST",
+        headers: { "Idempotency-Key": key },
         body: JSON.stringify(payload),
       });
-      await onSuccess();
+      intents.current.resolve(contactId, "interaction:create", payload);
+      await onSuccess(receipt);
       setTitle("");
       setContent("");
       setOccurredAt(localDateTimeValue());

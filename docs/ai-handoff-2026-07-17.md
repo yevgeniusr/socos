@@ -23,6 +23,14 @@ The final Google account grant is a second unavoidable user-confirmed action.
 Pixel location, event discovery, and event briefs remain disabled so activation
 still follows dependency order.
 
+Three P1 source changes are now implemented and independently approved but are
+not deployed: a durable interaction receipt, truthful compact integration
+status/mobile cues, and a cloud-only disposable restore release gate. The
+receipt adds migration 12, so it must not be deployed until the forced-command
+runner is provisioned and produces a live restore receipt for the exact
+candidate SHA. Repository tests are evidence for the implementation, not a
+substitute for that live proof.
+
 The tracked Hermes `socos-social-loop` skill is installed and attached to the
 active 09:00 Asia/Dubai Discord cron. The gateway is supervised. Today's
 successful cron run happened before the skill was attached, so a post-attachment
@@ -37,6 +45,7 @@ Snapshot taken in `/Users/mac/Desktop/projects/personal/socos`.
 | Reviewed application SHA | `1b25328de683e5b7923d4219d0401a1f93f168b2` |
 | Pre-activation-tooling baseline SHA | `69e6ac0444a50ae92d811155493fcff559774a86` |
 | Production application SHA | same reviewed SHA |
+| Current source branch | `main`; verify local and `origin/main` before use |
 | Production status | `running:healthy` |
 | Production URL | `https://socos.rachkovan.com` |
 | Real contacts | 106 non-demo, cloud-only |
@@ -49,6 +58,8 @@ Snapshot taken in `/Users/mac/Desktop/projects/personal/socos`.
 | Event briefs | disabled |
 | Hermes | installed, gateway supervised, cron active |
 | Live Discord reply proof | pending |
+| P1 source hardening | implemented and reviewed; not deployed |
+| Cloud restore gate | 20/20 mocked/isolated tests; live runner not provisioned |
 
 This handoff itself may be a later documentation-only commit than the reviewed
 production SHA. Re-run `git status`, `git log -1`, and `git ls-remote`
@@ -146,6 +157,37 @@ The resulting product direction is:
 - Graph introductions fail closed with `INSUFFICIENT_GRAPH_DATA` when evidence
   is too sparse.
 
+### Reviewed Source Pending Deployment
+
+- Added one owner-scoped `InteractionReceipt` per interaction in migration 12.
+  The receipt is written atomically with the interaction, chronology update,
+  XP, and achievements; it preserves exact recorded fields, before/after last
+  contact, distinct XP deltas, total/level snapshots, and the fixed outcome
+  `Recorded only; nothing sent`.
+- Both human interaction POST routes now require a valid `Idempotency-Key`.
+  REST and agent/MCP creation return the same receipt envelope, durable GET is
+  owner-scoped, replay suppresses duplicate rewards, and deletion cascades.
+- Contacts shows the exact focused receipt and safely retries a committed but
+  lost response with the identical body/key. Today keeps the interaction and
+  quest XP separate, exposes exact notes only inside the contact-scoped retry
+  dialog, and uses a redacted non-live compact receipt after success.
+- Integrations now has a sticky truthful Calendar access/source summary. It
+  accepts only the exact two read-only scopes, independent of order, and rejects
+  duplicates, missing, extra, or broad/write scopes. Destructive/action cues
+  remain visibly labeled on mobile with 44-pixel targets.
+- Added `scripts/cloud-restore-release-gate.mjs` and its fixed local SSH wrapper.
+  The gate binds to the exact trusted `origin/main`, requires a fresh Coolify
+  backup plus an independent consistent cloud dump, validates cluster identity
+  and three isolated roles, restores to a disposable restricted database, runs
+  candidate migrations/Prisma/drift/count invariants, and verifies cleanup.
+- Database URLs no longer appear in argv in backup, schema comparison, or count
+  verification. Child/SSH/HTTP/cleanup work is deadline-bounded with process
+  group termination, repeated-signal handling, and continued cleanup after a
+  hung phase. Receipts and failures are fixed and redacted.
+- Independent CRM review and restore-gate review both returned `APPROVE` after
+  their findings were corrected. None of this source work accessed production,
+  real personal rows, or secrets.
+
 ### Agent And MCP Surface
 
 - Exactly 11 authenticated owner-scoped MCP tools cover briefs, contacts,
@@ -214,35 +256,46 @@ Installed and attached does not prove a live Discord reply mutation.
 Application and integration verification:
 
 ```text
-Web Vitest: 66/66
+Web Vitest: 78/78
+Focused interaction API Jest: 4 suites, 40/40
 Hermes planner: 14/14
 Integrations production Chromium: 15/15
 Focus stress: 45/45 + 30/30 + 15/15
-Contacts + Daily Cockpit + Integrations Chromium: 33/33
-API Jest: 94 suites passed, 1 skipped; 1,036 passed, 5 skipped
+Contacts + Daily Cockpit + Integrations Chromium: 38/38
+API Jest focused change coverage: 4 suites, 40/40
 Workspace typechecks: 5/5
 Workspace builds: 4/4; Next generated 16 pages
 Lint: 0 errors; pre-existing warnings only
-Infrastructure/security: 120 passed, 1 expected skip
-Security scanner: 567 tracked files
+Infrastructure/security: 166 passed, 1 expected skip
+Security scanner: 579 tracked files
 PostgreSQL migration safety: 10/10
+Database operations: 36/36
+Cloud restore release gate: 20/20
 Calendar/location PostgreSQL integration: passed
 Human-idempotency PostgreSQL integration: passed
+Agent-interface PostgreSQL integration: 6/6
 Independent Integrations review: APPROVE
 Independent Hermes review: APPROVE
 Activation/ops/wrapper tests: 31/31
 Independent activation-tooling review: APPROVE
+Independent interaction/integration review: APPROVE
+Independent cloud restore-gate review: APPROVE
 ```
 
-The latest broad `pnpm test` rerun reached 93 passing API suites, 1 skipped
-suite, and 1,034 passing tests before two cases in
-`agent-auth.controller.spec.ts` failed from a five-second load timeout and the
-subsequent connection reset. That controller and these operations scripts do
-not overlap. The exact controller spec then passed 8/8 with `--runInBand`.
-Because Turbo stopped on that API failure, the root script/security segment was
-verified separately with 145 passing tests, 1 intentional skip, and the
-567-file security scan passing. Do not describe the latest broad command itself
-as green.
+Current-source verification also passed API and web typechecks, API and web
+production builds, Prisma validation with a synthetic URL, focused Contacts /
+Today / Integrations Playwright flows, and diff checks. Web lint has 0 errors
+and 37 existing warnings; API lint has 0 errors and existing warnings. The
+focused API run emitted the existing Jest worker-teardown warning after all 40
+tests passed.
+
+The latest broad `pnpm test` rerun reached 94 passing API suites, 1 skipped
+suite, and 1,040 passing tests before two cases in `auth.service.spec.ts` failed
+from their five-second timeout under the six-minute parallel load. The exact
+auth spec then passed 3/3 with `--runInBand`. Because Turbo stopped on that API
+failure, the registered root operations/security segment was verified
+separately with 166 passing tests, 1 intentional skip, and the 579-file security
+scan passing. Do not describe the latest broad command itself as green.
 
 Final activation cohort:
 
@@ -362,6 +415,8 @@ schema-neutral release.
 - This document is the current transfer artifact.
 - It should be updated again after Calendar, Pixel, events, briefs, and the live
   Discord reply are proven.
+- It should also be updated after the first live cloud restore receipt and the
+  migration-12 deployment are proven.
 
 ## Remaining Work
 
@@ -418,11 +473,15 @@ stage-local smoke, and restore the prior flag plus redeploy on failure.
 
 ### P1: Operational Hardening
 
-- Add a real disposable cloud restore check before future schema/data releases.
-- Add a durable interaction receipt with exact recorded interaction,
-  last-contact update, XP delta, and `Recorded only; nothing sent`.
-- Improve compact Calendar scope summaries and mobile destructive-control cues
-  based on repeated Betabot feedback.
+- Provision the restricted `socos-release-gate` forced-SSH account, root-owned
+  environment launcher, trusted-mirror updater, private work/lock directories,
+  exact PostgreSQL system identifier, three distinct database roles/ACLs,
+  private networking, and secret rotation described in the restore runbook.
+- Run the first live cloud-only restore gate for the exact reviewed candidate.
+  Mocked tests and a successful backup are not restore proof.
+- Only after that live receipt, deploy migration 12 and the reviewed P1 source,
+  then smoke the durable receipt, compact Calendar summary, mobile cues, and
+  health/auth boundaries using aggregate or synthetic evidence only.
 
 ### P2: Relationship Memory And Social Planning
 
@@ -450,6 +509,8 @@ stage-local smoke, and restore the prior flag plus redeploy on failure.
 - `docs/ai-handoff-2026-07-17.md`: this authoritative handoff.
 - `docs/runbooks/calendar-location-operations.md`: activation and rollback.
 - `docs/runbooks/database-backup-restore.md`: backup/restore evidence.
+- `scripts/run-cloud-restore-release-gate.mjs`: fixed local SSH client.
+- `scripts/cloud-restore-release-gate.mjs`: forced cloud restore command.
 - `docs/integrations/hermes-social-loop.md`: Hermes reply loop.
 - `docs/integrations/hermes-mcp.md`: authenticated Hermes MCP client.
 - `integrations/hermes/skills/socos-social-loop/SKILL.md`: tracked live skill.
@@ -473,13 +534,24 @@ Read first:
 4. scripts/run-coolify-activation.mjs
 5. scripts/coolify-activate.mjs
 6. docs/runbooks/database-backup-restore.md
-7. docs/integrations/hermes-social-loop.md
-8. integrations/hermes/skills/socos-social-loop/SKILL.md
+7. scripts/run-cloud-restore-release-gate.mjs
+8. scripts/cloud-restore-release-gate.mjs
+9. docs/integrations/hermes-social-loop.md
+10. integrations/hermes/skills/socos-social-loop/SKILL.md
 
 Then inspect git status, local/origin HEAD, production application/deployment
 SHA, feature flags, Hermes gateway/cron state, and the final Betabot verifier.
 Trust current evidence over any stale snapshot. Do not reset, clean, stash,
 rewrite history, switch branches, or discard existing/user changes.
+
+The current source adds migration 12 InteractionReceipt, exact/compact receipt
+UX, strict Calendar scope summaries/mobile cues, and the cloud-only disposable
+restore gate. These changes are reviewed but not deployed. Before any schema
+deployment, provision the forced-command runner exactly as documented and run
+`scripts/run-cloud-restore-release-gate.mjs` for the exact trusted origin/main
+SHA. Require its fixed success receipt. Never treat its 20/20 repository tests,
+a Coolify backup, or an older drill as live restore proof. Then deploy that exact
+SHA and verify the new receipt/UI behavior without exposing personal rows.
 
 The reviewed application SHA is
 1b25328de683e5b7923d4219d0401a1f93f168b2. It is deployed and healthy at

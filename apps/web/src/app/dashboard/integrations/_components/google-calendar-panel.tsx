@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { apiJson } from "@/lib/api-client";
 import type {
@@ -9,7 +9,11 @@ import type {
   CalendarSourcesResponse,
   LoadableIntegration,
 } from "@/lib/integration-contracts";
-import { integrationFailure } from "../integration-view";
+import {
+  calendarAccessSummary,
+  integrationFailure,
+  type CalendarAccessSummary,
+} from "../integration-view";
 import ConfirmationDialog from "./confirmation-dialog";
 import IntegrationSection from "./integration-section";
 
@@ -20,8 +24,10 @@ type CalendarPanelData = {
 
 export default function GoogleCalendarPanel({
   refreshToken,
+  onSummaryChange,
 }: {
   refreshToken: number;
+  onSummaryChange: (summary: CalendarAccessSummary) => void;
 }) {
   const [state, setState] = useState<LoadableIntegration<CalendarPanelData>>({
     status: "loading",
@@ -35,6 +41,11 @@ export default function GoogleCalendarPanel({
   const sourceVersionsRef = useRef(new Map<string, number>());
   const sourceQueuesRef = useRef(new Map<string, Promise<void>>());
   const sourceConfirmedRef = useRef(new Map<string, boolean>());
+  const summary = useMemo(() => calendarAccessSummary(state), [state]);
+
+  useEffect(() => {
+    onSummaryChange(summary);
+  }, [onSummaryChange, summary]);
 
   const loadCalendar = useCallback(async (signal?: AbortSignal) => {
     const epoch = ++calendarEpochRef.current;

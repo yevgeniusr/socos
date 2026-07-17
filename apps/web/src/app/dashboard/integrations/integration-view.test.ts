@@ -1,7 +1,60 @@
 import { describe, expect, it } from "vitest";
 
 import { ApiError } from "@/lib/api-client";
-import { integrationFailure, parseCalendarResult } from "./integration-view";
+import type {
+  CalendarConnectionResponse,
+  CalendarSourcesResponse,
+  LoadableIntegration,
+} from "@/lib/integration-contracts";
+import {
+  calendarAccessSummary,
+  hasExactReadOnlyCalendarScopes,
+  integrationFailure,
+  parseCalendarResult,
+} from "./integration-view";
+
+const REQUIRED_SCOPES = [
+  "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+  "https://www.googleapis.com/auth/calendar.events.readonly",
+];
+
+type CalendarState = LoadableIntegration<{
+  connection: CalendarConnectionResponse;
+  sources: CalendarSourcesResponse;
+}>;
+
+const activeConnection = {
+  id: "calendar-connection",
+  status: "active",
+  grantedScopes: REQUIRED_SCOPES,
+  lastSyncedAt: null,
+  errorCode: null,
+  createdAt: "2026-07-17T08:00:00.000Z",
+  updatedAt: "2026-07-17T08:00:00.000Z",
+};
+
+const sources = [
+  {
+    id: "primary",
+    name: "Primary",
+    timeZone: "Asia/Dubai",
+    selected: true,
+    isPrimary: true,
+    fullSyncRequired: false,
+    lastSyncedAt: null,
+    errorCode: null,
+  },
+  {
+    id: "shared",
+    name: "Shared",
+    timeZone: "Asia/Dubai",
+    selected: false,
+    isPrimary: false,
+    fullSyncRequired: false,
+    lastSyncedAt: null,
+    errorCode: null,
+  },
+];
 
 describe("integrationFailure", () => {
   it("maps only the configured feature-gate response to disabled", () => {
@@ -60,5 +113,102 @@ describe("parseCalendarResult", () => {
 
   it("rejects any other value", () => {
     expect(parseCalendarResult("anything-else")).toBeNull();
+  });
+});
+
+describe("hasExactReadOnlyCalendarScopes", () => {
+  it("accepts exactly the two required read-only scopes in any order", () => {
+    expect(hasExactReadOnlyCalendarScopes(REQUIRED_SCOPES)).toBe(true);
+    expect(hasExactReadOnlyCalendarScopes([...REQUIRED_SCOPES].reverse())).toBe(
+      true
+    );
+  });
+
+  it.each([
+    { scopes: [REQUIRED_SCOPES[0]] },
+    { scopes: [...REQUIRED_SCOPES, REQUIRED_SCOPES[0]] },
+    {
+      scopes: [...REQUIRED_SCOPES, "https://www.googleapis.com/auth/calendar"],
+    },
+    { scopes: ["https://www.googleapis.com/auth/calendar.readonly"] },
+  ])("rejects incomplete, duplicate, extra, or broad grants", ({ scopes }) => {
+    expect(hasExactReadOnlyCalendarScopes(scopes)).toBe(false);
+  });
+});
+
+describe("calendarAccessSummary", () => {
+  it("reports exact read-only access and selected source counts", () => {
+    const state: CalendarState = {
+      status: "ready",
+      data: { connection: activeConnection, sources },
+    };
+
+    expect(calendarAccessSummary(state)).toEqual({
+      state: "active",
+      accessLabel: "Read only",
+      sourceLabel: "1 of 2 calendars included",
+    });
+  });
+
+  it("flags an active connection whose scopes do not match exactly", () => {
+    const state: CalendarState = {
+      status: "ready",
+      data: {
+        connection: {
+          ...activeConnection,
+          grantedScopes: [...REQUIRED_SCOPES, REQUIRED_SCOPES[0]],
+        },
+        sources,
+      },
+    };
+
+    expect(calendarAccessSummary(state)).toEqual({
+      state: "review",
+      accessLabel: "Scope needs review",
+      sourceLabel: "1 of 2 calendars included",
+    });
+  });
+
+  it.each([
+    [
+      { status: "loading" } satisfies CalendarState,
+      {
+        state: "loading",
+        accessLabel: "Checking Calendar access",
+        sourceLabel: "Calendar sources loading",
+      },
+    ],
+    [
+      { status: "disabled" } satisfies CalendarState,
+      {
+        state: "disabled",
+        accessLabel: "Calendar not enabled",
+        sourceLabel: "Calendar sources unavailable",
+      },
+    ],
+    [
+      {
+        status: "error",
+        message: "private provider detail",
+      } satisfies CalendarState,
+      {
+        state: "error",
+        accessLabel: "Calendar needs attention",
+        sourceLabel: "Calendar sources unavailable",
+      },
+    ],
+    [
+      {
+        status: "ready",
+        data: { connection: null, sources: [] },
+      } satisfies CalendarState,
+      {
+        state: "disconnected",
+        accessLabel: "Calendar not connected",
+        sourceLabel: "No calendars available",
+      },
+    ],
+  ])("reports a truthful non-active state", (state, expected) => {
+    expect(calendarAccessSummary(state)).toEqual(expected);
   });
 });

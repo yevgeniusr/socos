@@ -50,15 +50,36 @@ describe("AgentToolHandlers", () => {
   it("uses the transaction-aware interaction seam and least-privilege presenter", async () => {
     const { handlers, interactions } = harness();
     const transaction = { id: "tx" } as never;
-    interactions.createForAgent.mockResolvedValue({
-      interactionId: "interaction-synthetic",
-      contactId: "contact-synthetic",
-      type: "call",
-      occurredAt: new Date("2026-07-16T12:00:00.000Z"),
-      xpAwarded: 10,
-      totalXp: 100,
-      level: 2,
-    });
+    const receipt = {
+      interaction: {
+        id: "interaction-synthetic",
+        contactId: "contact-synthetic",
+        type: "call",
+        title: null,
+        content: "Private content",
+        summary: null,
+        occurredAt: "2026-07-16T12:00:00.000Z",
+        duration: null,
+        location: null,
+        xpEarned: 10,
+        createdAt: "2026-07-16T12:00:00.000Z",
+      },
+      lastContact: {
+        previousAt: null,
+        resultingAt: "2026-07-16T12:00:00.000Z",
+        advanced: true,
+      },
+      xp: {
+        interactionDelta: 10,
+        achievementDelta: 0,
+        totalDelta: 10,
+        totalAfter: 100,
+        levelAfter: 2,
+      },
+      outcome: "Recorded only; nothing sent",
+      createdAt: "2026-07-16T12:00:00.000Z",
+    };
+    interactions.createForAgent.mockResolvedValue(receipt);
     const input = {
       idempotencyKey: "interaction:intent-001",
       contactId: "contact-synthetic",
@@ -68,12 +89,7 @@ describe("AgentToolHandlers", () => {
 
     await expect(
       handlers.logInteraction(principal, input, transaction)
-    ).resolves.toEqual({
-      interactionId: "interaction-synthetic",
-      type: "call",
-      occurredAt: "2026-07-16T12:00:00.000Z",
-      xpEarned: 10,
-    });
+    ).resolves.toEqual(receipt);
     expect(interactions.createForAgent).toHaveBeenCalledWith(
       principal.ownerId,
       {
@@ -83,6 +99,52 @@ describe("AgentToolHandlers", () => {
       },
       transaction
     );
+  });
+
+  it("returns the exact durable receipt envelope for agent interaction writes", async () => {
+    const { handlers, interactions } = harness();
+    const receipt = {
+      interaction: {
+        id: "interaction-synthetic",
+        contactId: "contact-synthetic",
+        type: "call",
+        title: null,
+        content: null,
+        summary: null,
+        occurredAt: "2026-07-16T12:00:00.000Z",
+        duration: null,
+        location: null,
+        xpEarned: 10,
+        createdAt: "2026-07-16T12:00:00.000Z",
+      },
+      lastContact: {
+        previousAt: null,
+        resultingAt: "2026-07-16T12:00:00.000Z",
+        advanced: true,
+      },
+      xp: {
+        interactionDelta: 10,
+        achievementDelta: 0,
+        totalDelta: 10,
+        totalAfter: 100,
+        levelAfter: 2,
+      },
+      outcome: "Recorded only; nothing sent",
+      createdAt: "2026-07-16T12:00:00.000Z",
+    };
+    interactions.createForAgent.mockResolvedValue(receipt);
+
+    await expect(
+      handlers.logInteraction(
+        principal,
+        {
+          idempotencyKey: "interaction:intent-002",
+          contactId: "contact-synthetic",
+          type: InteractionType.CALL,
+        },
+        { id: "tx" } as never
+      )
+    ).resolves.toEqual(receipt);
   });
 
   it("uses createForAgent for reminders and never the outbound-capable legacy create", async () => {

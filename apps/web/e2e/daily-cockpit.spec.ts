@@ -471,9 +471,8 @@ async function installApi(
       url.pathname === "/api/contacts/contact-synthetic/interactions" &&
       method === "POST"
     ) {
-      state.interactionBodies.push(
-        request.postDataJSON() as Record<string, unknown>
-      );
+      const body = request.postDataJSON() as Record<string, unknown>;
+      state.interactionBodies.push(body);
       state.interactionKeys.push(request.headers()["idempotency-key"] ?? "");
       if (
         options.loseFirstInteractionResponse &&
@@ -484,7 +483,35 @@ async function installApi(
           { message: "Synthetic lost interaction response" },
           503
         );
-      return json(route, { interaction: { id: "interaction-evidence" } });
+      return json(route, {
+        interaction: {
+          id: "interaction-evidence",
+          contactId: "contact-synthetic",
+          type: body.type,
+          title: body.title,
+          content: body.content,
+          summary: null,
+          occurredAt: body.occurredAt,
+          duration: null,
+          location: null,
+          xpEarned: 10,
+          createdAt: "2026-07-17T12:00:00.000Z",
+        },
+        lastContact: {
+          previousAt: null,
+          resultingAt: body.occurredAt,
+          advanced: true,
+        },
+        xp: {
+          interactionDelta: 10,
+          achievementDelta: 0,
+          totalDelta: 10,
+          totalAfter: 130,
+          levelAfter: 2,
+        },
+        outcome: "Recorded only; nothing sent",
+        createdAt: "2026-07-17T12:00:00.000Z",
+      });
     }
     const questComplete = url.pathname.match(
       /^\/api\/briefs\/quests\/([^/]+)\/complete$/
@@ -1034,6 +1061,11 @@ test("retries a lost quest-completion response with one verified receipt", async
   await expect(dialog.getByRole("alert")).toContainText(
     "Synthetic lost quest completion response"
   );
+  await expect(
+    dialog.getByRole("heading", { name: "Interaction recorded" })
+  ).toHaveCount(1);
+  await expect(page.getByRole("status")).toHaveCount(1);
+  await expect(dialog.getByText("Interaction +10 XP; achievements +0 XP; total +10 XP")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Quest verified" })).toHaveCount(0);
   expect(api.interactionBodies).toHaveLength(1);
   expect(api.questCompletionKeys).toHaveLength(1);
@@ -1042,13 +1074,23 @@ test("retries a lost quest-completion response with one verified receipt", async
   await expect(dialog).toBeHidden();
   await expect(page.getByRole("heading", { name: "Quest verified" })).toHaveCount(1);
   await expect(page.getByRole("heading", { name: "Quest verified" })).toBeFocused();
+  await expect(page.getByRole("status")).toHaveCount(1);
   await expect(page.getByText("+20 XP awarded")).toHaveCount(1);
+  await expect(
+    page.getByRole("heading", { name: "Interaction recorded" })
+  ).toHaveCount(1);
+  await expect(
+    page.getByText("Interaction +10 XP; achievements +0 XP; total +10 XP")
+  ).toHaveCount(1);
+  await expect(page.getByText("Verified notes")).toHaveCount(0);
+  await expect(page.getByText("Completed call")).toHaveCount(0);
   await expect(page.getByText("Verified Jul 17, 4:00 AM")).toBeVisible();
   await expect(page.getByText("Synthetic brief refresh failure")).toBeVisible();
   expect(api.interactionBodies).toHaveLength(1);
   expect(api.questCompletionKeys).toHaveLength(2);
   expect(api.questCompletionKeys[1]).toBe(api.questCompletionKeys[0]);
   expect(api.questCompletionKeys[0]).toMatch(/^[A-Za-z0-9._:-]{8,128}$/);
+
 });
 
 test("retries a mismatched committed quest response with the same intent key", async ({
@@ -1121,11 +1163,17 @@ test("moves focus to the verified receipt after each successful quest", async ({
     .click();
   await expect(interactionDialog).toBeHidden();
   await expect(receiptHeading).toBeFocused();
+  await expect(
+    page.getByRole("heading", { name: "Interaction recorded" })
+  ).toHaveCount(1);
 
   const reminderQuest = page
     .locator("li")
     .filter({ hasText: "Complete the synthetic reminder" });
   await reminderQuest.getByRole("button", { name: "Complete quest" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Interaction recorded" })
+  ).toHaveCount(0);
   const reminderDialog = page.getByRole("dialog", {
     name: "Complete the synthetic reminder",
   });

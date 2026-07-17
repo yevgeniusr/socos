@@ -138,6 +138,36 @@ export interface CreateInteractionPayload {
   occurredAt: string;
 }
 
+export interface InteractionReceiptEnvelope {
+  interaction: {
+    id: string;
+    contactId: string;
+    type: string;
+    title: string | null;
+    content: string | null;
+    summary: string | null;
+    occurredAt: string;
+    duration: number | null;
+    location: string | null;
+    xpEarned: number;
+    createdAt: string;
+  };
+  lastContact: {
+    previousAt: string | null;
+    resultingAt: string | null;
+    advanced: boolean;
+  };
+  xp: {
+    interactionDelta: number;
+    achievementDelta: number;
+    totalDelta: number;
+    totalAfter: number;
+    levelAfter: number;
+  };
+  outcome: "Recorded only; nothing sent";
+  createdAt: string;
+}
+
 export interface CreateReminderPayload {
   contactId: string;
   type: ReminderType;

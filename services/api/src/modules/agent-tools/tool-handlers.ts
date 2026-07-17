@@ -207,12 +207,7 @@ export class AgentToolHandlers {
       dto,
       transaction
     );
-    return {
-      interactionId: created.interactionId,
-      type: created.type,
-      occurredAt: created.occurredAt.toISOString(),
-      xpEarned: created.xpAwarded,
-    };
+    return created;
   }
 
   async createReminder(

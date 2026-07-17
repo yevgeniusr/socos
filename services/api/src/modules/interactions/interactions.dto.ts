@@ -77,19 +77,37 @@ export class LogInteractionResponseDto {
   @ApiProperty()
   interaction: {
     id: string;
+    contactId: string;
     type: string;
     title: string | null;
-    occurredAt: Date;
+    content: string | null;
+    summary: string | null;
+    occurredAt: string;
+    duration: number | null;
+    location: string | null;
     xpEarned: number;
+    createdAt: string;
   };
 
   @ApiProperty()
-  user: {
-    xp: number;
-    level: number;
-    xpToNextLevel: number;
+  lastContact: {
+    previousAt: string | null;
+    resultingAt: string | null;
+    advanced: boolean;
   };
 
-  @ApiPropertyOptional()
-  newAchievements?: string[];
+  @ApiProperty()
+  xp: {
+    interactionDelta: number;
+    achievementDelta: number;
+    totalDelta: number;
+    totalAfter: number;
+    levelAfter: number;
+  };
+
+  @ApiProperty({ example: 'Recorded only; nothing sent' })
+  outcome: 'Recorded only; nothing sent';
+
+  @ApiProperty()
+  createdAt: string;
 }

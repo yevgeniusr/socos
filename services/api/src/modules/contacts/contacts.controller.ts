@@ -1,5 +1,5 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Request, Headers } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiHeader } from '@nestjs/swagger';
 import { ContactsService } from './contacts.service.js';
 import { CreateContactDto, UpdateContactDto, ContactQueryDto } from './contacts.dto.js';
 import { AuthGuard } from '../auth/auth.guard.js';
@@ -8,6 +8,7 @@ import {
   CreateInteractionDto,
 } from '../interactions/interactions.dto.js';
 import { InteractionsService } from '../interactions/interactions.service.js';
+import { requireHumanIdempotencyKey } from '../../common/human-idempotency.service.js';
 
 @ApiTags('contacts')
 @Controller('contacts')
@@ -95,6 +96,7 @@ export class ContactsController {
 
   @Post(':id/interactions')
   @ApiOperation({ summary: 'Log an interaction for a contact' })
+  @ApiHeader({ name: 'Idempotency-Key', required: true })
   async createInteraction(
     @Request() req: { user: { userId: string } },
     @Param('id') contactId: string,
@@ -102,9 +104,11 @@ export class ContactsController {
     @Headers('idempotency-key') idempotencyKey?: string,
   ) {
     const interaction: CreateInteractionDto = { ...dto, contactId };
-    return idempotencyKey
-      ? this.interactionsService.create(req.user.userId, interaction, idempotencyKey)
-      : this.interactionsService.create(req.user.userId, interaction);
+    return this.interactionsService.create(
+      req.user.userId,
+      interaction,
+      requireHumanIdempotencyKey(idempotencyKey),
+    );
   }
 
   @Get(':id/interactions')

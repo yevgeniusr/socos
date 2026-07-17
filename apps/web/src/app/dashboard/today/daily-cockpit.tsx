@@ -5,6 +5,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useDashboard } from "../_components/dashboard-shell";
 import { ApiError, apiJson } from "@/lib/api-client";
+import type { InteractionReceiptEnvelope } from "@/lib/contact-contracts";
+import InteractionReceipt from "@/components/interaction-receipt";
 import type {
   DailyBrief,
   ProposalHistoryResponse,
@@ -103,6 +105,8 @@ export default function DailyCockpit() {
   const [questReceipt, setQuestReceipt] = useState<
     (QuestReceipt & { timeZone: string }) | null
   >(null);
+  const [questInteractionReceipt, setQuestInteractionReceipt] =
+    useState<InteractionReceiptEnvelope | null>(null);
   const reminderTriggerRef = useRef<HTMLButtonElement>(null);
   const reminderReceiptFocusRef = useRef<HTMLHeadingElement>(null);
   const questTriggerRef = useRef<HTMLButtonElement>(null);
@@ -121,15 +125,23 @@ export default function DailyCockpit() {
   );
 
   const closeQuestDialog = useCallback(
-    (focusTarget: "trigger" | "receipt" = "trigger") => {
+    (focusTarget: "trigger" | "receipt" | "none" = "trigger") => {
       setSelectedQuest(null);
       if (focusTarget === "receipt")
         window.requestAnimationFrame(() => questReceiptFocusRef.current?.focus());
-      else
+      else if (focusTarget === "trigger")
         window.requestAnimationFrame(() => questTriggerRef.current?.focus());
     },
     []
   );
+
+  useEffect(() => {
+    if (!questReceipt) return;
+    const frame = window.requestAnimationFrame(() =>
+      questReceiptFocusRef.current?.focus()
+    );
+    return () => window.cancelAnimationFrame(frame);
+  }, [questReceipt]);
 
   const loadBrief = useCallback((signal?: AbortSignal, preserve = false) => {
     if (!preserve) setBrief({ status: "loading" });
@@ -500,11 +512,20 @@ export default function DailyCockpit() {
               </p>
             </section>
           ) : null}
+          {questInteractionReceipt ? (
+            <InteractionReceipt
+              receipt={questInteractionReceipt}
+              detail="compact"
+              live={false}
+            />
+          ) : null}
           {brief.status === "ready" ? (
             <QuestList
               quests={brief.data.quests}
               onOpen={(quest, trigger) => {
                 questTriggerRef.current = trigger;
+                setQuestReceipt(null);
+                setQuestInteractionReceipt(null);
                 setSelectedQuest(quest);
               }}
             />
@@ -580,9 +601,10 @@ export default function DailyCockpit() {
         <QuestCompletionDialog
           quest={selectedQuest}
           onClose={closeQuestDialog}
-          onSuccess={async (receipt) => {
+          onSuccess={(receipt, interactionReceipt) => {
             setQuestReceipt({ ...receipt, timeZone });
-            await refreshQuestData();
+            setQuestInteractionReceipt(interactionReceipt);
+            void refreshQuestData();
           }}
         />
       ) : null}

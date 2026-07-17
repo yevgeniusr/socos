@@ -21,21 +21,97 @@ export interface AgentInteractionInput {
   location?: string;
 }
 
-export interface AgentInteractionResult {
-  interactionId: string;
-  contactId: string;
-  type: string;
-  occurredAt: Date;
-  xpAwarded: number;
-  totalXp: number;
-  level: number;
+export interface InteractionReceiptEnvelope {
+  interaction: {
+    id: string;
+    contactId: string;
+    type: string;
+    title: string | null;
+    content: string | null;
+    summary: string | null;
+    occurredAt: string;
+    duration: number | null;
+    location: string | null;
+    xpEarned: number;
+    createdAt: string;
+  };
+  lastContact: {
+    previousAt: string | null;
+    resultingAt: string | null;
+    advanced: boolean;
+  };
+  xp: {
+    interactionDelta: number;
+    achievementDelta: number;
+    totalDelta: number;
+    totalAfter: number;
+    levelAfter: number;
+  };
+  outcome: "Recorded only; nothing sent";
+  createdAt: string;
 }
 
-interface InteractionWriteResult extends AgentInteractionResult {
-  title: string | null;
+export type AgentInteractionResult = InteractionReceiptEnvelope;
+
+interface InteractionWriteResult {
+  receipt: InteractionReceiptEnvelope;
   newAchievements: string[];
   rewardNotifications: InteractionRewardNotifications;
 }
+
+interface PersistedInteractionReceipt {
+  previousLastContactedAt: Date | null;
+  resultingLastContactedAt: Date | null;
+  lastContactAdvanced: boolean;
+  interactionXpDelta: number;
+  achievementXpDelta: number;
+  totalXpDelta: number;
+  totalXpAfter: number;
+  levelAfter: number;
+  createdAt: Date;
+  interaction: {
+    id: string;
+    contactId: string;
+    type: string;
+    title: string | null;
+    content: string | null;
+    summary: string | null;
+    occurredAt: Date;
+    duration: number | null;
+    location: string | null;
+    xpEarned: number;
+    createdAt: Date;
+  };
+}
+
+const RECORDED_ONLY_OUTCOME = "Recorded only; nothing sent" as const;
+
+const INTERACTION_RECEIPT_SELECT = {
+  previousLastContactedAt: true,
+  resultingLastContactedAt: true,
+  lastContactAdvanced: true,
+  interactionXpDelta: true,
+  achievementXpDelta: true,
+  totalXpDelta: true,
+  totalXpAfter: true,
+  levelAfter: true,
+  createdAt: true,
+  interaction: {
+    select: {
+      id: true,
+      contactId: true,
+      type: true,
+      title: true,
+      content: true,
+      summary: true,
+      occurredAt: true,
+      duration: true,
+      location: true,
+      xpEarned: true,
+      createdAt: true,
+    },
+  },
+} as const;
 
 function levelForXp(totalXp: number): number {
   return Math.floor(Math.sqrt(totalXp / 100)) + 1;
@@ -75,7 +151,7 @@ export class InteractionsService {
           (tx) => this.createForAgentInTransaction(tx, ownerId, input),
           { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
         );
-    return this.toAgentResult(result);
+    return result.receipt;
   }
 
   async create(
@@ -83,53 +159,34 @@ export class InteractionsService {
     dto: CreateInteractionDto,
     idempotencyKey?: string,
   ) {
-    if (idempotencyKey) {
-      if (!this.humanIdempotencyService) {
-        throw new Error('Human idempotency service is unavailable.');
-      }
-      const result = await this.humanIdempotencyService.execute(
-        userId,
-        'interaction:create',
-        idempotencyKey,
-        dto,
-        async (tx) => {
-          const write = await this.createForAgentInTransaction(tx, userId, dto);
-          return {
-            response: this.toHumanResult(write),
-            rewardNotifications: write.rewardNotifications,
-          };
-        },
+    if (idempotencyKey === undefined) {
+      const write = await this.prisma.$transaction(
+        (tx) => this.createForAgentInTransaction(tx, userId, dto),
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
-      if (!result.replayed) {
-        this.notifyInteractionRewards(userId, result.value.rewardNotifications);
-      }
-      return result.value.response;
+      this.notifyInteractionRewards(userId, write.rewardNotifications);
+      return write.receipt;
     }
-
-    const result = await this.prisma.$transaction(
-      (tx) => this.createForAgentInTransaction(tx, userId, dto),
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+    if (!this.humanIdempotencyService) {
+      throw new Error('Human idempotency service is unavailable.');
+    }
+    const result = await this.humanIdempotencyService.execute(
+      userId,
+      'interaction:create',
+      idempotencyKey,
+      dto,
+      async (tx) => {
+        const write = await this.createForAgentInTransaction(tx, userId, dto);
+        return {
+          receipt: write.receipt,
+          rewardNotifications: write.rewardNotifications,
+        };
+      },
     );
-    this.notifyInteractionRewards(userId, result.rewardNotifications);
-    return this.toHumanResult(result);
-  }
-
-  private toHumanResult(result: InteractionWriteResult) {
-    return {
-      interaction: {
-        id: result.interactionId,
-        type: result.type,
-        title: result.title,
-        occurredAt: result.occurredAt,
-        xpEarned: result.xpAwarded,
-      },
-      user: {
-        xp: result.totalXp,
-        level: result.level,
-        xpToNextLevel: Math.pow(result.level, 2) * 100,
-      },
-      newAchievements: result.newAchievements,
-    };
+    if (!result.replayed) {
+      this.notifyInteractionRewards(userId, result.value.rewardNotifications);
+    }
+    return result.value.receipt;
   }
 
   private notifyInteractionRewards(
@@ -196,6 +253,18 @@ export class InteractionsService {
     return interactions;
   }
 
+  async getReceipt(
+    userId: string,
+    interactionId: string,
+  ): Promise<InteractionReceiptEnvelope> {
+    const receipt = await this.prisma.interactionReceipt.findFirst({
+      where: { interactionId, ownerId: userId },
+      select: INTERACTION_RECEIPT_SELECT,
+    });
+    if (!receipt) throw new NotFoundException('Interaction receipt not found');
+    return this.toReceiptEnvelope(receipt);
+  }
+
   async delete(userId: string, interactionId: string) {
     const interaction = await this.prisma.interaction.findFirst({
       where: { id: interactionId, ownerId: userId },
@@ -244,6 +313,7 @@ export class InteractionsService {
         id: true,
         ownerId: true,
         isDemo: true,
+        lastContactedAt: true,
       },
     });
     if (!contact || contact.ownerId !== ownerId || contact.isDemo) {
@@ -275,12 +345,17 @@ export class InteractionsService {
         contactId: true,
         type: true,
         title: true,
+        content: true,
+        summary: true,
         occurredAt: true,
+        duration: true,
+        location: true,
         xpEarned: true,
+        createdAt: true,
       },
     });
 
-    await transaction.contact.updateMany({
+    const contactAdvance = await transaction.contact.updateMany({
       where: {
         id: input.contactId,
         ownerId,
@@ -377,15 +452,29 @@ export class InteractionsService {
       });
     }
 
+    const lastContactAdvanced = contactAdvance.count === 1;
+    const resultingLastContactedAt = lastContactAdvanced
+      ? interaction.occurredAt
+      : contact.lastContactedAt;
+    const totalXpDelta = interaction.xpEarned + achievementXpAwarded;
+    const receipt = await transaction.interactionReceipt.create({
+      data: {
+        interactionId: interaction.id,
+        ownerId,
+        previousLastContactedAt: contact.lastContactedAt,
+        resultingLastContactedAt,
+        lastContactAdvanced,
+        interactionXpDelta: interaction.xpEarned,
+        achievementXpDelta: achievementXpAwarded,
+        totalXpDelta,
+        totalXpAfter: user.xp,
+        levelAfter: user.level,
+      },
+      select: INTERACTION_RECEIPT_SELECT,
+    });
+
     return {
-      interactionId: interaction.id,
-      contactId: interaction.contactId,
-      type: interaction.type,
-      title: interaction.title,
-      occurredAt: interaction.occurredAt,
-      xpAwarded: interaction.xpEarned,
-      totalXp: user.xp,
-      level: user.level,
+      receipt: this.toReceiptEnvelope(receipt),
       newAchievements,
       rewardNotifications: {
         achievements: achievementNotifications,
@@ -395,15 +484,37 @@ export class InteractionsService {
     };
   }
 
-  private toAgentResult(result: InteractionWriteResult): AgentInteractionResult {
+  private toReceiptEnvelope(
+    result: PersistedInteractionReceipt,
+  ): InteractionReceiptEnvelope {
     return {
-      interactionId: result.interactionId,
-      contactId: result.contactId,
-      type: result.type,
-      occurredAt: result.occurredAt,
-      xpAwarded: result.xpAwarded,
-      totalXp: result.totalXp,
-      level: result.level,
+      interaction: {
+        id: result.interaction.id,
+        contactId: result.interaction.contactId,
+        type: result.interaction.type,
+        title: result.interaction.title,
+        content: result.interaction.content,
+        summary: result.interaction.summary,
+        occurredAt: result.interaction.occurredAt.toISOString(),
+        duration: result.interaction.duration,
+        location: result.interaction.location,
+        xpEarned: result.interaction.xpEarned,
+        createdAt: result.interaction.createdAt.toISOString(),
+      },
+      lastContact: {
+        previousAt: result.previousLastContactedAt?.toISOString() ?? null,
+        resultingAt: result.resultingLastContactedAt?.toISOString() ?? null,
+        advanced: result.lastContactAdvanced,
+      },
+      xp: {
+        interactionDelta: result.interactionXpDelta,
+        achievementDelta: result.achievementXpDelta,
+        totalDelta: result.totalXpDelta,
+        totalAfter: result.totalXpAfter,
+        levelAfter: result.levelAfter,
+      },
+      outcome: RECORDED_ONLY_OUTCOME,
+      createdAt: result.createdAt.toISOString(),
     };
   }
 }

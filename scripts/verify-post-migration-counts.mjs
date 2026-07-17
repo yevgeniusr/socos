@@ -5,7 +5,9 @@ import { resolve } from 'node:path';
 
 const databaseUrl = process.env.DATABASE_URL;
 const metadataPath = process.argv[2];
-const migrationsRoot = resolve('services/api/prisma/migrations');
+const migrationsRoot = resolve(
+  process.env.SOCOS_MIGRATIONS_ROOT ?? 'services/api/prisma/migrations',
+);
 const expectedMigrationCount = readdirSync(migrationsRoot)
   .filter((name) => existsSync(resolve(migrationsRoot, name, 'migration.sql')))
   .length;
@@ -37,11 +39,13 @@ const eventDiscoveryTables = [
   'EventSource',
 ];
 const humanIdempotencyTables = ['HumanIdempotencyRecord'];
+const interactionReceiptTables = ['InteractionReceipt'];
 const introducedTableRollouts = [
   { migrationCount: 7, label: 'agent-interface tables', tables: agentInterfaceTables },
   { migrationCount: 8, label: 'calendar-location tables', tables: calendarLocationTables },
   { migrationCount: 9, label: 'event-discovery tables', tables: eventDiscoveryTables },
   { migrationCount: 11, label: 'human-idempotency tables', tables: humanIdempotencyTables },
+  { migrationCount: 12, label: 'interaction-receipt tables', tables: interactionReceiptTables },
 ];
 const allowedNewTables = new Set([
   ...introducedTableRollouts.flatMap((rollout) => rollout.tables),
@@ -115,14 +119,13 @@ const result = spawnSync(
   'psql',
   [
     '-X',
-    databaseUrl,
     '--set=ON_ERROR_STOP=1',
     '--no-align',
     '--field-separator=\t',
     '--pset=footer=off',
     `--command=${query}`,
   ],
-  { encoding: 'utf8' },
+  { encoding: 'utf8', env: { ...process.env, PGDATABASE: databaseUrl } },
 );
 
 if (result.error || result.status !== 0) {

@@ -359,7 +359,7 @@ export default function EventDiscoveryPanel() {
                           onClick={() =>
                             setPendingAction({ kind: "disable", source })
                           }
-                          className="flex size-11 items-center justify-center border border-outline-variant/60 text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
+                          className="flex min-h-11 items-center justify-center gap-2 border border-outline-variant/60 px-3 text-sm font-bold text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50 sm:size-11 sm:px-0"
                         >
                           <span
                             className="material-symbols-outlined"
@@ -367,6 +367,7 @@ export default function EventDiscoveryPanel() {
                           >
                             pause
                           </span>
+                          <span className="sm:hidden">Disable</span>
                         </button>
                       ) : (
                         <button
@@ -375,7 +376,7 @@ export default function EventDiscoveryPanel() {
                           aria-label={`Enable ${source.name}`}
                           title={`Enable ${source.name}`}
                           onClick={() => void setSourceStatus(source, "active")}
-                          className="flex size-11 items-center justify-center border border-secondary/50 text-secondary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
+                          className="flex min-h-11 items-center justify-center gap-2 border border-secondary/50 px-3 text-sm font-bold text-secondary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50 sm:size-11 sm:px-0"
                         >
                           <span
                             className="material-symbols-outlined"
@@ -383,6 +384,7 @@ export default function EventDiscoveryPanel() {
                           >
                             play_arrow
                           </span>
+                          <span className="sm:hidden">Enable</span>
                         </button>
                       )}
                       <button
@@ -393,7 +395,7 @@ export default function EventDiscoveryPanel() {
                         onClick={() =>
                           setPendingAction({ kind: "remove", source })
                         }
-                        className="flex size-11 items-center justify-center border border-error/50 text-error focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
+                        className="flex min-h-11 items-center justify-center gap-2 border border-error/50 bg-error/5 px-3 text-sm font-bold text-error focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50 sm:size-11 sm:px-0"
                       >
                         <span
                           className="material-symbols-outlined"
@@ -401,6 +403,7 @@ export default function EventDiscoveryPanel() {
                         >
                           delete
                         </span>
+                        <span className="sm:hidden">Remove</span>
                       </button>
                     </div>
                   </div>

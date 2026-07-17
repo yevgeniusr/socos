@@ -333,7 +333,7 @@ export default function PixelLocationPanel() {
                               event.currentTarget;
                             setPendingAction({ kind: "rotate", device });
                           }}
-                          className="flex size-11 items-center justify-center border border-outline-variant/60 text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
+                          className="flex min-h-11 items-center justify-center gap-2 border border-outline-variant/60 px-3 text-sm font-bold text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50 sm:size-11 sm:px-0"
                         >
                           <span
                             className="material-symbols-outlined"
@@ -341,6 +341,7 @@ export default function PixelLocationPanel() {
                           >
                             key
                           </span>
+                          <span className="sm:hidden">Rotate</span>
                         </button>
                         <button
                           type="button"
@@ -350,7 +351,7 @@ export default function PixelLocationPanel() {
                           onClick={() =>
                             setPendingAction({ kind: "revoke", device })
                           }
-                          className="flex size-11 items-center justify-center border border-error/50 text-error focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
+                          className="flex min-h-11 items-center justify-center gap-2 border border-error/50 bg-error/5 px-3 text-sm font-bold text-error focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50 sm:size-11 sm:px-0"
                         >
                           <span
                             className="material-symbols-outlined"
@@ -358,6 +359,7 @@ export default function PixelLocationPanel() {
                           >
                             block
                           </span>
+                          <span className="sm:hidden">Revoke</span>
                         </button>
                       </div>
                     ) : null}

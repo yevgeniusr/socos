@@ -27,7 +27,10 @@ test.afterEach(async ({ page }) => {
 const calendarConnection = {
   id: "calendar-connection",
   status: "active",
-  grantedScopes: ["https://www.googleapis.com/auth/calendar.readonly"],
+  grantedScopes: [
+    "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+    "https://www.googleapis.com/auth/calendar.events.readonly",
+  ],
   lastSyncedAt: ISO_NOW,
   errorCode: null,
   createdAt: ISO_NOW,
@@ -41,6 +44,16 @@ const calendarSources = [
     timeZone: "Asia/Dubai",
     selected: true,
     isPrimary: true,
+    fullSyncRequired: false,
+    lastSyncedAt: ISO_NOW,
+    errorCode: null,
+  },
+  {
+    id: "calendar-source-shared",
+    name: "Synthetic shared calendar",
+    timeZone: "Asia/Dubai",
+    selected: false,
+    isPrimary: false,
     fullSyncRequired: false,
     lastSyncedAt: ISO_NOW,
     errorCode: null,
@@ -109,6 +122,7 @@ type SyntheticOptions = {
   eventDisabled?: boolean;
   failCalendarConnect?: boolean;
   pixelRevokedWithHistory?: boolean;
+  calendarScopes?: string[];
 };
 
 async function json(route: Route, body: unknown, status = 200) {
@@ -145,6 +159,7 @@ async function installSyntheticApi(page: Page, options: SyntheticOptions = {}) {
     calendarFailuresRemaining: options.calendarFailures ?? 0,
     calendarConnection: {
       ...calendarConnection,
+      grantedScopes: options.calendarScopes ?? calendarConnection.grantedScopes,
     } as Omit<typeof calendarConnection, "status" | "errorCode"> & {
       status: string;
       errorCode: string | null;
@@ -406,6 +421,11 @@ test.describe("authenticated Integrations workspace", () => {
     await expect(page.getByText(/integration is not configured/i)).toHaveCount(
       0
     );
+    const calendarAccess = page.getByRole("status", {
+      name: "Calendar access",
+    });
+    await expect(calendarAccess).toContainText("Calendar not enabled");
+    await expect(calendarAccess).toContainText("Calendar sources unavailable");
   });
 
   test("connects, selects, receives callback, and truthfully disconnects Calendar", async ({
@@ -418,6 +438,12 @@ test.describe("authenticated Integrations workspace", () => {
     await expect(
       calendar.getByText("Connected", { exact: true })
     ).toBeVisible();
+    const calendarAccess = page.getByRole("status", {
+      name: "Calendar access",
+    });
+    await expect(calendarAccess).toContainText("Read only");
+    await expect(calendarAccess).toContainText("1 of 2 calendars included");
+    await expect(page.getByText(/googleapis\.com\/auth/)).toHaveCount(0);
 
     const calendarCheckbox = calendar.getByRole("checkbox", {
       name: "Use Synthetic primary calendar",
@@ -426,6 +452,7 @@ test.describe("authenticated Integrations workspace", () => {
     await expect
       .poll(() => api.calendarSelectionPayloads)
       .toEqual([{ selected: false }]);
+    await expect(calendarAccess).toContainText("0 of 2 calendars included");
 
     await calendar
       .getByRole("button", { name: "Reconnect Google Calendar" })
@@ -460,6 +487,27 @@ test.describe("authenticated Integrations workspace", () => {
     await expect(disconnectReceipt).not.toContainText(
       "removed the synced Calendar connection"
     );
+    await expect(calendarAccess).toContainText("Calendar not connected");
+    await expect(calendarAccess).toContainText("No calendars available");
+  });
+
+  test("flags active Calendar scope mismatches without exposing scope URLs", async ({
+    page,
+  }) => {
+    await installSyntheticApi(page, {
+      calendarScopes: [
+        ...calendarConnection.grantedScopes,
+        "https://www.googleapis.com/auth/calendar",
+      ],
+    });
+    await page.goto("/dashboard/integrations");
+
+    const calendarAccess = page.getByRole("status", {
+      name: "Calendar access",
+    });
+    await expect(calendarAccess).toContainText("Scope needs review");
+    await expect(calendarAccess).toContainText("1 of 2 calendars included");
+    await expect(page.getByText(/googleapis\.com\/auth/)).toHaveCount(0);
   });
 
   test("shows Pixel credentials once and confirms rotation and revocation", async ({
@@ -523,6 +571,9 @@ test.describe("authenticated Integrations workspace", () => {
     const rotateButton = pixel.getByRole("button", {
       name: "Rotate credentials for Synthetic Pixel",
     });
+    await expect(
+      rotateButton.getByText("Rotate", { exact: true })
+    ).toBeHidden();
     await rotateButton.click();
     const rotate = page.getByRole("dialog", {
       name: "Rotate Pixel credentials",
@@ -1046,10 +1097,51 @@ test.describe("authenticated Integrations workspace", () => {
     await page.getByRole("link", { name: "Integrations" }).click();
     await expect(page).toHaveURL(/\/dashboard\/integrations$/);
 
+    const calendarAccess = page.getByRole("status", {
+      name: "Calendar access",
+    });
+    await expect(calendarAccess).toContainText("Read only");
+    await page.evaluate(() => window.scrollTo(0, 600));
+    await expect
+      .poll(async () =>
+        Math.round((await calendarAccess.boundingBox())?.y ?? -1)
+      )
+      .toBe(56);
+
     const pixel = page.getByRole("region", { name: "Pixel location" });
     const revokeButton = pixel.getByRole("button", {
       name: "Revoke Synthetic Pixel",
     });
+    const rotateButton = pixel.getByRole("button", {
+      name: "Rotate credentials for Synthetic Pixel",
+    });
+    const events = page.getByRole("region", { name: "Event discovery" });
+    const disableButton = events.getByRole("button", {
+      name: "Disable Synthetic Dubai AI",
+    });
+    const removeButton = events.getByRole("button", {
+      name: "Remove Synthetic Dubai AI",
+    });
+    await expect(
+      rotateButton.getByText("Rotate", { exact: true })
+    ).toBeVisible();
+    await expect(
+      revokeButton.getByText("Revoke", { exact: true })
+    ).toBeVisible();
+    await expect(
+      disableButton.getByText("Disable", { exact: true })
+    ).toBeVisible();
+    await expect(
+      removeButton.getByText("Remove", { exact: true })
+    ).toBeVisible();
+    for (const control of [
+      rotateButton,
+      revokeButton,
+      disableButton,
+      removeButton,
+    ]) {
+      expect((await control.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    }
     await revokeButton.click();
     const dialog = page.getByRole("dialog", { name: "Revoke Pixel device" });
     const cancel = dialog.getByRole("button", { name: "Cancel" });

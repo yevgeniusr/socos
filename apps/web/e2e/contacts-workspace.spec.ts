@@ -84,6 +84,7 @@ interface SyntheticApiState {
   writeRequests: Array<{ method: string; pathname: string }>;
   updatePayloads: Array<Record<string, unknown>>;
   interactionPayloads: Array<Record<string, unknown>>;
+  interactionKeys: string[];
   reminderPayloads: Array<Record<string, unknown>>;
   completedReminderIds: string[];
 }
@@ -96,12 +97,20 @@ function json(route: Route, body: unknown, status = 200) {
   });
 }
 
-async function installSyntheticApi(page: Page): Promise<SyntheticApiState> {
+async function installSyntheticApi(
+  page: Page,
+  options: {
+    loseFirstInteractionResponse?: boolean;
+    receiptSummary?: string;
+    receiptLocation?: string;
+  } = {}
+): Promise<SyntheticApiState> {
   const state: SyntheticApiState = {
     listRequests: [],
     writeRequests: [],
     updatePayloads: [],
     interactionPayloads: [],
+    interactionKeys: [],
     reminderPayloads: [],
     completedReminderIds: [],
   };
@@ -194,6 +203,17 @@ async function installSyntheticApi(page: Page): Promise<SyntheticApiState> {
     if (url.pathname === "/api/contacts/synthetic-mentor" && method === "GET") {
       return json(route, contactDetail);
     }
+    if (url.pathname === "/api/contacts/synthetic-second" && method === "GET") {
+      return json(route, {
+        ...contactDetail,
+        id: "synthetic-second",
+        firstName: "Synthetic",
+        lastName: "Second",
+        interactions: [],
+        reminders: [],
+        _count: { interactions: 0, reminders: 0, tasks: 0, gifts: 0 },
+      });
+    }
     if (url.pathname === "/api/contacts/synthetic-mentor" && method === "PUT") {
       state.updatePayloads.push(
         request.postDataJSON() as Record<string, unknown>
@@ -201,10 +221,44 @@ async function installSyntheticApi(page: Page): Promise<SyntheticApiState> {
       return json(route, contactDetail);
     }
     if (url.pathname === "/api/interactions" && method === "POST") {
-      state.interactionPayloads.push(
-        request.postDataJSON() as Record<string, unknown>
-      );
-      return json(route, { interaction: { id: "synthetic-interaction-new" } });
+      const body = request.postDataJSON() as Record<string, unknown>;
+      state.interactionPayloads.push(body);
+      state.interactionKeys.push(request.headers()["idempotency-key"] ?? "");
+      if (
+        options.loseFirstInteractionResponse &&
+        state.interactionPayloads.length === 1
+      ) {
+        return json(route, { message: "Synthetic lost interaction response" }, 503);
+      }
+      return json(route, {
+        interaction: {
+          id: "synthetic-interaction-new",
+          contactId: "synthetic-mentor",
+          type: body.type,
+          title: body.title,
+          content: body.content,
+          summary: options.receiptSummary ?? null,
+          occurredAt: body.occurredAt,
+          duration: null,
+          location: options.receiptLocation ?? null,
+          xpEarned: 10,
+          createdAt: ISO_NOW,
+        },
+        lastContact: {
+          previousAt: "2026-07-10T09:00:00.000Z",
+          resultingAt: body.occurredAt,
+          advanced: true,
+        },
+        xp: {
+          interactionDelta: 10,
+          achievementDelta: 50,
+          totalDelta: 60,
+          totalAfter: 180,
+          levelAfter: 3,
+        },
+        outcome: "Recorded only; nothing sent",
+        createdAt: ISO_NOW,
+      });
     }
     if (url.pathname === "/api/reminders" && method === "POST") {
       state.reminderPayloads.push(
@@ -303,6 +357,128 @@ test.describe("personal Contacts workspace", () => {
     expect(semanticCopy.filter(Boolean).join("\n")).not.toMatch(
       /\b(sent|delivered)\b/i
     );
+  });
+
+  test("keeps and focuses the exact interaction receipt", async ({ page }) => {
+    const api = await installSyntheticApi(page);
+    await page.goto("/dashboard/contacts");
+    await page
+      .getByRole("searchbox", { name: "Search contacts" })
+      .fill("mentor");
+    await page
+      .getByRole("button", {
+        name: "Log call with Synthetic Mentor",
+        exact: true,
+      })
+      .click();
+    const profile = page.getByRole("dialog", { name: "Contact profile" });
+    const form = profile
+      .getByRole("heading", { name: "Log interaction" })
+      .locator("..").locator("..");
+    await form.getByRole("textbox", { name: "Title" }).fill("Receipt call");
+    await form.getByRole("textbox", { name: "Notes" }).fill("Synthetic notes");
+    await form.getByRole("button", { name: "Log interaction" }).click();
+
+    const receipt = profile.getByRole("status");
+    await expect(
+      receipt.getByRole("heading", { name: "Interaction recorded" })
+    ).toBeFocused();
+    await expect(receipt).toContainText("Receipt call");
+    await expect(receipt).toContainText("Last contact advanced");
+    await expect(receipt).toContainText(
+      "Interaction +10 XP; achievements +50 XP; total +60 XP"
+    );
+    await expect(receipt).toContainText("Recorded only; nothing sent");
+    expect(api.interactionKeys[0]).toMatch(/^[A-Za-z0-9._:-]{8,128}$/);
+  });
+
+  test("retries a committed lost interaction response with one receipt", async ({
+    page,
+  }) => {
+    const api = await installSyntheticApi(page, {
+      loseFirstInteractionResponse: true,
+    });
+    await page.goto("/dashboard/contacts");
+    await page
+      .getByRole("searchbox", { name: "Search contacts" })
+      .fill("mentor");
+    await page
+      .getByRole("button", {
+        name: "Log call with Synthetic Mentor",
+        exact: true,
+      })
+      .click();
+    const profile = page.getByRole("dialog", { name: "Contact profile" });
+    const form = profile
+      .getByRole("heading", { name: "Log interaction" })
+      .locator("..").locator("..");
+    await form.getByRole("textbox", { name: "Title" }).fill("Replay call");
+    await form.getByRole("textbox", { name: "Notes" }).fill("Replay notes");
+    await form.getByRole("button", { name: "Log interaction" }).click();
+    await expect(form.getByRole("alert")).toContainText(
+      "Synthetic lost interaction response"
+    );
+
+    await form.getByRole("button", { name: "Log interaction" }).click();
+    expect(api.interactionPayloads).toHaveLength(2);
+    expect(api.interactionPayloads[1]).toEqual(api.interactionPayloads[0]);
+    expect(api.interactionKeys[1]).toBe(api.interactionKeys[0]);
+    expect(api.interactionKeys[0]).toMatch(/^[A-Za-z0-9._:-]{8,128}$/);
+    await expect(
+      profile.getByRole("heading", { name: "Interaction recorded" })
+    ).toHaveCount(1);
+    await expect(profile.getByRole("status")).toHaveCount(1);
+  });
+
+  test("clears an interaction receipt when the contact changes", async ({
+    page,
+  }) => {
+    await installSyntheticApi(page);
+    await page.goto("/dashboard/contacts?contact=synthetic-mentor");
+    const profile = page.getByRole("dialog", { name: "Contact profile" });
+    await profile.getByRole("button", { name: "Log call" }).click();
+    const form = profile
+      .getByRole("heading", { name: "Log interaction" })
+      .locator("..").locator("..");
+    await form.getByRole("textbox", { name: "Title" }).fill("Mentor receipt");
+    await form.getByRole("textbox", { name: "Notes" }).fill("Mentor notes");
+    await form.getByRole("button", { name: "Log interaction" }).click();
+    await expect(
+      profile.getByRole("heading", { name: "Interaction recorded" })
+    ).toHaveCount(1);
+
+    await page.goto("/dashboard/contacts?contact=synthetic-second");
+    await expect(
+      profile.getByRole("heading", { name: "Synthetic Second" }).first()
+    ).toBeVisible();
+    await expect(
+      profile.getByRole("heading", { name: "Interaction recorded" })
+    ).toHaveCount(0);
+  });
+
+  test("wraps exact receipt fields at Pixel width", async ({ page }) => {
+    const longWord = "x".repeat(180);
+    await installSyntheticApi(page, {
+      receiptSummary: `summary${longWord}`,
+      receiptLocation: `location${longWord}`,
+    });
+    await page.setViewportSize({ width: 412, height: 915 });
+    await page.goto("/dashboard/contacts?contact=synthetic-mentor");
+    const profile = page.getByRole("dialog", { name: "Contact profile" });
+    await profile.getByRole("button", { name: "Log call" }).click();
+    const form = profile
+      .getByRole("heading", { name: "Log interaction" })
+      .locator("..").locator("..");
+    await form.getByRole("textbox", { name: "Title" }).fill(`title${longWord}`);
+    await form.getByRole("textbox", { name: "Notes" }).fill(`notes${longWord}`);
+    await form.getByRole("button", { name: "Log interaction" }).click();
+    const receipt = profile.getByRole("status");
+    await expect(receipt).toBeVisible();
+    const overflows = await receipt.locator("p").evaluateAll((elements) =>
+      elements.filter((element) => element.scrollWidth > element.clientWidth)
+        .length
+    );
+    expect(overflows).toBe(0);
   });
 
   test("reaches all contacts and performs profile actions with exact API contracts", async ({
@@ -468,9 +644,18 @@ test.describe("personal Contacts workspace", () => {
       content: "Synthetic browser notes",
       occurredAt: interactionOccurredAt,
     });
-    await profile
-      .getByRole("button", { name: "Close interaction form" })
-      .click();
+    expect(api.interactionKeys[0]).toMatch(/^[A-Za-z0-9._:-]{8,128}$/);
+    const interactionReceipt = profile.getByRole("status");
+    await expect(
+      interactionReceipt.getByRole("heading", { name: "Interaction recorded" })
+    ).toBeFocused();
+    await expect(interactionReceipt).toContainText("Last contact advanced");
+    await expect(interactionReceipt).toContainText(
+      "Interaction +10 XP; achievements +50 XP; total +60 XP"
+    );
+    await expect(interactionReceipt).toContainText(
+      "Recorded only; nothing sent"
+    );
 
     await profile.getByRole("button", { name: "Remind", exact: true }).click();
     const reminderForm = profile

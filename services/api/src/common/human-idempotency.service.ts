@@ -13,6 +13,13 @@ const CLEANUP_BATCH_SIZE = 25;
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const OPERATION_PATTERN = /^[A-Za-z0-9._:-]{3,128}$/;
 
+export function requireHumanIdempotencyKey(value: string | undefined): string {
+  if (!value || !IDEMPOTENCY_KEY_PATTERN.test(value)) {
+    throw new BadRequestException("Invalid idempotency key.");
+  }
+  return value;
+}
+
 export interface HumanIdempotencyResult<T> {
   value: T;
   replayed: boolean;
@@ -30,11 +37,11 @@ export class HumanIdempotencyService {
     execute: (transaction: Prisma.TransactionClient) => Promise<T>
   ): Promise<HumanIdempotencyResult<T>> {
     if (
-      !OPERATION_PATTERN.test(operation) ||
-      !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)
+      !OPERATION_PATTERN.test(operation)
     ) {
       throw new BadRequestException("Invalid idempotency key.");
     }
+    requireHumanIdempotencyKey(idempotencyKey);
 
     let requestHash: string;
     try {

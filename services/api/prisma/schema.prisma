@@ -27,6 +27,7 @@ model User {
   // Relations
   contacts                  Contact[]
   interactions              Interaction[]
+  interactionReceipts       InteractionReceipt[]
   reminders                 Reminder[]
   achievements              UserAchievement[]
   vaults                    Vault[]
@@ -855,9 +856,34 @@ model Interaction {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  receipt InteractionReceipt?
+
   @@index([contactId])
   @@index([ownerId])
   @@index([occurredAt])
+  @@unique([id, ownerId])
+}
+
+model InteractionReceipt {
+  id        String @id @default(cuid())
+  ownerId   String
+  owner     User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  interactionId String      @unique
+  interaction   Interaction @relation(fields: [interactionId, ownerId], references: [id, ownerId], onDelete: Cascade)
+
+  previousLastContactedAt  DateTime?
+  resultingLastContactedAt DateTime?
+  lastContactAdvanced      Boolean
+  interactionXpDelta       Int
+  achievementXpDelta       Int
+  totalXpDelta             Int
+  totalXpAfter             Int
+  levelAfter               Int
+  createdAt                DateTime @default(now())
+
+  @@unique([interactionId, ownerId])
+  @@index([ownerId, createdAt])
 }
 
 // ==================== REMINDER ====================
