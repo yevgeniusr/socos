@@ -483,6 +483,49 @@ process.stdout.write(${JSON.stringify(metadata)});`,
   assert.doesNotMatch(JSON.stringify(call.args), /postgres(?:ql)?:\/\/|secret-password/);
 });
 
+test('worktree cleanup exact-removes only its candidate without globally pruning registrations', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'socos-release-worktree-cleanup-'));
+  const bin = join(dir, 'bin');
+  const repository = join(dir, 'repository');
+  const worktree = join(dir, 'candidate');
+  const outerRegistration = join(dir, 'outer-runner-registration');
+  const callLog = join(dir, 'git-calls.jsonl');
+  spawnSync('mkdir', ['-p', bin, repository, worktree]);
+  writeFileSync(outerRegistration, 'host-only runner registration');
+  nodeExecutable(
+    bin,
+    'git',
+    `const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.appendFileSync('${callLog}', JSON.stringify(args) + '\\n');
+if (args.includes('prune')) {
+  fs.rmSync('${outerRegistration}', { force: true });
+} else if (args.includes('remove')) {
+  fs.rmSync(args.at(-1), { recursive: true, force: true });
+}`,
+  );
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${bin}:${originalPath}`;
+  try {
+    const dependencies = createDependencies({
+      repository,
+      operationTimeoutMs: 5_000,
+      cleanupTimeoutMs: 5_000,
+      terminationGraceMs: 100,
+    }, new AbortController().signal);
+    await dependencies.removeWorktree(candidate, { worktree });
+  } finally {
+    process.env.PATH = originalPath;
+  }
+
+  const calls = readFileSync(callLog, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+  assert.deepEqual(calls, [
+    ['-C', repository, 'worktree', 'remove', '--force', worktree],
+  ]);
+  assert.equal(existsSync(worktree), false);
+  assert.equal(existsSync(outerRegistration), true);
+});
+
 test('local wrapper validates the candidate before invoking ssh', () => {
   const dir = mkdtempSync(join(tmpdir(), 'socos-release-local-invalid-'));
   const called = join(dir, 'called');

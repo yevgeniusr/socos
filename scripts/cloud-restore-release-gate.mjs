@@ -768,7 +768,6 @@ export function createDependencies(config, signal) {
       if (existsSync(workspace.worktree)) {
         await git(['-C', config.repository, 'worktree', 'remove', '--force', workspace.worktree], { cleanup: true });
       }
-      await git(['-C', config.repository, 'worktree', 'prune'], { cleanup: true });
     },
     async removeWorkspace(candidateSha, workspace) {
       void candidateSha;
