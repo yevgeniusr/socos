@@ -60,6 +60,15 @@ absent. The next run passed 11 tests after adding the bounded stdin planner,
 immutable-message idempotency, edit rejection, pending quest checks, exact tool
 plans, and removing every multi-tool completion path.
 
+### RED/GREEN 5: MCP Envelope And Install Paths
+
+Independent review found that the planner expected a bare DailyBrief instead of
+the real MCP result envelope, and that a symlinked installer resolved the wrong
+repository. Tests reproduced both failures. The planner now unwraps only a
+strict `{ok:true,data:<DailyBrief>}` result, while the installer resolves its
+real path and runtime instructions honor an isolated `HERMES_HOME`. The focused
+suite now passes 14 tests, including CLI, custom-home, and symlink integration.
+
 ## Delivered Files
 
 - `integrations/hermes/skills/socos-social-loop/SKILL.md`
@@ -85,6 +94,10 @@ plans, and removing every multi-tool completion path.
 - Planner input is one strict JSON object, limited to 64 KiB and accepted only
   through stdin. Personal input is rejected in argv and is never written to a
   temporary file.
+- The supplied brief is a strict MCP success envelope; bare briefs, failures,
+  and extra envelope fields fail closed.
+- Installer and runtime paths honor `HERMES_HOME`, including symlinked installer
+  invocation.
 - Every successful plan contains exactly one allowlisted MCP mutation call.
 - Explicit evidence must match the quest's stored completion type before a
   mutation is attempted.

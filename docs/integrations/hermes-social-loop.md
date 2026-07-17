@@ -22,6 +22,8 @@ The destination is
 `$HERMES_HOME/skills/socos/socos-social-loop`, defaulting to
 `~/.hermes/skills/socos/socos-social-loop`. Installation does not edit MCP
 credentials, Discord configuration, cron jobs, or gateway state.
+For a custom home, expose the same non-secret `HERMES_HOME` to the Hermes job so
+the runtime command resolves the installed planner.
 
 After installation, preload `socos-social-loop` in the existing daily job. Keep
 its workdir on the Socos checkout, preserve `[SILENT]` for `BRIEF_NOT_READY`, and
@@ -32,7 +34,7 @@ retain the local Discord target outside the repository.
 Every mutation must first run this exact command:
 
 ```bash
-node ~/.hermes/skills/socos/socos-social-loop/scripts/reply-contract.mjs plan
+node "${HERMES_HOME:-$HOME/.hermes}/skills/socos/socos-social-loop/scripts/reply-contract.mjs" plan
 ```
 
 Pass one UTF-8 JSON object through process stdin. Never put personal input in
@@ -45,13 +47,16 @@ to 64 KiB and must contain exactly:
   "messageId": "<Discord Snowflake>",
   "editedTimestamp": null,
   "nowMs": 0,
-  "brief": "<complete socos_brief_today object>"
+  "brief": "<complete {ok:true,data:<DailyBrief>} socos_brief_today result>"
 }
 ```
 
-`editedTimestamp` must be explicitly present and `null`. Missing or non-null
-values are rejected. Old, future, malformed, oversized, multi-object, and
-extra-field inputs are rejected with a sanitized error that does not echo data.
+`brief` must be the complete strict MCP success envelope with exactly `ok` and
+`data`; the planner unwraps it itself. Bare DailyBrief values, `ok:false`, and
+extra result-envelope fields are rejected. `editedTimestamp` must be explicitly
+present and `null`. Missing or non-null values are rejected. Old, future,
+malformed, oversized, multi-object, and extra-field inputs are rejected with a
+sanitized error that does not echo data.
 
 Success emits one JSON object containing exactly one validated MCP mutation call:
 
@@ -94,10 +99,11 @@ dc.<DiscordMessageId>.<feedback|complete|proposal>
 ```
 
 The key uses immutable message ID and operation step only. It has no command
-digest. The planner rejects Discord edits; if altered content is nevertheless
-presented with a false null edit marker, the same key reaches Socos with a changed
-request hash and fails as an idempotency conflict instead of creating another
-mutation.
+digest. The planner rejects Discord edits. If false null edit metadata lets
+altered content plan the same tool and step, the same key reaches Socos with a
+changed request hash and fails as an idempotency conflict instead of creating
+another mutation. That fallback does not cover an alteration that changes the
+tool or step; edit rejection is the primary boundary.
 
 The exact 24-hour Snowflake boundary is accepted; older and future messages are
 rejected. A transport timeout is an unknown outcome, so retry the exact call and

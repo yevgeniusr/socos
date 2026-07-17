@@ -370,7 +370,7 @@ function planReplyUnchecked(input) {
   }
   assertRecentDiscordMessage({ messageId: input.messageId, nowMs: input.nowMs });
   const command = parseReply(input.text);
-  const book = addressBookForBrief(input.brief);
+  const book = addressBookForBrief(briefFromToolResult(input.brief));
   const resolved = assertKnownAddresses(command, book);
 
   if (command.kind === "feedback") {
@@ -416,6 +416,19 @@ function planReplyUnchecked(input) {
   }
 
   throw new Error("Invalid parsed Socos reply.");
+}
+
+function briefFromToolResult(result) {
+  if (
+    !result ||
+    typeof result !== "object" ||
+    Array.isArray(result) ||
+    !sameKeys(Object.keys(result).sort(), ["data", "ok"]) ||
+    result.ok !== true
+  ) {
+    throw new Error("Invalid Socos brief result.");
+  }
+  return result.data;
 }
 
 function proposalPayload(command, resolved) {

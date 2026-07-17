@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, symlinkSync } from "node:fs";
+import { mkdtempSync, readFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -16,6 +16,9 @@ import {
 } from "./reply-contract.mjs";
 
 const contractPath = fileURLToPath(new URL("./reply-contract.mjs", import.meta.url));
+const installerPath = fileURLToPath(
+  new URL("../../../../../scripts/install-hermes-socos-skill.sh", import.meta.url),
+);
 const itemId = "cmitem1234567890abcdef";
 const eventItemId = "cmevent1234567890abcdef";
 const reminderItemId = "cmdate1234567890abcdefg";
@@ -85,10 +88,36 @@ function envelope(text, overrides = {}) {
     messageId: snowflakeAt(nowMs - 1_000),
     editedTimestamp: null,
     nowMs,
-    brief: brief(),
+    brief: { ok: true, data: brief() },
     ...overrides,
   };
 }
+
+test("accepts only the strict real MCP success envelope for the brief", () => {
+  const validText = `socos accept item:${itemId}`;
+  assert.equal(planReply(envelope(validText)).calls.length, 1);
+
+  for (const briefResult of [
+    brief(),
+    {
+      ok: false,
+      error: {
+        code: "BRIEF_NOT_READY",
+        message: "Synthetic not ready.",
+        retryable: false,
+      },
+    },
+    { ok: true, data: brief(), extra: true },
+    { ok: true, data: brief(), error: { code: "INVALID_INPUT" } },
+    { ok: true },
+    { ok: "true", data: brief() },
+  ]) {
+    assert.throws(
+      () => planReply(envelope(validText, { brief: briefResult })),
+      /Socos reply plan rejected/,
+    );
+  }
+});
 
 test("parses feedback, explicit evidence completion, and proposal grammar only", () => {
   assert.deepEqual(parseReply(`socos accept item:${itemId}`), {
@@ -377,7 +406,7 @@ test("stdin plan CLI runs when invoked through a symlinked install path", () => 
   );
 });
 
-test("stdin CLI rejects argv payloads, malformed JSON, edits, and oversized input", () => {
+test("stdin CLI rejects argv payloads, MCP failures, edits, and oversized input", () => {
   const argvPayload = spawnSync(
     process.execPath,
     [contractPath, "plan", `socos accept item:${itemId}`],
@@ -388,6 +417,18 @@ test("stdin CLI rejects argv payloads, malformed JSON, edits, and oversized inpu
 
   for (const input of [
     "{}{}",
+    JSON.stringify(
+      envelope(`socos accept item:${itemId}`, {
+        brief: {
+          ok: false,
+          error: {
+            code: "BRIEF_NOT_READY",
+            message: "Synthetic not ready.",
+            retryable: false,
+          },
+        },
+      }),
+    ),
     JSON.stringify(
       envelope(`socos accept item:${itemId}`, {
         editedTimestamp: "2026-07-17T11:59:59.000Z",
@@ -404,4 +445,58 @@ test("stdin CLI rejects argv payloads, malformed JSON, edits, and oversized inpu
     assert.equal(result.stderr, "Socos reply plan rejected.\n");
     assert.doesNotMatch(result.stderr, new RegExp(itemId));
   }
+});
+
+test("installer and runtime honor an isolated custom HERMES_HOME", () => {
+  const directory = mkdtempSync(join(tmpdir(), "socos-hermes-home-"));
+  const hermesHome = join(directory, "custom-hermes");
+  const install = spawnSync("sh", [installerPath], {
+    encoding: "utf8",
+    env: { ...process.env, HERMES_HOME: hermesHome },
+  });
+  assert.equal(install.status, 0, install.stderr);
+
+  const installedRoot = join(
+    hermesHome,
+    "skills/socos/socos-social-loop",
+  );
+  const installedSkill = readFileSync(join(installedRoot, "SKILL.md"), "utf8");
+  assert.match(
+    installedSkill,
+    /\$\{HERMES_HOME:-\$HOME\/\.hermes\}\/skills\/socos\/socos-social-loop/,
+  );
+
+  const runtime = spawnSync(
+    "sh",
+    [
+      "-c",
+      'node "${HERMES_HOME:-$HOME/.hermes}/skills/socos/socos-social-loop/scripts/reply-contract.mjs" plan',
+    ],
+    {
+      input: JSON.stringify(envelope(`socos accept item:${itemId}`)),
+      encoding: "utf8",
+      env: { ...process.env, HERMES_HOME: hermesHome },
+    },
+  );
+  assert.equal(runtime.status, 0, runtime.stderr);
+});
+
+test("installer resolves its repository when invoked through a symlink", () => {
+  const directory = mkdtempSync(join(tmpdir(), "socos-installer-link-"));
+  const linkedInstaller = join(directory, "install-socos");
+  const hermesHome = join(directory, "hermes");
+  symlinkSync(installerPath, linkedInstaller);
+
+  const install = spawnSync("sh", [linkedInstaller], {
+    encoding: "utf8",
+    env: { ...process.env, HERMES_HOME: hermesHome },
+  });
+  assert.equal(install.status, 0, install.stderr);
+  assert.equal(
+    readFileSync(
+      join(hermesHome, "skills/socos/socos-social-loop/SKILL.md"),
+      "utf8",
+    ).length > 0,
+    true,
+  );
 });

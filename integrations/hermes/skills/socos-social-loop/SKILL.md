@@ -1,7 +1,7 @@
 ---
 name: socos-social-loop
 description: Use when rendering a Socos daily brief in Hermes or handling a Discord message that begins with the exact `socos` command prefix.
-version: 1.1.0
+version: 1.1.1
 author: Socos
 license: MIT
 metadata:
@@ -48,32 +48,35 @@ be one safe action.
 
 Before every mutation:
 
-1. Fetch `socos_brief_today` and retain the complete response in memory.
+1. Fetch `socos_brief_today` and retain its complete result envelope in memory.
 2. Require Discord metadata with `editedTimestamp` explicitly present and
    `null`. Reject edits, missing metadata, old/future messages, fuzzy commands,
    missing offsets, unknown IDs, completed quests, and evidence-type mismatch.
 3. Run only:
 
    ```text
-   node ~/.hermes/skills/socos/socos-social-loop/scripts/reply-contract.mjs plan
+   node "${HERMES_HOME:-$HOME/.hermes}/skills/socos/socos-social-loop/scripts/reply-contract.mjs" plan
    ```
 
    Send one JSON object through process stdin with exactly `text`, `messageId`,
-   `editedTimestamp`, `nowMs`, and `brief`. Never place these values in argv, a
-   shell command, environment variable, or temporary file.
+   `editedTimestamp`, `nowMs`, and `brief`. Set `brief` to the complete
+   `socos_brief_today` result, exactly `{ok:true,data:<DailyBrief>}`. Never place
+   these values in argv, a shell command, environment variable, or temporary file.
 4. If the planner exits nonzero, mutate nothing. If it succeeds, call the exact
    single MCP tool and input in its JSON output. Do not add or reinterpret fields.
 
-The planner validates the real DailyBrief `people`, `dates`, optional `events`,
-and `quests`, preserves quest `status`, requires pending completion, maps item
-proposals to exact contacts, and rejects contact actions on events.
+The planner rejects failures and noncanonical result envelopes, then validates
+the real DailyBrief `people`, `dates`, optional `events`, and `quests`. It
+preserves quest `status`, requires pending completion, maps item proposals to
+exact contacts, and rejects contact actions on events.
 
 ## Idempotency And Approval
 
 Keys are `dc.<DiscordMessageId>.<feedback|complete|proposal>`. They depend only
-on immutable message ID and step. Transport retries reuse the exact plan. An
-altered payload with the same key must produce a backend conflict, not a second
-mutation.
+on immutable message ID and step. Transport retries reuse the exact plan. If
+false edit metadata lets altered content reach the same tool and step, the same
+key must produce a backend conflict, not a second mutation. Edit rejection is
+the primary boundary when an alteration changes the tool or step.
 
 Planner output is restricted to `socos_brief_feedback`,
 `socos_complete_quest`, or `socos_propose_action`. Proposals are pending previews.

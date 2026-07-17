@@ -3,7 +3,22 @@ set -eu
 
 umask 077
 
-repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+script_path=$0
+link_count=0
+while [ -L "$script_path" ]; do
+  link_count=$((link_count + 1))
+  if [ "$link_count" -gt 40 ]; then
+    echo "Too many installer symlinks." >&2
+    exit 1
+  fi
+  link_target=$(readlink "$script_path")
+  case "$link_target" in
+    /*) script_path=$link_target ;;
+    *) script_path=$(dirname -- "$script_path")/$link_target ;;
+  esac
+done
+script_dir=$(CDPATH= cd -- "$(dirname -- "$script_path")" && pwd)
+repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
 source_dir="$repo_root/integrations/hermes/skills/socos-social-loop"
 hermes_home=${HERMES_HOME:-"$HOME/.hermes"}
 target_dir="$hermes_home/skills/socos/socos-social-loop"
