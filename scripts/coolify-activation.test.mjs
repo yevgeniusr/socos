@@ -212,7 +212,12 @@ async function startFake(options = {}) {
       json(status, {});
     } else if (path === '/api/integrations/google-calendar/webhook' && request.method === 'POST') {
       const enabled = effectiveValue(state.envs.find((record) => record.key === 'CALENDAR_SYNC_ENABLED' && !record.is_preview)) === 'true';
-      json(enabled ? 400 : 503, {});
+      json(
+        enabled ? 404 : 503,
+        enabled
+          ? { code: options.webhookCodeMismatch ? 'not_found' : 'calendar_webhook_not_found' }
+          : {},
+      );
     } else {
       json(404, { error: 'not found' });
     }
@@ -563,7 +568,7 @@ test('updates paired calendar values, deploys the pinned commit, and emits only 
       health_status: 200,
       calendar_guard_status: 401,
       location_status: 503,
-      calendar_webhook_status: 400,
+      calendar_webhook_status: 404,
     });
     const calendarUpdates = state.bodies.find((entry) => entry.path.endsWith('/envs/bulk')).body.data;
     assert.equal(calendarUpdates.length, 6);
@@ -574,6 +579,18 @@ test('updates paired calendar values, deploys the pinned commit, and emits only 
     const exposed = `${result.spawnargs.join(' ')}\n${result.stdout}\n${result.stderr}\n${state.requests.join('\n')}`;
     assert.doesNotMatch(exposed, new RegExp(`${token}|${calendarSecret}`));
     assert.match(JSON.stringify(state.bodies), new RegExp(calendarSecret));
+  });
+});
+
+test('rejects a generic enabled Calendar webhook 404 and restores the snapshot', async () => {
+  await withFake({ webhookCodeMismatch: true }, async ({ baseUrl, state }) => {
+    const result = await runCli(input(baseUrl), baseUrl);
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /"error_code":"smoke_failed"/);
+    assert.match(result.stderr, /"rollback_status":"succeeded"/);
+    assert.equal(state.envBulkCalls, 2);
+    assert.equal(state.deployments.length, 2);
   });
 });
 

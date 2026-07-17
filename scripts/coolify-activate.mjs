@@ -342,10 +342,16 @@ async function smoke(baseUrl, flags) {
     ['health_status', '/api/health-check', 'GET', 200],
     ['calendar_guard_status', '/api/integrations/google-calendar', 'GET', 401],
     ['location_status', '/api/location/owntracks', 'POST', flags.location ? 401 : 503],
-    ['calendar_webhook_status', '/api/integrations/google-calendar/webhook', 'POST', flags.calendar ? 400 : 503],
+    [
+      'calendar_webhook_status',
+      '/api/integrations/google-calendar/webhook',
+      'POST',
+      flags.calendar ? 404 : 503,
+      flags.calendar ? 'calendar_webhook_not_found' : undefined,
+    ],
   ];
   const statuses = {};
-  for (const [name, path, method, expected] of checks) {
+  for (const [name, path, method, expected, expectedCode] of checks) {
     let response;
     try {
       response = await fetch(`${baseUrl}${path}`, { method, redirect: 'error' });
@@ -353,8 +359,21 @@ async function smoke(baseUrl, flags) {
       fail('smoke_failed');
     }
     statuses[name] = response.status;
-    await response.body?.cancel();
-    if (response.status !== expected) fail('smoke_failed');
+    if (response.status !== expected) {
+      await response.body?.cancel();
+      fail('smoke_failed');
+    }
+    if (expectedCode) {
+      let body;
+      try {
+        body = await response.json();
+      } catch {
+        fail('smoke_failed');
+      }
+      if (body?.code !== expectedCode) fail('smoke_failed');
+    } else {
+      await response.body?.cancel();
+    }
   }
   return statuses;
 }
