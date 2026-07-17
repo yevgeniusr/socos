@@ -1050,8 +1050,12 @@ test("event catalog migration is transactional, owner-scoped, and seeds determin
   assert.match(migration, /^BEGIN;\n[\s\S]*\nCOMMIT;\n?$/);
   assert.match(schema, /model EventCatalogListing \{/);
   assert.match(schema, /model EventCatalogFollow \{/);
+  assert.match(schema, /sourceId\s+String\?/);
+  assert.match(schema, /source\s+EventSource\?/);
   assert.match(migration, /CREATE TABLE "EventCatalogListing"/);
   assert.match(migration, /CREATE TABLE "EventCatalogFollow"/);
+  assert.match(migration, /"sourceId" TEXT,/);
+  assert.doesNotMatch(migration, /"sourceId" TEXT NOT NULL/);
   assert.match(
     migration,
     /FOREIGN KEY \("sourceId", "ownerId"\)[\s\S]*REFERENCES "EventSource"\("id", "ownerId"\) ON DELETE CASCADE/,
@@ -1060,14 +1064,14 @@ test("event catalog migration is transactional, owner-scoped, and seeds determin
     migration,
     /CREATE UNIQUE INDEX "EventCatalogFollow_ownerId_listingId_key"/,
   );
-  assert.match(
-    migration,
-    /CREATE INDEX "EventCatalogListing_search_idx"[\s\S]*USING GIN/,
-  );
+  assert.doesNotMatch(migration, /EventCatalogListing_search_idx/);
   assert.match(
     migration,
     /CREATE INDEX "EventCatalogListing_tags_idx"[\s\S]*USING GIN/,
   );
+  assert.match(migration, /"rightsBasis" TEXT NOT NULL/);
+  assert.match(migration, /"termsUrl" TEXT/);
+  assert.doesNotMatch(migration, /"license" TEXT/);
   assert.match(migration, /catalog-uae-public-holidays/);
   assert.match(migration, /catalog-un-international-days/);
   assert.doesNotMatch(migration, /ON CONFLICT[\s\S]*DO UPDATE/);
@@ -1432,6 +1436,13 @@ if (!databaseUrl) {
   async function assertEventCatalogSchema(client) {
     assert.equal(await tableExists(client, "EventCatalogListing"), true);
     assert.equal(await tableExists(client, "EventCatalogFollow"), true);
+    const sourceColumn = await client.query(
+      `SELECT is_nullable FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'EventCatalogFollow'
+          AND column_name = 'sourceId'`,
+    );
+    assert.equal(sourceColumn.rows[0]?.is_nullable, "YES");
 
     const seed = await client.query(
       `SELECT "id", "slug", "contentHash" FROM "EventCatalogListing" ORDER BY "slug"`,
@@ -1460,6 +1471,8 @@ if (!databaseUrl) {
         "EventCatalogFollow_sourceId_ownerId_fkey",
         "EventCatalogFollow_status_check",
         "EventCatalogListing_contentHash_check",
+        "EventCatalogListing_rightsBasis_check",
+        "EventCatalogListing_termsUrl_check",
       ]],
     );
     const definitions = new Map(
@@ -1480,6 +1493,31 @@ if (!databaseUrl) {
       definitions.get("EventCatalogListing_contentHash_check") ?? "",
       /contentHash.*\[a-f0-9\].*64/,
     );
+    assert.match(
+      definitions.get("EventCatalogListing_rightsBasis_check") ?? "",
+      /rightsBasis.*metadata_only.*source_terms.*cc_by_4_0/,
+    );
+    assert.match(
+      definitions.get("EventCatalogListing_termsUrl_check") ?? "",
+      /termsUrl.*https:\/\//,
+    );
+
+    await client.query(
+      `INSERT INTO "User" ("id", "email", "updatedAt")
+       VALUES ('catalog-follow-owner', 'catalog-follow-owner@example.invalid', CURRENT_TIMESTAMP);
+       INSERT INTO "EventCatalogFollow" (
+         "id", "ownerId", "listingId", "status", "socialWeight", "updatedAt"
+       ) VALUES (
+         'catalog-follow-without-source', 'catalog-follow-owner',
+         'catalog-uae-public-holidays', 'active', 5, CURRENT_TIMESTAMP
+       );`,
+    );
+    const sourceFreeFollow = await client.query(
+      `SELECT "sourceId" FROM "EventCatalogFollow"
+        WHERE "id" = 'catalog-follow-without-source'`,
+    );
+    assert.equal(sourceFreeFollow.rows[0]?.sourceId, null);
+    await client.query(`DELETE FROM "User" WHERE "id" = 'catalog-follow-owner'`);
   }
 
   async function assertCalendarLocationSchema(client) {

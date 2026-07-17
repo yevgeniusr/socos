@@ -20,7 +20,8 @@ export interface EventCatalogSeedItem {
   sourceRevision: "seed-2026-07-18";
   checkedAt: "2026-07-18T00:00:00.000Z";
   freshnessSlaHours: number;
-  license: string;
+  rightsBasis: "metadata_only" | "source_terms" | "cc_by_4_0";
+  termsUrl: string | null;
   attribution: string;
   connectorType: string;
   connectorReference: string;
@@ -52,7 +53,8 @@ export const EVENT_CATALOG_SEED_MANIFEST: readonly EventCatalogSeedItem[] = [
     provenanceUrl:
       "https://u.ae/en/information-and-services/public-holidays-and-religious-affairs/public-holidays",
     freshnessSlaHours: 168,
-    license: "official-public-information",
+    rightsBasis: "metadata_only",
+    termsUrl: null,
     attribution: "United Arab Emirates Government",
     connectorType: "official_page",
     connectorReference: "uae-government-public-holidays",
@@ -75,7 +77,8 @@ export const EVENT_CATALOG_SEED_MANIFEST: readonly EventCatalogSeedItem[] = [
     dateCertainty: "confirmed",
     provenanceUrl: "https://www.un.org/en/observances/list-days-weeks",
     freshnessSlaHours: 720,
-    license: "un-terms-of-use",
+    rightsBasis: "source_terms",
+    termsUrl: "https://www.un.org/en/about-us/terms-of-use",
     attribution: "United Nations",
     connectorType: "official_page",
     connectorReference: "un-international-days",
@@ -98,7 +101,8 @@ export const EVENT_CATALOG_SEED_MANIFEST: readonly EventCatalogSeedItem[] = [
     dateCertainty: "calculated",
     provenanceUrl: "https://www.hebcal.com/holidays/",
     freshnessSlaHours: 720,
-    license: "CC-BY-4.0",
+    rightsBasis: "cc_by_4_0",
+    termsUrl: "https://creativecommons.org/licenses/by/4.0/",
     attribution: "Hebcal.com",
     connectorType: "hebcal_api",
     connectorReference: "hebcal-diaspora",
@@ -121,7 +125,8 @@ export const EVENT_CATALOG_SEED_MANIFEST: readonly EventCatalogSeedItem[] = [
     dateCertainty: "calculated",
     provenanceUrl: "https://www.hebcal.com/holidays/",
     freshnessSlaHours: 720,
-    license: "CC-BY-4.0",
+    rightsBasis: "cc_by_4_0",
+    termsUrl: "https://creativecommons.org/licenses/by/4.0/",
     attribution: "Hebcal.com",
     connectorType: "hebcal_api",
     connectorReference: "hebcal-israel",
@@ -144,7 +149,8 @@ export const EVENT_CATALOG_SEED_MANIFEST: readonly EventCatalogSeedItem[] = [
     dateCertainty: "confirmed",
     provenanceUrl: "https://www.gitex.com/",
     freshnessSlaHours: 168,
-    license: "official-event-information",
+    rightsBasis: "metadata_only",
+    termsUrl: null,
     attribution: "Dubai World Trade Centre",
     connectorType: "official_page",
     connectorReference: "gitex-global",
@@ -167,7 +173,8 @@ export const EVENT_CATALOG_SEED_MANIFEST: readonly EventCatalogSeedItem[] = [
     dateCertainty: "confirmed",
     provenanceUrl: "https://www.aieverythingglobal.com/",
     freshnessSlaHours: 168,
-    license: "official-event-information",
+    rightsBasis: "metadata_only",
+    termsUrl: null,
     attribution: "Dubai World Trade Centre",
     connectorType: "official_page",
     connectorReference: "ai-everything-global",

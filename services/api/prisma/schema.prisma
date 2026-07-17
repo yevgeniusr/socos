@@ -418,7 +418,8 @@ model EventCatalogListing {
   sourceRevision     String
   checkedAt          DateTime
   freshnessSlaHours  Int
-  license            String
+  rightsBasis        String
+  termsUrl           String?
   attribution        String
   connectorType      String
   connectorReference String
@@ -440,8 +441,8 @@ model EventCatalogFollow {
   owner        User                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   listingId    String
   listing      EventCatalogListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
-  sourceId     String
-  source       EventSource         @relation(fields: [sourceId, ownerId], references: [id, ownerId], onDelete: Cascade)
+  sourceId     String?
+  source       EventSource?        @relation(fields: [sourceId, ownerId], references: [id, ownerId], onDelete: Cascade)
   status       String              @default("active")
   socialWeight Int                 @default(5)
   createdAt    DateTime            @default(now())

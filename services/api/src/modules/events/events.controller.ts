@@ -17,7 +17,11 @@ import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { AuthGuard } from "../auth/auth.guard.js";
 import { EventPreferenceService } from "./event-preference.service.js";
 import { EventCatalogService } from "./event-catalog.service.js";
-import { EventCatalogQueryDto } from "./event-catalog.dto.js";
+import {
+  EventCatalogQueryDto,
+  PatchEventCatalogFollowDto,
+  PutEventCatalogFollowDto,
+} from "./event-catalog.dto.js";
 import { EventSourceService } from "./event-source.service.js";
 import {
   type AuthenticatedEventRequest,
@@ -113,5 +117,23 @@ export class EventCatalogController {
     @Param("slug") slug: string
   ) {
     return this.catalog.getBySlug(request.user.userId, slug);
+  }
+
+  @Put(":slug/follow")
+  putFollow(
+    @Request() request: AuthenticatedEventRequest,
+    @Param("slug") slug: string,
+    @Body() input: PutEventCatalogFollowDto
+  ) {
+    return this.catalog.putFollow(request.user.userId, slug, input);
+  }
+
+  @Patch(":slug/follow")
+  patchFollow(
+    @Request() request: AuthenticatedEventRequest,
+    @Param("slug") slug: string,
+    @Body() input: PatchEventCatalogFollowDto
+  ) {
+    return this.catalog.patchFollow(request.user.userId, slug, input);
   }
 }

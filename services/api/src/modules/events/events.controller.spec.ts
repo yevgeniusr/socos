@@ -62,17 +62,35 @@ describe("events controllers", () => {
     const catalog = {
       search: jest.fn().mockResolvedValue({ items: [], nextCursor: null }),
       getBySlug: jest.fn().mockResolvedValue({}),
+      putFollow: jest.fn().mockResolvedValue({}),
+      patchFollow: jest.fn().mockResolvedValue({}),
     };
     const controller = new EventCatalogController(catalog as never);
     const query = { q: "holidays", limit: 10 };
 
     await controller.search(request, query);
     await controller.getBySlug(request, "uae-public-holidays");
+    await controller.putFollow(request, "uae-public-holidays", {
+      socialWeight: 8,
+    });
+    await controller.patchFollow(request, "uae-public-holidays", {
+      status: "paused",
+    });
 
     expect(catalog.search).toHaveBeenCalledWith("jwt-owner", query);
     expect(catalog.getBySlug).toHaveBeenCalledWith(
       "jwt-owner",
       "uae-public-holidays"
+    );
+    expect(catalog.putFollow).toHaveBeenCalledWith(
+      "jwt-owner",
+      "uae-public-holidays",
+      { socialWeight: 8 }
+    );
+    expect(catalog.patchFollow).toHaveBeenCalledWith(
+      "jwt-owner",
+      "uae-public-holidays",
+      { status: "paused" }
     );
   });
 });

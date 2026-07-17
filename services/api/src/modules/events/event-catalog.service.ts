@@ -7,7 +7,11 @@ import {
 } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service.js";
-import type { EventCatalogQueryDto } from "./event-catalog.dto.js";
+import type {
+  EventCatalogQueryDto,
+  PatchEventCatalogFollowDto,
+  PutEventCatalogFollowDto,
+} from "./event-catalog.dto.js";
 
 export const EVENT_CATALOG_CLOCK = Symbol("EVENT_CATALOG_CLOCK");
 export type EventCatalogClock = () => Date;
@@ -36,7 +40,8 @@ const listingFields = {
   sourceRevision: true,
   checkedAt: true,
   freshnessSlaHours: true,
-  license: true,
+  rightsBasis: true,
+  termsUrl: true,
   attribution: true,
   updatedAt: true,
   connectorReference: false,
@@ -152,9 +157,90 @@ export class EventCatalogService {
     const presented = presentListing(row);
     return {
       ...presented,
-      nextOccurrence: row.follows[0]?.source.events[0] ?? null,
+      nextOccurrence: row.follows[0]?.source?.events[0] ?? null,
     };
   }
+
+  async putFollow(
+    ownerId: string,
+    slug: string,
+    input: PutEventCatalogFollowDto = {}
+  ) {
+    assertSlug(slug);
+    const socialWeight = mutationWeight(input.socialWeight);
+    return this.prisma.$transaction(async (tx) => {
+      const listing = await tx.eventCatalogListing.findFirst({
+        where: { slug, status: "active" },
+        select: { id: true, slug: true },
+      });
+      if (!listing) throw listingNotFound();
+
+      const follow = await tx.eventCatalogFollow.upsert({
+        where: {
+          ownerId_listingId: { ownerId, listingId: listing.id },
+        },
+        create: {
+          ownerId,
+          listingId: listing.id,
+          status: "active",
+          socialWeight: socialWeight ?? 5,
+        },
+        update: {
+          status: "active",
+          ...(socialWeight === undefined ? {} : { socialWeight }),
+        },
+        select: { status: true, socialWeight: true },
+      });
+      return presentFollowMutation(listing.slug, follow);
+    });
+  }
+
+  async patchFollow(
+    ownerId: string,
+    slug: string,
+    input: PatchEventCatalogFollowDto
+  ) {
+    assertSlug(slug);
+    if (input.status !== "active" && input.status !== "paused") {
+      throw new BadRequestException("Invalid event catalog follow");
+    }
+    const socialWeight = mutationWeight(input.socialWeight);
+    return this.prisma.$transaction(async (tx) => {
+      const listing = await tx.eventCatalogListing.findFirst({
+        where: { slug, status: "active" },
+        select: { id: true, slug: true },
+      });
+      if (!listing) throw listingNotFound();
+
+      const updated = await tx.eventCatalogFollow.updateMany({
+        where: { ownerId, listingId: listing.id },
+        data: {
+          status: input.status,
+          ...(socialWeight === undefined ? {} : { socialWeight }),
+        },
+      });
+      if (updated.count !== 1) {
+        throw new NotFoundException("Event catalog follow not found");
+      }
+      const follow = await tx.eventCatalogFollow.findUnique({
+        where: {
+          ownerId_listingId: { ownerId, listingId: listing.id },
+        },
+        select: { status: true, socialWeight: true },
+      });
+      if (!follow) {
+        throw new NotFoundException("Event catalog follow not found");
+      }
+      return presentFollowMutation(listing.slug, follow);
+    });
+  }
+}
+
+function presentFollowMutation(
+  slug: string,
+  follow: { status: string; socialWeight: number }
+) {
+  return { slug, followed: true, follow };
 }
 
 function presentListing<
@@ -216,4 +302,18 @@ function decodeCursor(cursor: string | undefined): string | undefined {
   } catch {
     throw new BadRequestException("Invalid event catalog cursor");
   }
+}
+
+function assertSlug(slug: string): void {
+  if (!slugPattern.test(slug)) throw listingNotFound();
+}
+
+function mutationWeight(value: number | undefined): number | undefined {
+  if (
+    value !== undefined &&
+    (!Number.isInteger(value) || value < 0 || value > 10)
+  ) {
+    throw new BadRequestException("Invalid event catalog follow");
+  }
+  return value;
 }
