@@ -102,6 +102,7 @@ interface ApiState {
   completedReminders: string[];
   reminderQuestCompletionCalls: number;
   decisions: string[];
+  approvedHistoryRequestsAfterDecision: number;
   failFirstKeep: boolean;
   failFirstSnooze: boolean;
   reminderBodies: Array<Record<string, unknown>>;
@@ -126,7 +127,7 @@ async function installApi(
     loseFirstInteractionResponse?: boolean;
     loseFirstReminderCreateResponse?: boolean;
     loseFirstQuestCompletionResponse?: boolean;
-    omitApprovedHistoryAfterDecision?: boolean;
+    durableApprovedHistoryThenOmitAndFail?: boolean;
     failRejectedHistoryAfterDecision?: boolean;
     statsMode?: "ready" | "deferred-error";
   } = {}
@@ -156,6 +157,7 @@ async function installApi(
     completedReminders: [],
     reminderQuestCompletionCalls: 0,
     decisions: [],
+    approvedHistoryRequestsAfterDecision: 0,
     failFirstKeep: true,
     failFirstSnooze: true,
     reminderBodies: [],
@@ -292,11 +294,29 @@ async function installApi(
       });
     if (url.pathname === "/api/agent-proposals/history") {
       const requestedStatus = url.searchParams.get("status");
+      const approvedDecisionRecorded = state.decisions.includes(
+        "proposal-approve:approve"
+      );
+      if (
+        options.durableApprovedHistoryThenOmitAndFail &&
+        requestedStatus === "approved" &&
+        approvedDecisionRecorded
+      ) {
+        state.approvedHistoryRequestsAfterDecision += 1;
+      }
       const rejectedRefreshShouldFail =
         options.failRejectedHistoryAfterDecision &&
         requestedStatus === "rejected" &&
         state.decisions.includes("proposal-reject:reject");
-      if (options.failApprovals || rejectedRefreshShouldFail) {
+      const approvedRefreshShouldFail =
+        options.durableApprovedHistoryThenOmitAndFail &&
+        requestedStatus === "approved" &&
+        state.approvedHistoryRequestsAfterDecision >= 3;
+      if (
+        options.failApprovals ||
+        rejectedRefreshShouldFail ||
+        approvedRefreshShouldFail
+      ) {
         return json(route, { message: "Synthetic approval failure" }, 503);
       }
       let visibleProposals =
@@ -306,9 +326,43 @@ async function installApi(
             )
           : proposals;
       if (
-        options.omitApprovedHistoryAfterDecision &&
+        options.durableApprovedHistoryThenOmitAndFail &&
         requestedStatus === "approved" &&
-        state.decisions.includes("proposal-approve:approve")
+        state.approvedHistoryRequestsAfterDecision === 1
+      ) {
+        visibleProposals = visibleProposals.map((proposal) =>
+          proposal.id === "proposal-approve"
+            ? {
+                ...proposal,
+                preview: {
+                  type: "message",
+                  contact: {
+                    id: "contact-synthetic",
+                    name: "Synthetic Person",
+                  },
+                  channel: "social",
+                  body: "Changed durable draft",
+                },
+                grant: {
+                  status: "consumed",
+                  expiresAt: "2026-07-17T08:15:00.000Z",
+                  consumedAt: now,
+                  revokedAt: null,
+                  outbox: {
+                    status: "processing",
+                    attempts: 1,
+                    completedAt: null,
+                    lastErrorCode: null,
+                  },
+                },
+              }
+            : proposal
+        );
+      }
+      if (
+        options.durableApprovedHistoryThenOmitAndFail &&
+        requestedStatus === "approved" &&
+        state.approvedHistoryRequestsAfterDecision === 2
       ) {
         visibleProposals = visibleProposals.filter(
           (proposal) => proposal.id !== "proposal-approve"
@@ -486,7 +540,7 @@ test("performs durable cockpit actions with exact contracts", async ({
   page,
 }) => {
   const api = await installApi(page, {
-    omitApprovedHistoryAfterDecision: true,
+    durableApprovedHistoryThenOmitAndFail: true,
     failRejectedHistoryAfterDecision: true,
   });
   await page.goto("/dashboard");
@@ -614,6 +668,9 @@ test("performs durable cockpit actions with exact contracts", async ({
   await message.getByRole("button", { name: "Approve" }).click();
   await expect.poll(() => api.decisions).toContain("proposal-approve:approve");
   await expect(page).toHaveURL(/\/dashboard\/approvals\?status=approved$/);
+  await expect
+    .poll(() => api.approvedHistoryRequestsAfterDecision)
+    .toBe(1);
   await expect(
     message.getByText("Synthetic draft", { exact: true })
   ).toBeVisible();
@@ -623,15 +680,36 @@ test("performs durable cockpit actions with exact contracts", async ({
   await expect(
     message.getByText("Approval granted", { exact: true })
   ).toBeVisible();
-  await expect(message.getByText("Execution not requested")).toBeVisible();
+  await expect(message.getByText("Execution running")).toBeVisible();
   await expect(
     message.getByText("XP or quest progress not reported")
   ).toBeVisible();
   await expect(
     page.getByRole("status").filter({ hasText: "Approval recorded" })
-  ).toBeAttached();
+  ).toBeVisible();
   await expect(page.getByText("Sent")).toHaveCount(0);
   await page.getByRole("link", { name: "pending" }).click();
+  await expect(page).toHaveURL(/\/dashboard\/approvals\?status=pending$/);
+  await page.getByRole("link", { name: "approved" }).click();
+  await expect(page).toHaveURL(/\/dashboard\/approvals\?status=approved$/);
+  await expect
+    .poll(() => api.approvedHistoryRequestsAfterDecision)
+    .toBe(2);
+  await expect(message.getByText("Synthetic draft", { exact: true })).toBeVisible();
+  await expect(message.getByText("Execution running")).toBeVisible();
+  await expect(message.getByText("Execution not requested")).toHaveCount(0);
+  await page.getByRole("link", { name: "pending" }).click();
+  await expect(page).toHaveURL(/\/dashboard\/approvals\?status=pending$/);
+  await page.getByRole("link", { name: "approved" }).click();
+  await expect(page).toHaveURL(/\/dashboard\/approvals\?status=approved$/);
+  await expect
+    .poll(() => api.approvedHistoryRequestsAfterDecision)
+    .toBe(3);
+  await expect(page.getByText("Synthetic approval failure")).toBeVisible();
+  await expect(message.getByText("Synthetic draft", { exact: true })).toBeVisible();
+  await expect(message.getByText("Execution running")).toBeVisible();
+  await page.getByRole("link", { name: "pending" }).click();
+  await expect(page).toHaveURL(/\/dashboard\/approvals\?status=pending$/);
   const invitation = page
     .locator("li")
     .filter({ hasText: "Synthetic invitation" });
@@ -650,7 +728,37 @@ test("performs durable cockpit actions with exact contracts", async ({
   ).toBeVisible();
   await expect(
     page.getByRole("status").filter({ hasText: "Rejection recorded" })
-  ).toBeAttached();
+  ).toBeVisible();
+});
+
+test("announces and focuses consecutive approval receipts", async ({ page }) => {
+  await installApi(page);
+  await page.goto("/dashboard/approvals?status=pending");
+
+  const first = page.locator("li").filter({ hasText: "Synthetic draft" });
+  await first.getByRole("button", { name: "Approve" }).click();
+  await expect(page).toHaveURL(/\/dashboard\/approvals\?status=approved$/);
+  await expect(
+    first.getByRole("heading", { name: "Decision receipt" })
+  ).toBeFocused();
+  const liveStatus = page
+    .getByRole("status")
+    .filter({ hasText: "Approval recorded" });
+  await expect(liveStatus).toContainText("Confirmation 1");
+
+  await page.getByRole("link", { name: "pending" }).click();
+  const second = page
+    .locator("li")
+    .filter({ hasText: "Synthetic invitation" });
+  await second.getByRole("button", { name: "Approve" }).click();
+  await expect(page).toHaveURL(/\/dashboard\/approvals\?status=approved$/);
+  await expect(
+    second.getByRole("heading", { name: "Decision receipt" })
+  ).toBeFocused();
+  await expect(liveStatus).toContainText("Confirmation 2");
+  await expect(liveStatus).toHaveText(
+    /Approval recorded\. Receipt ready\.\s+Confirmation 2\./
+  );
 });
 
 test("explains focus priority and prefills reminders from structured date context", async ({

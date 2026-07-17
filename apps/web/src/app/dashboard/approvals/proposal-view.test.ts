@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  decisionAnnouncement,
   proposalAfterDecision,
   proposalHistoryStatusAfterDecision,
+  proposalPinWithDurableHistory,
   proposalReceipt,
   proposalsWithPinnedReceipt,
   proposalStatusCopy,
@@ -167,9 +169,13 @@ describe("proposalsWithPinnedReceipt", () => {
     expect(visible[0].preview).toBe(pinned.preview);
   });
 
-  it("uses the durable proposal once the decided history includes it", () => {
+  it("retains durable execution state and the exact preview through omission", () => {
     const durable = {
       ...pinned,
+      preview: {
+        ...pinned.preview,
+        body: "Changed durable preview",
+      },
       grant: {
         status: "consumed",
         expiresAt: pinned.expiresAt,
@@ -184,9 +190,59 @@ describe("proposalsWithPinnedReceipt", () => {
       },
     };
 
+    const updatedPin = proposalPinWithDurableHistory(pinned, [durable]);
+
+    expect(updatedPin.preview).toBe(pinned.preview);
+    expect(proposalReceipt(updatedPin)?.execution).toBe("Execution running");
+    expect(proposalsWithPinnedReceipt([durable], pinned, "approved")).toEqual([
+      updatedPin,
+    ]);
+    expect(proposalsWithPinnedReceipt([], updatedPin, "approved")).toEqual([
+      updatedPin,
+    ]);
     expect(
-      proposalsWithPinnedReceipt([durable], pinned, "approved")
-    ).toEqual([durable]);
+      proposalReceipt(
+        proposalsWithPinnedReceipt([], updatedPin, "approved")[0]
+      )?.execution
+    ).toBe("Execution running");
+  });
+
+  it("does not regress a terminal pin when history later returns an older state", () => {
+    const completed = {
+      ...pinned,
+      grant: {
+        status: "consumed",
+        expiresAt: pinned.expiresAt,
+        consumedAt: pinned.decidedAt,
+        revokedAt: null,
+        outbox: {
+          status: "completed",
+          attempts: 2,
+          completedAt: pinned.decidedAt,
+          lastErrorCode: null,
+        },
+      },
+    };
+    const processing = {
+      ...completed,
+      grant: {
+        ...completed.grant,
+        outbox: {
+          ...completed.grant.outbox,
+          status: "processing",
+          completedAt: null,
+        },
+      },
+    };
+
+    const updatedPin = proposalPinWithDurableHistory(pinned, [completed]);
+    const afterStaleHistory = proposalPinWithDurableHistory(updatedPin, [
+      processing,
+    ]);
+
+    expect(proposalReceipt(afterStaleHistory)?.execution).toBe(
+      "Execution completed"
+    );
   });
 
   it("replaces a stale pending copy and hides the pin from other filters", () => {
@@ -196,6 +252,17 @@ describe("proposalsWithPinnedReceipt", () => {
       proposalsWithPinnedReceipt([stalePending], pinned, "approved")
     ).toEqual([pinned]);
     expect(proposalsWithPinnedReceipt([], pinned, "rejected")).toEqual([]);
+  });
+});
+
+describe("decisionAnnouncement", () => {
+  it("gives repeated decisions fresh accessible text and concise visible copy", () => {
+    const first = decisionAnnouncement("approve", 1);
+    const second = decisionAnnouncement("approve", 2);
+
+    expect(first.copy).toBe("Approval recorded. Receipt ready.");
+    expect(second.copy).toBe(first.copy);
+    expect(second.confirmation).not.toBe(first.confirmation);
   });
 });
 

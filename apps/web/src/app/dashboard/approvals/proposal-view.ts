@@ -11,6 +11,24 @@ export interface ProposalReceipt {
   progress: string;
 }
 
+export interface DecisionAnnouncement {
+  copy: string;
+  confirmation: string;
+}
+
+export function decisionAnnouncement(
+  decision: "approve" | "reject",
+  sequence: number
+): DecisionAnnouncement {
+  return {
+    copy:
+      decision === "approve"
+        ? "Approval recorded. Receipt ready."
+        : "Rejection recorded. Receipt ready.",
+    confirmation: `Confirmation ${sequence}.`,
+  };
+}
+
 export function proposalStatusCopy(proposal: Proposal): string {
   if (
     proposal.status === "unavailable" ||
@@ -96,6 +114,52 @@ function proposalMatchesStatus(
   return status === "all" || proposal.status === status;
 }
 
+const executionProgress: Record<string, number> = {
+  pending: 1,
+  processing: 2,
+  completed: 3,
+  failed: 3,
+  cancelled: 3,
+};
+
+const terminalExecutionStatuses = new Set([
+  "completed",
+  "failed",
+  "cancelled",
+]);
+
+export function proposalPinWithDurableHistory(
+  pinnedProposal: Proposal,
+  proposals: Proposal[]
+): Proposal {
+  const durableProposal = proposals.find(
+    (proposal) =>
+      proposal.id === pinnedProposal.id &&
+      proposal.status === pinnedProposal.status
+  );
+  if (!durableProposal) return pinnedProposal;
+
+  const pinnedStatus = pinnedProposal.grant?.outbox?.status;
+  const durableStatus = durableProposal.grant?.outbox?.status;
+  const pinnedProgress = pinnedStatus ? (executionProgress[pinnedStatus] ?? 0) : 0;
+  const durableProgress = durableStatus
+    ? (executionProgress[durableStatus] ?? 0)
+    : 0;
+  if (
+    durableProgress < pinnedProgress ||
+    (pinnedStatus &&
+      terminalExecutionStatuses.has(pinnedStatus) &&
+      durableStatus !== pinnedStatus)
+  ) {
+    return pinnedProposal;
+  }
+
+  return {
+    ...durableProposal,
+    preview: pinnedProposal.preview,
+  };
+}
+
 export function proposalsWithPinnedReceipt(
   proposals: Proposal[],
   pinnedProposal: Proposal | null,
@@ -116,7 +180,15 @@ export function proposalsWithPinnedReceipt(
       proposal.id === pinnedProposal.id &&
       proposal.status === pinnedProposal.status
   );
-  if (durableProposal) return visible;
+  if (durableProposal) {
+    const updatedPin = proposalPinWithDurableHistory(
+      pinnedProposal,
+      visible
+    );
+    return visible.map((proposal) =>
+      proposal.id === pinnedProposal.id ? updatedPin : proposal
+    );
+  }
 
   return [
     pinnedProposal,

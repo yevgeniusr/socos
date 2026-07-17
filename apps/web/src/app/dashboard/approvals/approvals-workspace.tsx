@@ -8,9 +8,12 @@ import { apiJson } from "@/lib/api-client";
 import type { ProposalHistoryResponse, ProposalHistoryStatus } from "@/lib/cockpit-contracts";
 import ProposalRow from "./_components/proposal-row";
 import {
+  decisionAnnouncement,
   proposalAfterDecision,
   proposalHistoryStatusAfterDecision,
+  proposalPinWithDurableHistory,
   proposalsWithPinnedReceipt,
+  type DecisionAnnouncement,
 } from "./proposal-view";
 
 type Proposal = ProposalHistoryResponse["proposals"][number];
@@ -29,7 +32,9 @@ export default function ApprovalsWorkspace() {
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const [pinnedProposal, setPinnedProposal] = useState<Proposal | null>(null);
   const [decidedId, setDecidedId] = useState<string | null>(null);
-  const [announcement, setAnnouncement] = useState("");
+  const [announcement, setAnnouncement] =
+    useState<DecisionAnnouncement | null>(null);
+  const announcementSequence = useRef(0);
   const receiptHeadingRef = useRef<HTMLHeadingElement>(null);
   const focusedDecisionId = useRef<string | null>(null);
 
@@ -59,6 +64,15 @@ export default function ApprovalsWorkspace() {
   );
 
   useEffect(() => {
+    if (!data?.proposals.length) return;
+    setPinnedProposal((current) =>
+      current
+        ? proposalPinWithDurableHistory(current, data.proposals)
+        : current
+    );
+  }, [data?.proposals]);
+
+  useEffect(() => {
     if (
       !decidedId ||
       focusedDecisionId.current === decidedId ||
@@ -86,10 +100,9 @@ export default function ApprovalsWorkspace() {
         setPinnedProposal(proposalAfterDecision(reviewedProposal, decision));
         setDecidedId(id);
         focusedDecisionId.current = null;
+        announcementSequence.current += 1;
         setAnnouncement(
-          decision === "approve"
-            ? "Approval recorded. Receipt ready."
-            : "Rejection recorded. Receipt ready."
+          decisionAnnouncement(decision, announcementSequence.current)
         );
       }
       const decidedStatus = proposalHistoryStatusAfterDecision(status, decision);
@@ -117,9 +130,17 @@ export default function ApprovalsWorkspace() {
         ))}
       </nav>
 
-      <p role="status" aria-live="polite" className="sr-only">
-        {announcement}
-      </p>
+      {announcement ? (
+        <p
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          className="mb-3 text-sm text-on-surface-variant"
+        >
+          {announcement.copy}
+          <span className="sr-only"> {announcement.confirmation}</span>
+        </p>
+      ) : null}
 
       {loading ? <div aria-busy="true" aria-label="Loading approval history" className="space-y-3"><div className="h-32 animate-pulse rounded-lg bg-surface-container-high" /><div className="h-32 animate-pulse rounded-lg bg-surface-container-high" /></div> : null}
       {error ? <div role="alert" className="rounded-lg border border-error/40 bg-error-container/20 p-4 text-sm text-on-error-container"><p>{error}</p><button type="button" onClick={() => load()} className="mt-3 min-h-11 rounded-lg border border-error/40 px-3 font-bold">Retry</button></div> : null}
