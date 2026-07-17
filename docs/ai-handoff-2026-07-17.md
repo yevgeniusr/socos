@@ -10,12 +10,11 @@ important dates, reminders, proactive social planning, durable personal
 memory, and behavior-changing gamification. The immediate strategy remains:
 make it genuinely useful for Yev first, then generalize.
 
-Production is currently on the deployed Contacts release
-`fd5f40b6b2a1621c8c6d5f8d74dcc70c87acf9bd`. The local `main` implementation
-head is `60848ee2b8a433ba52a58548e83f5a74ff0fc8e5`, 32 commits ahead of
-`origin/main` before this handoff update. The Daily Cockpit release gate has
-passed locally and the next operation is backup, push, exact-SHA Coolify
-deployment, and aggregate-only production smoke.
+Production is `running:healthy` on the deployed Daily Cockpit release
+`b0e88ccc535ba79d71a5586f341e0d3ac6be8ac1`. The reviewed implementation,
+Docker packaging correction, and this release state are on `origin/main`.
+The next work is staged Google Calendar, Pixel location, event discovery, and
+Hermes action-loop activation; all four integration flags remain disabled.
 
 Do not reset, clean, stash, rewrite, or check out over this worktree. Continue
 on the existing `main` branch and preserve unrelated user changes.
@@ -100,7 +99,7 @@ EVENT_BRIEF_ENABLED=false
 Google Maps Timeline is not the live ingress. The selected Pixel path is an
 OwnTracks-compatible reporter.
 
-## Done Locally: Daily Cockpit Release
+## Daily Cockpit Release
 
 The authenticated cockpit and approvals workspace are implemented at
 `/dashboard/today` and `/dashboard/approvals`, with `/dashboard` redirecting to
@@ -162,6 +161,14 @@ Human-idempotency PostgreSQL integration: passed
 Final whole-slice independent review: APPROVE
 ```
 
+The first clean Coolify build exposed a deployment-only packaging omission:
+the web image did not copy the Agent Core workspace manifest before dependency
+installation, so `zod` was absent. Commit `b0e88cc` added the missing manifest
+copy and a packaging regression assertion. The focused Node packaging suite,
+local web production build, and a clean no-cache build of
+`docker/Dockerfile.web` all passed before redeployment. No product behavior
+changed after the approved cohort.
+
 ## Formal Beta Gate
 
 The authoritative passing run is:
@@ -203,16 +210,33 @@ despite a first-interaction achievement. It is valid research evidence but not
 the final product gate. The rerun corrected only those synthetic fixtures and
 scoring signals; product code and strict scoring were unchanged.
 
-## In Progress
-
-1. Create a fresh Coolify database backup.
-2. Push `main` and verify the exact origin SHA.
-3. Deploy the exact reviewed SHA to Coolify application
-   `swwcg80gkw4k0k4oco8w8wgw`.
-4. Verify `running:healthy` and perform aggregate-only production smoke.
-5. Update this document with the final deployment UUID/SHA.
+## Release Completed
 
 Production URL: `https://socos.rachkovan.com`.
+
+```text
+backup execution: culn3f82333kj6zvzdklpo7s
+backup status: success
+backup size: 169842 bytes
+deployment UUID: z3bpqa8m3wx1gc89t8c3adu6
+deployment commit: b0e88ccc535ba79d71a5586f341e0d3ac6be8ac1
+application status: running:healthy
+/=200
+/sample-workspace=200
+/auth/signup=200
+/api/health-check=200
+/api/reminders=401
+/api/agents/reminders/upcoming=401
+POST /api/mcp=401
+POST /api/location/owntracks=503
+POST /api/admin/database/migrate=404
+```
+
+The four Calendar/location/event flags were checked through the Coolify API
+before deployment and every configured copy was exactly `false`. Production
+smoke inspected only fixed status codes. The most recent aggregate contact
+proof remains 106 non-demo, 7 isolated demo, and 113 total; no private rows,
+notes, calendar data, or coordinates were read during this release.
 
 ## Remaining Roadmap
 
@@ -268,21 +292,24 @@ allowed, but messages, introductions, invitations, merges, and deletions need
 human approval. Approval is not execution. XP must come only from verified
 server evidence.
 
-Current reviewed implementation head is
-60848ee2b8a433ba52a58548e83f5a74ff0fc8e5. The passing formal cohort is
+Current deployed application head is
+b0e88ccc535ba79d71a5586f341e0d3ac6be8ac1. The passing formal cohort is
 .betabots/runs/20260717-052117-daily-cockpit-proof-gate-rerun-real-postgres:
 verified real backend, GPT-5.5, median 81, 5/5 journeys, 5/5 activity evidence,
 0 errors. Independent final review approved with no Critical or Important
-findings. Fresh verification commands and counts are in the handoff.
+findings. Commit b0e88cc contains only the verified deployment packaging fix.
+Fresh verification commands, release UUIDs, and smoke results are in the
+handoff.
 
-First finish any still-pending release boundary recorded in the handoff:
-fresh Coolify backup, push main, exact-SHA deploy of application
-swwcg80gkw4k0k4oco8w8wgw, running:healthy verification, and aggregate-only
-production smoke. Keep the four integration flags false.
+First verify git status, origin/main, the current production SHA, and that all
+four integration flags are still false. Then prioritize Google Calendar
+consent and read-only connection, Pixel OwnTracks enrollment, one certified
+Dubai-relevant event source, and the Hermes Discord reply-to-approved-action
+loop. Enable one feature flag at a time only after backup, health, and
+aggregate verification. Ask Yev only for unavoidable Google consent or Pixel
+device actions.
 
-After release, prioritize Google Calendar consent, Pixel OwnTracks enrollment,
-one certified event source, and the Hermes Discord reply-to-action loop. Then
-implement the remaining roadmap test-first using subagent-driven development,
+Continue the product roadmap test-first using subagent-driven development,
 independent task/final review, broad verification, and fresh real-backend
 Betabots. Fix every Critical/Important finding before deployment. Do not ask
 routine questions; make conservative choices from the codebase and document
