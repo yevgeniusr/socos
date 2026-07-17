@@ -14,10 +14,12 @@ authority. Socos will own catalog metadata and combine curated authoritative
 sources with reviewed external feeds. Catalog metadata is global; follows,
 preferences, discovered events, and feedback remain owner-scoped.
 
-The first release layers a catalog over the existing certified ICS adapter.
-Later provider adapters may ingest strict JSON APIs without changing the public
-catalog or follow model. Arbitrary user submissions never become fetchable
-until their host and connector are reviewed.
+The first release adds catalog browsing and source-free owner follows. A follow
+records interest immediately; it does not fabricate an ICS source or enable
+network ingestion. Later reviewed provider adapters attach a source and ingest
+strict ICS or JSON without changing the public catalog or follow model.
+Arbitrary user submissions never become fetchable until their host and
+connector are reviewed.
 
 ## Data Model
 
@@ -26,12 +28,13 @@ until their host and connector are reviewed.
 - stable slug, title, original summary, aliases, tags, kind, and status;
 - geographic scope, countries, subdivisions, city, and online flag;
 - trust tier, date certainty, provenance URL, source revision, checked time,
-  freshness SLA, license, and attribution;
+  freshness SLA, explicit rights basis, optional terms URL, and attribution;
 - connector type and an encrypted or server-controlled connector reference;
 - content hash and timestamps.
 
-`EventCatalogFollow` stores one owner/listing pair, linked owner-scoped
-`EventSource`, active or paused state, social weight, and timestamps.
+`EventCatalogFollow` stores one owner/listing pair, an optional linked
+owner-scoped `EventSource`, active or paused state, social weight, and
+timestamps. The source remains null until a reviewed importer exists.
 
 `EventCatalogImportRun` stores fixed safe outcomes, upstream validators,
 content hash, counts, and timing. Raw provider payloads and token-bearing URLs
@@ -46,8 +49,8 @@ must never enter logs or audit metadata.
   city, trust, followed state, and stable cursor pagination.
 - `GET /event-catalog/:slug`: listing, attribution, freshness, next occurrence,
   and owner follow state.
-- `PUT /event-catalog/:slug/follow`: idempotent follow that creates exactly one
-  owner-scoped source from a reviewed connector.
+- `PUT /event-catalog/:slug/follow`: idempotently saves or resumes one
+  owner-scoped follow without starting ingestion.
 - `PATCH /event-catalog/:slug/follow`: pause or resume without deleting history.
 - `POST /event-catalog/submissions`: quarantine a suggestion for review; it
   cannot create a fetchable source.
@@ -57,12 +60,14 @@ proposal for general agents; no catalog action may send invitations or messages.
 
 ## Search And UX
 
-Use PostgreSQL full-text search for title, summary, and aliases, plus GIN tag
-indexes. Rank by text match, current location, official trust, freshness, then
-stable slug. Add `/dashboard/discover` with `Recommended`, `Following`, and
-`All` tabs; search; tag/type/country/city/trust filters; dense result rows;
-provenance; certainty; freshness; next occurrence; and Follow/Pause controls.
-Keep raw custom ICS under Integrations as an advanced workflow.
+The initial bounded catalog uses normalized case-insensitive title/summary
+search, exact normalized aliases, GIN tag/country indexes, and stable slug
+pagination. Move to indexed full-text or trigram search before the catalog is
+large enough for substring scans to matter. `/dashboard/discover` ships with
+`All` and `Following` tabs; search; tag/type/country/trust filters; dense result
+rows; provenance; rights; certainty; freshness; and Follow/Pause controls.
+Location-ranked `Recommended`, city/online filters, and next-occurrence data
+arrive with importers. Raw custom ICS remains under Integrations.
 
 ## Initial Catalog
 
@@ -72,8 +77,7 @@ Keep raw custom ICS under Integrations as an advanced workflow.
    copied descriptions.
 3. Jewish holidays for Diaspora and Israel through Hebcal with CC BY 4.0
    attribution and rate limiting.
-4. GITEX Global, AI Everything, and selected DWTC technology/business series
-   sourced from official pages.
+4. GITEX Global and AI Everything sourced from official pages.
 5. Re-certified Dubai AI/startup Meetup feeds if their ICS endpoints remain
    public and stable.
 6. OpenHolidays countries only after an explicit ODbL storage and attribution
@@ -84,14 +88,19 @@ hardcodes movable dates and conflates unrelated lunar calendar systems.
 
 ## Delivery Slices
 
-1. Add migration, constraints, indexes, catalog/follow services, owner isolation,
-   deterministic seed manifests, and search/follow API tests.
-2. Add the Discover workspace, responsive filters, listing details, follow/pause,
-   provenance, freshness, and browser coverage at desktop and Pixel 412x915.
-3. Add provider importers with DNS pinning, no redirects, size/deadline caps,
+1. **Implemented:** migration, constraints, catalog/follow services, owner
+   isolation, six deterministic seed listings, search/filter/detail APIs, and
+   source-free follow/pause mutations.
+2. **Implemented:** responsive Discover workspace, listing details,
+   provenance/rights/freshness/certainty, filters, pagination, and follow/pause.
+   Unit, type, lint, and production-build checks pass; live browser screenshots
+   remain pending because the local Playwright CLI wrapper is unavailable.
+3. **Remaining:** provider importers with DNS pinning, no redirects, size/deadline caps,
    schema quarantine, ETag/hash caching, correction revisions, and safe errors.
-4. Add read-only MCP discovery and audited follow proposals.
-5. Run migration safety, focused API/web/browser suites, independent security
+4. **Remaining:** location-ranked recommendations, longer occurrence previews,
+   source attachment, and Today/Daily Brief delivery from followed listings.
+5. **Remaining:** read-only MCP discovery and audited follow proposals.
+6. Run migration safety, focused API/web/browser suites, independent security
    review, exact-SHA cloud restore gate, deployment, and aggregate production
    verification before enabling event discovery.
 
@@ -99,8 +108,8 @@ hardcodes movable dates and conflates unrelated lunar calendar systems.
 
 - Search, tags, filters, pagination, and follow state are deterministic and
   owner-isolated.
-- Following is idempotent and cannot duplicate a source or occurrence.
-- Every active listing has provenance, license/attribution, trust, freshness,
+- Following is idempotent and cannot duplicate an owner/listing preference.
+- Every active listing has provenance, explicit rights basis/attribution, trust, freshness,
   and date certainty.
 - Tentative-to-confirmed corrections preserve source revision history.
 - SSRF, redirect, DNS rebinding, oversized payload, schema drift, and secret
