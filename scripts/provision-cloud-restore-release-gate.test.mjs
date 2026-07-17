@@ -119,15 +119,33 @@ case "$name" in
         cat > "$SHIM_STATE/production-role-sql-$phase_count"
         cat "$SHIM_STATE/production-role-sql-$phase_count" >> "$SHIM_STATE/production-role-sql"
         printf 'phase_%s\\n' "$phase_count" >> "$SHIM_STATE/acl-events"
+        if [[ "$phase_count" -eq 2 && "\${SHIM_FAIL_PHASE_B:-0}" == '1' ]]; then
+          exit 1
+        fi
       else
-        cat >> "$SHIM_STATE/role-sql"
+        role_phase_count=0
+        [[ -f "$SHIM_STATE/role-sql-count" ]] && role_phase_count=$(<"$SHIM_STATE/role-sql-count")
+        role_phase_count=$((role_phase_count + 1))
+        printf '%s' "$role_phase_count" > "$SHIM_STATE/role-sql-count"
+        cat > "$SHIM_STATE/role-sql-$role_phase_count"
+        cat "$SHIM_STATE/role-sql-$role_phase_count" >> "$SHIM_STATE/role-sql"
+        printf 'role_%s\\n' "$role_phase_count" >> "$SHIM_STATE/acl-events"
       fi
     elif [[ " $* " == *' run '* && " $* " == *' scripts/cloud-restore-release-gate.mjs '* ]]; then
       printf '%s\\n' '{"gate":"socos-cloud-restore-release","version":1,"status":"passed"}'
     fi
     ;;
   timeout)
+    [[ "\${1:-}" == '--signal=TERM' ]] && shift
+    [[ "\${1:-}" == '--kill-after=5s' ]] && shift
+    timeout_seconds=\${1:-}
     shift
+    if [[ "\${SHIM_HANG_ACL_QUERY:-}" == 'cutoff' && " $* " == *'clock_timestamp'* ]]; then
+      exit 124
+    fi
+    if [[ "\${SHIM_HANG_ACL_QUERY:-}" == 'poll' && " $* " == *'pg_stat_activity'* ]]; then
+      exit 124
+    fi
     exec "$@"
     ;;
   sleep)
@@ -241,14 +259,22 @@ test('provisioner renders the locked account, exact resources, database boundary
   assert.equal(statSync(join(f.root, 'etc/socos-release-gate.env')).mode & 0o777, 0o600);
 
   const sql = readFileSync(join(f.state, 'role-sql'), 'utf8');
+  const rolePhaseA = readFileSync(join(f.state, 'role-sql-1'), 'utf8');
+  const passwordPhase = readFileSync(join(f.state, 'role-sql-2'), 'utf8');
   const productionSql = readFileSync(join(f.state, 'production-role-sql'), 'utf8');
   const productionPhaseA = readFileSync(join(f.state, 'production-role-sql-1'), 'utf8');
   const productionPhaseB = readFileSync(join(f.state, 'production-role-sql-2'), 'utf8');
-  assert.equal(readFileSync(join(f.state, 'acl-events'), 'utf8'), 'phase_1\ncutoff\npoll\nphase_2\n');
+  assert.equal(readFileSync(join(f.state, 'acl-events'), 'utf8'), 'role_1\nphase_1\ncutoff\npoll\nphase_2\nrole_2\n');
   const calls = readFileSync(f.log, 'utf8');
   assert.match(calls, /xact_start <= to_timestamp\(1784289600000000 \/ 1000000\.0\)/);
   assert.match(calls, /pg_prepared_xacts WHERE owner = 'socos_app'/);
   assert.doesNotMatch(calls, /pg_prepared_xacts WHERE[^;]*prepared/);
+  assert.match(calls, /timeout <--signal=TERM> <--kill-after=5s> <10> <docker> <exec>/);
+  assert.doesNotMatch(rolePhaseA, /\bPASSWORD\b/);
+  assert.match(rolePhaseA, /ALTER ROLE socos_release_gate_read WITH LOGIN NOSUPERUSER/);
+  assert.match(passwordPhase, /^BEGIN;[\s\S]*ALTER ROLE socos_release_gate_read WITH PASSWORD '[0-9a-f]{64}';/);
+  assert.match(passwordPhase, /ALTER ROLE socos_release_gate_admin WITH PASSWORD '[0-9a-f]{64}';/);
+  assert.match(passwordPhase, /ALTER ROLE socos_release_gate_restore WITH PASSWORD '[0-9a-f]{64}';[\s\S]*COMMIT;\n$/);
   assert.match(productionPhaseA, /^BEGIN;[\s\S]*ALTER DEFAULT PRIVILEGES FOR ROLE socos_app/);
   assert.match(productionPhaseA, /COMMIT;\n$/);
   assert.doesNotMatch(productionPhaseA, /ON ALL (?:TABLES|SEQUENCES|ROUTINES)/);
@@ -351,6 +377,7 @@ test('provisioner bounds ACL quiescence and never sweeps when pre-cutoff app tra
   assert.equal(result.stderr, 'provision_status=failed\n');
   assert.equal(readFileSync(join(f.state, 'acl-poll-count'), 'utf8'), '60');
   assert.equal(existsSync(join(f.state, 'production-role-sql-2')), false);
+  assert.equal(existsSync(join(f.state, 'role-sql-2')), false);
   const phaseA = readFileSync(join(f.state, 'production-role-sql-1'), 'utf8');
   assert.match(phaseA, /ALTER DEFAULT PRIVILEGES/);
   assert.doesNotMatch(phaseA, /ON ALL (?:TABLES|SEQUENCES|ROUTINES)/);
@@ -368,7 +395,38 @@ test('provisioner rejects malformed ACL cutoff and quiescence results without sw
     assert.equal(result.stdout, '');
     assert.equal(result.stderr, 'provision_status=failed\n');
     assert.equal(existsSync(join(f.state, 'production-role-sql-2')), false);
+    assert.equal(existsSync(join(f.state, 'role-sql-2')), false);
   }
+});
+
+test('provisioner externally times out hung ACL queries before sweep or password rotation', () => {
+  for (const query of ['cutoff', 'poll']) {
+    const f = fixture();
+    const startedAt = performance.now();
+    const result = run(f.input, { ...f.env, SHIM_HANG_ACL_QUERY: query });
+    assert.ok(performance.now() - startedAt < 5_000);
+    assert.notEqual(result.status, 0);
+    assert.equal(result.stdout, '');
+    assert.equal(result.stderr, 'provision_status=failed\n');
+    assert.equal(existsSync(join(f.state, 'production-role-sql-2')), false);
+    assert.equal(existsSync(join(f.state, 'role-sql-2')), false);
+    assert.match(readFileSync(f.log, 'utf8'), /timeout <--signal=TERM> <--kill-after=5s> <10> <docker> <exec>/);
+  }
+});
+
+test('phase B failure preserves installed credentials and skips password rotation', () => {
+  const f = fixture();
+  const etc = join(f.root, 'etc');
+  mkdirSync(etc);
+  const envPath = join(etc, 'socos-release-gate.env');
+  writeFileSync(envPath, 'installed-credentials-remain\n', { mode: 0o600 });
+  const result = run(f.input, { ...f.env, SHIM_FAIL_PHASE_B: '1' });
+  assert.notEqual(result.status, 0);
+  assert.equal(result.stdout, '');
+  assert.equal(result.stderr, 'provision_status=failed\n');
+  assert.equal(existsSync(join(f.state, 'production-role-sql-2')), true);
+  assert.equal(existsSync(join(f.state, 'role-sql-2')), false);
+  assert.equal(readFileSync(envPath, 'utf8'), 'installed-credentials-remain\n');
 });
 
 test('package wiring and runbook cover secure provisioning, audits, rotation, stale locks, and the exact candidate', () => {
@@ -414,6 +472,8 @@ test('package wiring and runbook cover secure provisioning, audits, rotation, st
     /pre-cutoff `socos_app` transaction/i,
     /pg_prepared_xacts/,
     /60 attempts.*two\s+seconds/is,
+    /ten-second external timeout/i,
+    /password rotation.*after Phase B/is,
     /token and role rotation/i,
     /rmdir \/var\/lock\/socos-release-gate\/gate\.lock/,
     /084b7addb0ccc765aa343c5412ed8f5fe5f6da0b.*ancestor/s,

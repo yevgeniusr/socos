@@ -12,6 +12,7 @@ readonly NETWORK='coolify'
 readonly RUNTIME_IMAGE='socos-release-gate-runtime:node22-pnpm10.10.0-pg16-v2'
 readonly ACL_QUIESCENCE_ATTEMPTS=60
 readonly ACL_QUIESCENCE_SLEEP_SECONDS=2
+readonly ACL_QUERY_TIMEOUT_SECONDS=10
 
 ROOT_PREFIX=${SOCOS_PROVISION_TEST_ROOT:-}
 TEST_BIN=${SOCOS_PROVISION_TEST_BIN:-}
@@ -43,6 +44,7 @@ root_path() {
 
 [[ "$effective_euid" == '0' ]] || fail
 [[ "$#" -eq 0 ]] || fail
+[[ "$ACL_QUERY_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || fail
 
 tmp_root=$(root_path '/var/lib/socos-release-gate')
 quiet install -d -m 0700 "$tmp_root"
@@ -183,12 +185,6 @@ login_roles_allowed=$(docker exec "$DATABASE_CONTAINER" psql -X --set=ON_ERROR_S
   2>/dev/null | tr -d '[:space:]') || fail
 [[ "$login_roles_allowed" == 't' ]] || fail
 unset login_roles_allowed
-read_password=$(openssl rand -hex 32 2>/dev/null) || fail
-admin_password=$(openssl rand -hex 32 2>/dev/null) || fail
-restore_password=$(openssl rand -hex 32 2>/dev/null) || fail
-[[ "$read_password" =~ ^[0-9a-f]{64}$ && "$admin_password" =~ ^[0-9a-f]{64}$ && "$restore_password" =~ ^[0-9a-f]{64}$ ]] || fail
-[[ "$read_password" != "$admin_password" && "$read_password" != "$restore_password" && "$admin_password" != "$restore_password" ]] || fail
-
 if ! docker exec -i "$DATABASE_CONTAINER" psql -X --set=ON_ERROR_STOP=1 --username=postgres --dbname=postgres >/dev/null 2>&1 <<SQL
 DO \$roles\$
 BEGIN
@@ -221,9 +217,9 @@ BEGIN
 END
 \$memberships\$;
 
-ALTER ROLE socos_release_gate_read WITH LOGIN PASSWORD '$read_password' NOSUPERUSER NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
-ALTER ROLE socos_release_gate_admin WITH LOGIN PASSWORD '$admin_password' NOSUPERUSER NOINHERIT CREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
-ALTER ROLE socos_release_gate_restore WITH LOGIN PASSWORD '$restore_password' NOSUPERUSER NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+ALTER ROLE socos_release_gate_read WITH LOGIN NOSUPERUSER NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+ALTER ROLE socos_release_gate_admin WITH LOGIN NOSUPERUSER NOINHERIT CREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+ALTER ROLE socos_release_gate_restore WITH LOGIN NOSUPERUSER NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
 GRANT socos_release_gate_restore TO socos_release_gate_admin;
 
 REVOKE CONNECT ON DATABASE socos FROM PUBLIC;
@@ -273,7 +269,8 @@ then
   fail
 fi
 
-acl_cutoff=$(docker exec "$DATABASE_CONTAINER" psql -X --set=ON_ERROR_STOP=1 --tuples-only --no-align \
+acl_cutoff=$(timeout --signal=TERM --kill-after=5s "$ACL_QUERY_TIMEOUT_SECONDS" \
+  docker exec "$DATABASE_CONTAINER" psql -X --set=ON_ERROR_STOP=1 --tuples-only --no-align \
   --username=postgres --dbname=socos \
   --command='SELECT floor(extract(epoch FROM clock_timestamp()) * 1000000)::bigint;' \
   2>/dev/null) || fail
@@ -281,7 +278,8 @@ acl_cutoff=$(docker exec "$DATABASE_CONTAINER" psql -X --set=ON_ERROR_STOP=1 --t
 
 acl_quiescent=0
 for ((acl_attempt = 1; acl_attempt <= ACL_QUIESCENCE_ATTEMPTS; acl_attempt += 1)); do
-  acl_quiescence=$(docker exec "$DATABASE_CONTAINER" psql -X --set=ON_ERROR_STOP=1 --tuples-only --no-align \
+  acl_quiescence=$(timeout --signal=TERM --kill-after=5s "$ACL_QUERY_TIMEOUT_SECONDS" \
+    docker exec "$DATABASE_CONTAINER" psql -X --set=ON_ERROR_STOP=1 --tuples-only --no-align \
     --username=postgres --dbname=socos \
     --command="SELECT NOT EXISTS (SELECT 1 FROM pg_stat_activity WHERE usename = 'socos_app' AND xact_start IS NOT NULL AND xact_start <= to_timestamp($acl_cutoff / 1000000.0)) AND NOT EXISTS (SELECT 1 FROM pg_prepared_xacts WHERE owner = 'socos_app');" \
     2>/dev/null) || fail
@@ -310,6 +308,23 @@ REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM socos_release_gate_
 GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO socos_release_gate_read;
 REVOKE EXECUTE ON ALL ROUTINES IN SCHEMA public FROM PUBLIC;
 REVOKE ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA public FROM socos_release_gate_read;
+COMMIT;
+SQL
+then
+  fail
+fi
+
+read_password=$(openssl rand -hex 32 2>/dev/null) || fail
+admin_password=$(openssl rand -hex 32 2>/dev/null) || fail
+restore_password=$(openssl rand -hex 32 2>/dev/null) || fail
+[[ "$read_password" =~ ^[0-9a-f]{64}$ && "$admin_password" =~ ^[0-9a-f]{64}$ && "$restore_password" =~ ^[0-9a-f]{64}$ ]] || fail
+[[ "$read_password" != "$admin_password" && "$read_password" != "$restore_password" && "$admin_password" != "$restore_password" ]] || fail
+
+if ! docker exec -i "$DATABASE_CONTAINER" psql -X --set=ON_ERROR_STOP=1 --username=postgres --dbname=postgres >/dev/null 2>&1 <<SQL
+BEGIN;
+ALTER ROLE socos_release_gate_read WITH PASSWORD '$read_password';
+ALTER ROLE socos_release_gate_admin WITH PASSWORD '$admin_password';
+ALTER ROLE socos_release_gate_restore WITH PASSWORD '$restore_password';
 COMMIT;
 SQL
 then

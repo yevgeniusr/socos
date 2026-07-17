@@ -226,7 +226,10 @@ objects in a second transaction. An object committed by an old transaction is
 therefore visible to the sweep, while a new transaction sees the committed
 defaults. The wait does not terminate sessions or require downtime. Query
 failures, malformed boolean/cutoff output, or wait exhaustion stop provisioning
-with only the fixed failure marker and no queried rows. Provisioning also
+with only the fixed failure marker and no queried rows. The cutoff and every
+polling `docker exec ... psql` call also have a ten-second external timeout with
+TERM and KILL escalation, so an unresponsive client or query cannot bypass the
+overall bound or reach Phase B. Provisioning also
 revokes production `PUBLIC` `TEMPORARY` and current public-routine execution
 while preserving any effective `TEMPORARY` privilege that `socos_app` had before
 provisioning. The gate separately verifies
@@ -512,6 +515,15 @@ one fixed-receipt gate. The rerun replaces the only authorized key and
 environment file and rotates all three generated gate-role passwords. Revoke
 the old token and remove the old private key only after the new path succeeds.
 Never edit the environment, authorized key, or role passwords by hand.
+
+Password rotation occurs only after Phase B commits successfully. The earlier
+role phase creates missing roles and resets flags, memberships, and ACLs without
+changing an installed password. After Phase B, the provisioner generates three
+new values, changes all three passwords in one transaction, and immediately
+atomically replaces the root-only environment file. A cutoff, polling, or Phase
+B failure therefore preserves both the installed passwords and their matching
+environment. On a first run, newly created roles have no password until the same
+final success path; rerunning provisioning follows the identical order.
 
 ### Stale-lock recovery
 
