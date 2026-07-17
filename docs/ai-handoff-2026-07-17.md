@@ -86,6 +86,9 @@ digital-nomad life. Raw private notes and contact content were not copied here.
   OwnTracks-compatible Pixel precise-history ingest and visit derivation,
   allowlisted ICS discovery, event ranking, calendar conflict checks,
   preferences, feedback, deletion, rekeying, and aggregate audit.
+- Google OAuth returns to the authenticated activation workspace at the fixed
+  `https://socos.rachkovan.com/dashboard/integrations` result URL; the provider
+  callback remains fixed and input-independent.
 - Deployed disabled-first. These flags must stay false until external setup and
   staged activation are complete:
 

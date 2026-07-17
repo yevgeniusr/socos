@@ -24,7 +24,7 @@ The production Google Calendar URLs are fixed:
 ```text
 GOOGLE_CALENDAR_REDIRECT_URI=https://socos.rachkovan.com/api/integrations/google-calendar/callback
 GOOGLE_CALENDAR_WEBHOOK_URL=https://socos.rachkovan.com/api/integrations/google-calendar/webhook
-GOOGLE_CALENDAR_SETTINGS_RESULT_URL=https://socos.rachkovan.com/dashboard
+GOOGLE_CALENDAR_SETTINGS_RESULT_URL=https://socos.rachkovan.com/dashboard/integrations
 PERSONAL_DATA_ACTIVE_KEY_VERSION=1
 ```
 

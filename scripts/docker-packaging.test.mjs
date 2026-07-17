@@ -198,7 +198,7 @@ test('calendar location event secrets are runtime-only Compose inputs', () => {
   );
   assert.match(
     compose,
-    /- GOOGLE_CALENDAR_SETTINGS_RESULT_URL=https:\/\/socos\.rachkovan\.com\/dashboard/,
+    /^\s*- GOOGLE_CALENDAR_SETTINGS_RESULT_URL=https:\/\/socos\.rachkovan\.com\/dashboard\/integrations$/m,
   );
   assert.match(compose, /- PERSONAL_DATA_ACTIVE_KEY_VERSION=1/);
   assert.match(compose, /- EVENT_SOURCE_ALLOWED_HOSTS=\$\{EVENT_SOURCE_ALLOWED_HOSTS:-\}/);

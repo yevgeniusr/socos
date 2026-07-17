@@ -56,7 +56,7 @@ services:
       - GOOGLE_CALENDAR_CLIENT_SECRET=${GOOGLE_CALENDAR_CLIENT_SECRET:?GOOGLE_CALENDAR_CLIENT_SECRET is required}
       - GOOGLE_CALENDAR_REDIRECT_URI=https://socos.rachkovan.com/api/integrations/google-calendar/callback
       - GOOGLE_CALENDAR_WEBHOOK_URL=https://socos.rachkovan.com/api/integrations/google-calendar/webhook
-      - GOOGLE_CALENDAR_SETTINGS_RESULT_URL=https://socos.rachkovan.com/dashboard
+      - GOOGLE_CALENDAR_SETTINGS_RESULT_URL=https://socos.rachkovan.com/dashboard/integrations
       - PERSONAL_DATA_KEYS=${PERSONAL_DATA_KEYS:?PERSONAL_DATA_KEYS is required}
       - PERSONAL_DATA_ACTIVE_KEY_VERSION=1
       - PERSONAL_DATA_INDEX_KEY=${PERSONAL_DATA_INDEX_KEY:?PERSONAL_DATA_INDEX_KEY is required}
