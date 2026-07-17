@@ -8,6 +8,7 @@ umask 077
 : "${PGUSER:?PGUSER is required}"
 : "${PGPASSWORD:?PGPASSWORD is required}"
 : "${PGDATABASE:?PGDATABASE is required}"
+unset DATABASE_URL
 BACKUP_DIR=${BACKUP_DIR:-./backups/postgres}
 timestamp=$(date -u +%Y%m%dT%H%M%SZ)
 backup_file="$BACKUP_DIR/socos-$timestamp-$$.dump"

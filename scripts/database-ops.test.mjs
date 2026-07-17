@@ -54,13 +54,13 @@ test('backup creates a private custom dump with checksum and aggregate metadata'
   executable(
     bin,
     'pg_dump',
-    `printf 'pg_dump %s\\n' "$*" >> '${argsLog}'; case "$*" in *--snapshot=*) ;; *) exit 3;; esac; while [ "$#" -gt 0 ]; do if [ "$1" = "--file" ]; then shift; printf custom-dump > "$1"; exit; fi; shift; done; exit 2`,
+    `if [ "\${DATABASE_URL+x}" = x ]; then has_database_url=true; else has_database_url=false; fi; printf 'pg_dump hasDatabaseUrl=%s args=%s\\n' "$has_database_url" "$*" >> '${argsLog}'; case "$*" in *--snapshot=*) ;; *) exit 3;; esac; while [ "$#" -gt 0 ]; do if [ "$1" = "--file" ]; then shift; printf custom-dump > "$1"; exit; fi; shift; done; exit 2`,
   );
   nodeExecutable(
     bin,
     'psql',
     `const fs = require('node:fs');
-fs.appendFileSync('${argsLog}', 'psql ' + process.argv.slice(2).join(' ') + '\\n');
+fs.appendFileSync('${argsLog}', 'psql hasDatabaseUrl=' + Object.hasOwn(process.env, 'DATABASE_URL') + ' args=' + JSON.stringify(process.argv.slice(2)) + '\\n');
 if (process.env.SOCOS_SNAPSHOT_FILE) {
   fs.writeFileSync(process.env.SOCOS_SNAPSHOT_FILE, '00000003-0000001B-1');
   fs.writeFileSync(process.env.SOCOS_SNAPSHOT_READY, '');
@@ -75,12 +75,14 @@ if (process.env.SOCOS_SNAPSHOT_FILE) {
     env: {
       BACKUP_DIR: dir,
       ...backupPgEnvironment,
+      DATABASE_URL: 'postgresql://decoy-user:decoy-password@decoy.invalid/wrong',
       PATH: `${bin}:${process.env.PATH}`,
     },
   });
 
   assert.equal(result.status, 0, result.stderr);
-  assert.doesNotMatch(`${result.stdout}${result.stderr}`, /secret-user|secret-password/);
+  const secrets = /secret-user|secret-password|decoy-user|decoy-password/;
+  assert.doesNotMatch(`${result.stdout}${result.stderr}`, secrets);
   const dump = result.stdout.match(/backup_file=(.+)/)?.[1];
   assert.ok(dump);
   assert.equal(readFileSync(dump, 'utf8'), 'custom-dump');
@@ -91,7 +93,12 @@ if (process.env.SOCOS_SNAPSHOT_FILE) {
     'table_name\trow_count\nContact\t106\nInteraction\t13\n',
   );
   assert.equal(readFileSync(signalLog, 'utf8'), 'INT');
-  assert.doesNotMatch(readFileSync(argsLog, 'utf8'), /secret-user|secret-password/);
+  const clientCalls = readFileSync(argsLog, 'utf8').trim().split('\n');
+  assert.equal(clientCalls.length, 3);
+  for (const clientCall of clientCalls) {
+    assert.match(clientCall, /^(?:psql|pg_dump) hasDatabaseUrl=false args=/);
+    assert.doesNotMatch(clientCall, secrets);
+  }
 });
 
 test('backup never publishes partial artifacts when dump creation fails', () => {
@@ -195,6 +202,17 @@ test('independent recovery runbook uses secret-store libpq variables instead of 
     .split('## Independent Recovery Proof')[1]
     .split('\n## ')[0];
   assert.match(independentRecovery, /PGHOST.*PGPORT.*PGUSER.*PGPASSWORD.*PGDATABASE/is);
+  for (const optionalVariable of [
+    'PGSSLMODE',
+    'PGSSLCERT',
+    'PGSSLKEY',
+    'PGSSLROOTCERT',
+    'PGSSLCRL',
+    'PGCONNECT_TIMEOUT',
+    'PGAPPNAME',
+    'PGOPTIONS',
+  ]) assert.match(independentRecovery, new RegExp(`\\b${optionalVariable}\\b`));
+  assert.match(independentRecovery, /not\s+configured.*need not be set or exported/is);
   assert.doesNotMatch(independentRecovery, /(?:^|[\s(])DATABASE_URL=/m);
 });
 

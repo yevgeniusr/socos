@@ -79,6 +79,11 @@ Run this inside an ephemeral cloud administration runner. Supply secrets through
 its secret store, use an encrypted cloud volume for `BACKUP_DIR`, and destroy the
 runner and volume after verification.
 
+When configured, also load and export only the permitted optional libpq variables
+that apply: `PGSSLMODE`, `PGSSLCERT`, `PGSSLKEY`, `PGSSLROOTCERT`, `PGSSLCRL`,
+`PGCONNECT_TIMEOUT`, `PGAPPNAME`, and `PGOPTIONS`. Optional values that are not
+configured need not be set or exported.
+
 ```bash
 # Load these five values directly from the runner secret store. Do not assemble
 # or pass a database URI to the backup helper.
