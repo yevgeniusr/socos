@@ -1,25 +1,50 @@
-# Socos AI Handoff - 2026-07-17
+# Socos Complete AI Handoff - 2026-07-17
 
 This is the authoritative continuation document for Socos. It replaces the
-earlier state recorded in `docs/ai-handoff-2026-07-16.md`.
+2026-07-16 handoff and records deployed work, local undeployed work, active
+work, remaining work, production facts, safety boundaries, and a ready-to-use
+prompt for the next AI.
 
-## Executive State
+## Executive Summary
 
-Socos is a personal-first, agent-friendly CRM for relationship maintenance,
-important dates, reminders, proactive social planning, durable personal
-memory, and behavior-changing gamification. The immediate strategy remains:
-make it genuinely useful for Yev first, then generalize.
+Socos is a personal-first, proactive, agent-friendly CRM. Its purpose is to
+help Yev maintain relationships, remember dates and context, discover relevant
+events based on plans and location, create useful introductions and social
+adventures, and make social follow-through easier through evidence-based
+gamification.
 
-Production is `running:healthy` on the deployed Daily Cockpit release
-`b0e88ccc535ba79d71a5586f341e0d3ac6be8ac1`. The reviewed implementation,
-Docker packaging correction, and this release state are on `origin/main`.
-The next work is staged Google Calendar, Pixel location, event discovery, and
-Hermes action-loop activation; all four integration flags remain disabled.
+The deployed product is healthy and already useful for contacts, reminders,
+relationship health, important dates, interaction history, daily briefs,
+quests, XP, approval workflows, and agent access through REST/MCP. All 106
+requested Monica contacts are in the Coolify database; no real contact data is
+stored locally.
 
-Do not reset, clean, stash, rewrite, or check out over this worktree. Continue
-on the existing `main` branch and preserve unrelated user changes.
+The immediate unfinished objective is to finish and deploy the Integrations
+workspace, then activate Google Calendar, Pixel OwnTracks location, Dubai event
+discovery, and a real Hermes Discord reply-to-CRM-action loop one dependency at
+a time. The backend foundations exist, but the external connections are not
+active. Do not describe them as active until real aggregate proof exists.
 
-## Non-Negotiable Contract
+## State Snapshot
+
+Snapshot taken on 2026-07-17 in `/Users/mac/Desktop/projects/personal/socos`.
+
+| Item | State |
+| --- | --- |
+| Branch | `main` |
+| Local HEAD at snapshot | `d01757e6a4ba3b8663044dc26329fcec749b5457` |
+| `origin/main` at snapshot | `d57ada4fd0d380b82ca5cc6f84a3b7a93d00dc66` |
+| Local divergence | Ahead by 4 commits |
+| Tracked worktree at snapshot | Clean |
+| Production app SHA | `b0e88ccc535ba79d71a5586f341e0d3ac6be8ac1` |
+| Production status | `running:healthy` |
+| Production URL | `https://socos.rachkovan.com` |
+| Active implementation | Integrations workspace Task 2; agent may commit after this snapshot |
+
+Always re-run `git status`, `git log`, and `git rev-parse` before continuing.
+Do not assume that the active Task 2 state is unchanged.
+
+## Product And Autonomy Contract
 
 - Socos may automatically read, summarize, log interactions, update activity,
   and create suggestions.
@@ -27,70 +52,328 @@ on the existing `main` branch and preserve unrelated user changes.
   explicit human approval.
 - Approval is not execution. A proposal or grant must never be described as
   sent or performed.
-- XP is displayed only for server-verified evidence.
-- Real contact, calendar, and location data belongs only in Coolify PostgreSQL,
-  never in the repository, local fixtures, logs, screenshots, or prompts.
-- Tests and beta cohorts use synthetic identities and records only.
+- XP is shown only for server-verified evidence.
+- Real contact, calendar, location, event, and private-note data belongs only in
+  Coolify PostgreSQL.
+- Local tests, screenshots, prompts, and beta cohorts use synthetic identities
+  and records only.
+- Never print or commit tokens, credentials, OAuth envelopes, private feed URLs,
+  exact coordinates, private contact rows, or raw Second Brain notes.
+- Disconnect and revoke stop future access; they must not be described as data
+  deletion.
 
-Mem0 was queried with `user_id="yev"` across all agent scopes and the Second
-Brain was reviewed. The durable product direction is to minimize CRM admin,
-support uneven social energy, preserve rich relationship context with
-provenance and correction, and use meaningful accountability and partly
-unpredictable rewards instead of cosmetic points. Relevant interests include
-AI, open source, education, founders, mentoring, events, travel, and
-digital-nomad life. Raw private notes and contact content were not copied here.
+## Personal Context Reviewed
+
+Mem0 was queried with `user_id="yev"` across all agent scopes, and relevant
+Second Brain material was reviewed. The product direction derived from that
+research is:
+
+- Minimize CRM administration and notification noise.
+- Support uneven social energy with one specific, low-friction next action.
+- Preserve relationship context, promises, dates, provenance, uncertainty, and
+  corrections without turning people into a sales pipeline.
+- Prefer meaningful accountability and partially unpredictable rewards over
+  cosmetic points or grinding.
+- Balance professional networking, hobbies, learning, and social adventures.
+- Optimize for Dubai now while retaining general multi-location support.
+- Make Discord/Hermes a primary daily operating surface.
+- Keep sensitive communication and irreversible operations behind approval.
+
+Relevant interests include AI, open source, education, founders, mentoring,
+events, travel, and digital-nomad life. Raw private notes and contact content
+were deliberately not copied into this document.
 
 ## Done And Deployed
 
-### Platform And Security
+### Platform, Security, And Operations
 
-- Repaired pnpm monorepo builds, CI, Docker packaging, migrations, startup,
-  health checks, and Coolify operations.
-- Replaced bypassable authentication with signed JWT validation and guarded
+- Repaired pnpm monorepo builds, CI, Docker packaging, migrations, startup, and
+  health checks.
+- Replaced bypassable authentication with signed JWT validation and protected
   unsafe routes.
 - Removed destructive runtime database administration paths and committed
-  secrets; rotated affected credentials and restricted the runtime DB role.
-- Added backup/restore, migration, host-policy, package, idempotency, and
+  secrets.
+- Rotated affected credentials and restricted the runtime database role.
+- Added backup/restore, migration, package, host-policy, idempotency, and
   security regression coverage.
+- Added a public, sanitized PostgreSQL health attestation for real-backend beta
+  verification without exposing database metadata.
+- Deployed the exact verified application SHA and retained a fresh successful
+  cloud backup as the release rollback point.
 
 ### Contacts And Personal Data
 
 - Imported all 106 requested Monica contacts into Coolify PostgreSQL with
-  provenance; no real contact rows are stored locally.
+  provenance.
 - Isolated 7 demo contacts from personal lists, scoring, briefs, and agent
   search where required.
-- Deployed `/dashboard/contacts` with search, filters, pagination across all
-  records, profile editing, important dates, retrospective call/message
-  logging, reminders, Add Contact, desktop side sheet, Pixel full-screen view,
-  focus containment, and exact API contracts.
-- Production aggregate proof at the last release: 106 non-demo contacts, 7
-  demo contacts, 113 total.
+- Production aggregate: 106 non-demo, 7 demo, 113 total.
+- Built `/dashboard/contacts` with search, filters, pagination, Add Contact,
+  profile editing, important dates, retrospective call/message logging,
+  reminders, desktop side sheet, Pixel full-screen view, and focus containment.
+- Added owner-scoped validation and demo-contact protections.
 
-### Intelligence, Gamification, MCP, And Hermes
+### Daily Cockpit And Approvals
 
-- Durable DailyBrief V1/V1.1, relationship health, important dates,
-  recommendations, feedback, reminders, quests, XP, streaks, achievements,
-  notifications, and evidence verification exist.
+- Built `/dashboard/today`; `/dashboard` redirects there.
+- Built `/dashboard/approvals` with truthful proposal, grant, outbox, rejection,
+  and execution states.
+- Added independent brief, reminder, momentum, quest, and approval panels.
+- Added keep, snooze, dismiss, reminder creation/completion, quest completion,
+  and approval/rejection workflows.
+- Added response-loss-safe intent keys and durable owner-scoped PostgreSQL
+  idempotency for reminder and interaction writes plus XP.
+- Added explainable focus cards containing relationship context, last contact,
+  cadence, tasks, dates, and health labels.
+- Interaction controls explicitly record historical calls/messages and never
+  imply that a message was sent.
+- Reminder receipts are based on the exact accepted request body and survive a
+  subsequent refresh failure.
+- Quest receipts show evidence type, verification time, and server-awarded XP.
+- Approval receipts explicitly distinguish approval from execution.
+- Pixel `412x915` navigation, focus behavior, and overflow were verified.
+
+### CRM Intelligence And Gamification
+
+- Implemented DailyBrief V1/V1.1.
+- Implemented relationship health, important-date reminders, recommendations,
+  feedback, reminders, quests, XP, streaks, achievements, and notifications.
+- Added verified-evidence boundaries for quests and XP.
+- Current graph-aware introduction logic fails closed with
+  `INSUFFICIENT_GRAPH_DATA` when relationship evidence is too sparse.
+
+### Agent, MCP, And Hermes Foundation
+
 - Authenticated REST/MCP exposes exactly 11 owner-scoped tools for briefs,
-  contacts, health, dates, reminders, interactions, feedback, quests,
-  proposals, and approved execution boundaries.
+  contacts, relationship health, important dates, reminders, interactions,
+  feedback, quests, proposals, and approved execution boundaries.
 - Hermes, Codex, and Claude clients were validated for scoped reads and denial
-  behavior. Hermes delivered a Discord daily brief on a 09:00 Asia/Dubai
-  schedule.
-- Provider executors are intentionally absent: approved outbound actions return
-  `ACTION_EXECUTION_UNAVAILABLE` rather than pretending execution occurred.
+  behavior.
+- `hermes mcp test socos` connected successfully and found all 11 tools.
+- Hermes has an active 09:00 Asia/Dubai daily brief cron delivered to Discord;
+  its last checked run succeeded.
+- Provider executors are intentionally absent. Approved outbound actions return
+  `ACTION_EXECUTION_UNAVAILABLE` instead of pretending execution occurred.
 
-### Calendar, Pixel Location, And Events Foundation
+### Calendar, Pixel Location, And Event Backend Foundation
 
-- Implemented encrypted Google Calendar OAuth/sync/watch/reconciliation,
-  OwnTracks-compatible Pixel precise-history ingest and visit derivation,
-  allowlisted ICS discovery, event ranking, calendar conflict checks,
-  preferences, feedback, deletion, rekeying, and aggregate audit.
-- Google OAuth returns to the authenticated activation workspace at the fixed
-  `https://socos.rachkovan.com/dashboard/integrations` result URL; the provider
-  callback remains fixed and input-independent.
-- Deployed disabled-first. These flags must stay false until external setup and
-  staged activation are complete:
+- Implemented encrypted Google Calendar OAuth with PKCE, single-use state,
+  minimum read-only scopes, sync, reconciliation, renewable watches, webhook
+  validation, calendar selection, disconnect, and encrypted provider state.
+- Implemented OwnTracks-compatible Pixel device enrollment, one-time Basic
+  credentials, rotation/revocation, precise-history ingest, retention, visit
+  derivation, location aliases, and coarse current-location context.
+- Implemented HTTPS allowlisted ICS source management, DNS-pinned fetching,
+  private-address rejection, event normalization, ranking, calendar conflict
+  checks, preferences, feedback, retention, and brief inclusion.
+- Implemented personal-context deletion, aggregate audit, and encryption rekey
+  support.
+- Production provider credentials and encryption configuration were checked for
+  structural presence without printing their values.
+- Google OAuth now returns to the fixed authenticated result page
+  `https://socos.rachkovan.com/dashboard/integrations` once that page is
+  deployed. The callback remains fixed and input-independent.
+
+These foundations are deployed disabled-first. They are not yet connected to
+real Google Calendar, Pixel history, or event feeds.
+
+## Completed Locally But Not Deployed
+
+The following four commits are local and were not on `origin/main` at the
+snapshot:
+
+```text
+5bb42ca docs: plan integrations activation workspace
+1a7bf68 chore(integrations): return OAuth to activation workspace
+3617f45 feat(integrations): add activation view contracts
+d01757e fix(integrations): tighten shared activation contracts
+```
+
+Completed local work:
+
+- Added the reviewed design at
+  `docs/plans/2026-07-17-integrations-workspace-design.md`.
+- Added the executable plan at
+  `docs/superpowers/plans/2026-07-17-integrations-workspace.md`.
+- Changed the fixed Google OAuth result URL from `/dashboard` to
+  `/dashboard/integrations` in Compose, examples, packaging tests, and the
+  operator runbook.
+- Fixed `apiJson<void>()` so a valid HTTP 204 returns `undefined` without trying
+  to parse an empty response.
+- Added safe Calendar, device-list, coarse-location, event-source, and
+  event-preference client contracts.
+- Added strict disabled-state mapping: only status 503 plus code
+  `integration_not_configured` is treated as disabled.
+- Added strict Calendar result parsing for only `connected` or `error`.
+- Removed reusable credential-bearing Pixel response types so one-time secrets
+  remain local to the UI component that consumes them.
+- Focused Vitest, web typecheck, packaging tests, security scan, workspace
+  typecheck, and workspace build passed for completed tasks.
+- Independent reviews approved Tasks 1 and 3 with no findings after the Task 1
+  hardening commit.
+
+## In Progress
+
+### Integrations Workspace Task 2
+
+An implementation agent was active at the snapshot. It had not yet created a
+tracked diff or commit when this document was written. Inspect the shared
+worktree and agent state before assigning or restarting the task.
+
+Target behavior:
+
+- Add `/dashboard/integrations`.
+- Replace the disabled Calendar navigation item with Integrations.
+- Expose Integrations in four-column Pixel mobile navigation.
+- Build independent Google Calendar, Pixel location, and event-discovery
+  sections.
+- Treat disabled configuration separately from transient errors.
+- Google: connect, announce callback result, select calendars, and confirm
+  disconnect with non-erasure copy.
+- Pixel: create a device, show endpoint/username/password exactly once, rotate
+  credentials, revoke ingest, and show coarse context only.
+- Events: create, enable/disable, and remove sources; save balanced preferences;
+  never redisplay the submitted feed URL.
+- Preserve ready panels if another panel fails and provide panel-local retries.
+- Use accessible confirmation and one-time-credential dialogs with focus trap,
+  Escape handling, and trigger restoration.
+- Prove the workflow with synthetic Playwright routes at desktop and
+  `412x915`, with no horizontal overflow.
+
+Required Task 2 report path:
+`.superpowers/sdd/integrations-task-2-report.md`.
+
+## Not Done Yet
+
+### P0: Finish And Release The Integrations Workspace
+
+1. Finish Task 2 with strict Playwright RED/GREEN evidence.
+2. Run focused Vitest, Playwright, typecheck, lint, build, formatting, and diff
+   checks.
+3. Independently review Task 2 for API fidelity, secret lifetime, deletion
+   wording, accessibility, and Pixel layout.
+4. Fix every Critical or Important finding and re-review.
+5. Run a whole-slice review across Tasks 1-3.
+6. Run broad web/API/workspace/security/PostgreSQL/Contacts/Daily Cockpit
+   regression suites.
+7. Run a focused five-session GPT-5.5 Betabot cohort against real Nest, Next,
+   PostgreSQL, and Chrome with synthetic Calendar, Pixel, and ICS fixtures.
+8. Require all activation journeys, median happiness at least 70, no Critical
+   defect, no secret exposure, and no precise-coordinate exposure.
+9. Update this handoff with final commits and evidence.
+10. Push `main`, take a fresh verified Coolify backup, deploy the exact SHA with
+    all four integration flags still false, and smoke production boundaries.
+
+### P0: Staged Real Integration Activation
+
+Activate one dependency at a time. Roll back the current flag if health or
+integrity checks fail.
+
+1. Calendar: enable `CALENDAR_SYNC_ENABLED`, complete Google read-only consent,
+   select calendars, and verify only aggregate connection/source/watch/sync
+   state plus the user-visible calendar status.
+2. Location: enable `LOCATION_INGEST_ENABLED`, create a device only when the
+   one-time credentials can be consumed, configure OwnTracks on the Pixel, and
+   verify aggregate device/sample/last-seen state. Precise/background access
+   and battery optimization require actions on the phone.
+3. Events: set `EVENT_SOURCE_ALLOWED_HOSTS=www.meetup.com`, enable
+   `EVENT_DISCOVERY_ENABLED`, create one certified Dubai-relevant HTTPS ICS
+   source, and verify aggregate source/event counts plus visible ranking and
+   conflict behavior.
+4. Briefs: enable `EVENT_BRIEF_ENABLED` only after discovery works, then verify
+   aggregate brief/event counts and user-visible ranked suggestions.
+
+Candidate sources already checked as public HTTPS `text/calendar` endpoints:
+
+```text
+https://www.meetup.com/dubai-ai/events/ical/
+https://www.meetup.com/dubai-ai-meetup/events/ical/
+https://www.meetup.com/startups-and-tech-events-in-dubai/events/ical/
+```
+
+Re-certify the chosen feed immediately before production use; public endpoints
+can change.
+
+### P0: Hermes Discord Action Loop
+
+- Update the Hermes daily workflow so replies map unambiguously to stable brief
+  items and the existing `socos_brief_feedback`, `socos_complete_quest`, and
+  `socos_propose_action` MCP tools.
+- Preserve idempotency and the risk-based autonomy policy.
+- Prove a real Discord reply can record feedback or complete a verified CRM
+  action through authenticated Socos MCP.
+- Require approval for any outbound proposal and keep execution unavailable
+  until a reviewed provider-specific executor exists.
+- Package the behavior as a tracked Hermes/Socos skill or plugin rather than an
+  undocumented prompt mutation.
+
+### P1: Safer Activation Operations
+
+- Extend Coolify tooling with a fail-closed activation command.
+- Read environment values through stdin or a secure payload, never command-line
+  arguments or logs.
+- Permit only known flags and enforce dependency order.
+- Require a fresh successful backup before each rollout stage.
+- Update duplicate Coolify environment records consistently.
+- Deploy/restart the exact SHA, health-check it, and restore the prior flag on
+  failure.
+- Do not claim restore proof unless an actual restore was executed. The current
+  session can trigger and inspect backups but has no working production host
+  shell; Coolify CLI does not expose restore, and SSH was denied.
+
+### P1: Daily Product Quality
+
+- Add a durable interaction receipt showing the exact recorded interaction,
+  updated last-contact value, XP delta, and `Recorded only; nothing sent` copy.
+- Mark required interaction fields before submit and consider safe contextual
+  prefills.
+- Add the non-blocking unit regression proving numeric-looking string quest
+  evidence such as `"2"` fails closed to a follow-up.
+- Improve the brief and reminder loop based on actual daily use after Calendar,
+  location, and events are active.
+
+### P2: Relationship Memory And Social Planning
+
+- Add memory extraction with confidence, source provenance, correction,
+  deduplication, export, deletion, and merge-approval UX.
+- Build weekly planning/reflection, celebrations, gifts, group plans, social
+  adventures, and better cadence management.
+- Improve proactive introduction ranking after enough graph evidence exists.
+- Add favorite-things categories and purpose-built public widgets such as a
+  bookshelf view from the Second Brain backlog.
+
+### P2: Agent Ecosystem And Execution
+
+- Package first-class Codex and Claude plugins around the existing authenticated
+  MCP tools and client documentation.
+- Add provider executors only behind exact reviewed payloads, a durable outbox,
+  replay protection, audit, and explicit approval.
+- Replace old rule-based AI note-generation placeholders only with a tested,
+  privacy-aware inference boundary; do not make this a prerequisite for the
+  integration activation.
+
+### P3: Gamification And Generalization
+
+- Tune accountability, anti-grind rules, meaningful rewards, campaigns, and
+  partially unpredictable reinforcement using real personal usage evidence.
+- Generalize onboarding, tenancy, configuration, and public documentation only
+  after the personal-first workflow is dependable.
+- Refresh the root README; several stack/version and feature claims no longer
+  precisely match the current implementation.
+
+## Production And Operations Facts
+
+```text
+Coolify application UUID: swwcg80gkw4k0k4oco8w8wgw
+Coolify database UUID: zwkk0scogckskkwss8oo48k4
+Production deployment UUID: z3bpqa8m3wx1gc89t8c3adu6
+Production deployment SHA: b0e88ccc535ba79d71a5586f341e0d3ac6be8ac1
+Production backup execution: culn3f82333kj6zvzdklpo7s
+Backup status: success
+Backup size: 169842 bytes
+```
+
+Feature flags at the snapshot:
 
 ```text
 CALENDAR_SYNC_ENABLED=false
@@ -99,131 +382,15 @@ EVENT_DISCOVERY_ENABLED=false
 EVENT_BRIEF_ENABLED=false
 ```
 
-Google Maps Timeline is not the live ingress. The selected Pixel path is an
-OwnTracks-compatible reporter.
+The Google client ID/secret, OAuth URLs, encryption keys, and personal-data
+index keys were checked for structural presence in both Coolify environment
+copies without revealing values. `EVENT_SOURCE_ALLOWED_HOSTS` was empty.
+`OWNTRACKS_WEBHOOK_SECRET` is not required because ingress uses per-device
+one-time credentials.
 
-## Daily Cockpit Release
-
-The authenticated cockpit and approvals workspace are implemented at
-`/dashboard/today` and `/dashboard/approvals`, with `/dashboard` redirecting to
-Today.
-
-Completed behavior:
-
-- Independently truthful brief, reminder, momentum, quest, and approval panels.
-- Keep, snooze, dismiss, reminder creation/completion, verified quest
-  completion, and approval/rejection workflows.
-- Stable response-loss-safe intent keys and owner-scoped PostgreSQL human
-  idempotency for reminder and interaction writes plus XP.
-- Explainable focus cards with relationship context, last interaction, cadence,
-  tasks, dates, and health labels.
-- Contacts actions explicitly say `Log call` and `Log message`; they record
-  history and do not imply outbound messaging.
-- Structured person-card reminder drafts match only numeric
-  `important_date_days`, exact contact ID, and exact `daysAway`. No reminder
-  type is inferred from prose.
-- Successful reminder creation shows a persistent, focused receipt derived
-  from the exact accepted request body. Reminder refresh failure cannot remove
-  it.
-- Verified quest receipts show evidence type, verification time, and
-  server-awarded XP.
-- Approval receipts distinguish rejection, approval grant, outbox state, and
-  execution; rejection explicitly says nothing was sent and no XP changed.
-- A compact pending-quest header link targets the focusable existing quest
-  heading and is Pixel-safe.
-
-The proof-layer implementation commits are:
+Last production smoke:
 
 ```text
-cb38ac4 fix(cockpit): prefill structured person dates
-6043753 fix(cockpit): retain reminder creation proof
-60848ee test(cockpit): prove reminder response loss retry
-```
-
-Independent task reviews and the final whole-slice review found no Critical or
-Important issues. One non-blocking Minor remains: add a direct unit assertion
-that numeric-looking string evidence such as `"2"` falls back to a follow-up.
-Production already enforces `typeof value === "number"` and fails closed.
-
-## Fresh Verification At `60848ee`
-
-```text
-Web Vitest: 8 files, 53/53 passed
-Agent-core Vitest: 2 files, 25/25 passed
-API Jest: 94 suites passed, 1 skipped; 1,036 passed, 5 skipped
-Workspace typechecks: 5/5 tasks passed
-Workspace builds: 4/4 tasks passed; Next generated 15 pages
-Workspace lint: 0 errors; existing warnings only
-Daily Cockpit Playwright: 15/15 passed
-Contacts Playwright: 3/3 passed
-Infrastructure/security/package/host-policy: 120 passed, 1 skipped
-Security scanner: passed across 546 tracked files
-Real PostgreSQL migration safety: 10/10 passed
-Calendar/location PostgreSQL integration: passed
-Human-idempotency PostgreSQL integration: passed
-Final whole-slice independent review: APPROVE
-```
-
-The first clean Coolify build exposed a deployment-only packaging omission:
-the web image did not copy the Agent Core workspace manifest before dependency
-installation, so `zod` was absent. Commit `b0e88cc` added the missing manifest
-copy and a packaging regression assertion. The focused Node packaging suite,
-local web production build, and a clean no-cache build of
-`docker/Dockerfile.web` all passed before redeployment. No product behavior
-changed after the approved cohort.
-
-## Formal Beta Gate
-
-The authoritative passing run is:
-
-```text
-.betabots/runs/20260717-052117-daily-cockpit-proof-gate-rerun-real-postgres
-```
-
-It used fresh visible-signup accounts, isolated persistent PostgreSQL, real
-Nest/Next services, real Chrome, GPT-5.5 minds, strict scoring, four-minute
-human pacing, and synthetic records only.
-
-```text
-environment: valid=true, verified=true, scoreCap=100
-LLM: 31 calls, 0 failures, 0 fallbacks
-sessions: 5/5 complete
-screenshots: 49
-UI actions: 23
-errors: 0
-scores: 81, 65, 81, 96, 97
-median: 81
-happy >=70: 4/5
-unhappy <50: 0/5
-journeys achieved: 5/5
-required activity evidence: 5/5
-release gate: PASS
-```
-
-The one 65 score completed its retrospective message-log journey and showed a
-durable changed last-contact date plus XP from 200 to 260. Its friction was
-discovering that Notes is required and wanting a richer post-save interaction
-receipt. This is useful next-iteration feedback, not a trust or release
-blocker: the UI consistently framed the action as logging history, and no bot
-believed an outbound message was sent.
-
-The prior valid run at `20260717-051050...` used an ambiguous fixture that put
-a Nova follow-up reminder closer than Nova's birthday and expected only +10 XP
-despite a first-interaction achievement. It is valid research evidence but not
-the final product gate. The rerun corrected only those synthetic fixtures and
-scoring signals; product code and strict scoring were unchanged.
-
-## Release Completed
-
-Production URL: `https://socos.rachkovan.com`.
-
-```text
-backup execution: culn3f82333kj6zvzdklpo7s
-backup status: success
-backup size: 169842 bytes
-deployment UUID: z3bpqa8m3wx1gc89t8c3adu6
-deployment commit: b0e88ccc535ba79d71a5586f341e0d3ac6be8ac1
-application status: running:healthy
 /=200
 /sample-workspace=200
 /auth/signup=200
@@ -235,86 +402,161 @@ POST /api/location/owntracks=503
 POST /api/admin/database/migrate=404
 ```
 
-The four Calendar/location/event flags were checked through the Coolify API
-before deployment and every configured copy was exactly `false`. Production
-smoke inspected only fixed status codes. The most recent aggregate contact
-proof remains 106 non-demo, 7 isolated demo, and 113 total; no private rows,
-notes, calendar data, or coordinates were read during this release.
+The 401 and 503 statuses above are expected security/disabled-feature
+boundaries, not failures.
 
-## Remaining Roadmap
+## Verification Evidence
 
-### Immediate Activation
+Daily Cockpit proof-layer verification at the released code line:
 
-- Complete Google OAuth consent/configuration, connect selected read-only
-  calendars, then enable Calendar sync in a staged rollout.
-- Enroll the Pixel OwnTracks-compatible device, verify encrypted history and
-  retention, then enable location ingest.
-- Certify at least one allowlisted Dubai-relevant ICS source, enable event
-  discovery, validate ranking/conflicts, then enable event briefs.
-- Prove a real Hermes Discord reply-to-approved-CRM-action loop. Keep all
-  outbound actions approval-required.
+```text
+Web Vitest: 8 files, 53/53 passed
+Agent Core Vitest: 2 files, 25/25 passed
+API Jest: 94 suites passed, 1 skipped; 1,036 passed, 5 skipped
+Workspace typechecks: 5/5 passed
+Workspace builds: 4/4 passed; Next generated 15 pages
+Workspace lint: 0 errors; existing warnings only
+Daily Cockpit Playwright: 15/15 passed
+Contacts Playwright: 3/3 passed
+Infrastructure/security/package/host-policy: 120 passed, 1 skipped
+Security scanner: passed across 546 tracked files
+Real PostgreSQL migration safety: 10/10 passed
+Calendar/location PostgreSQL integration: passed
+Human-idempotency PostgreSQL integration: passed
+Final independent review: APPROVE
+```
 
-### Product Work
+Authoritative formal cohort:
 
-- Add a durable interaction receipt showing the exact record, updated last
-  contact, XP delta, and explicit `Recorded only; nothing sent` copy.
-- Mark required interaction fields before submission and consider safe
-  context-aware prefills.
-- Build weekly planning/reflection, celebrations, gifts, group plans, social
-  adventures, and better proactive cadence management.
-- Add relationship-memory extraction with confidence, provenance, correction,
-  deduplication, export, deletion, and merge approval UX.
-- Improve introduction ranking once graph density is sufficient; current
-  strategy may correctly return `INSUFFICIENT_GRAPH_DATA`.
-- Package first-class Codex and Claude plugins around the existing MCP client
-  docs and authenticated tools.
-- Add provider executors only behind exact reviewed payloads, durable outbox
-  state, audit, and explicit approval.
-- Tune gamification with accountability, anti-grind rules, meaningful rewards,
-  campaigns, and partly unpredictable reinforcement.
-- Future Second Brain backlog: favorite-things categories and purpose-built
-  public widgets such as a bookshelf view.
+```text
+.betabots/runs/20260717-052117-daily-cockpit-proof-gate-rerun-real-postgres
+environment valid=true, verified=true, scoreCap=100
+GPT-5.5 calls: 31; failures: 0; fallbacks: 0
+sessions: 5/5 complete
+screenshots: 49
+UI actions: 23
+errors: 0
+scores: 81, 65, 81, 96, 97
+median: 81
+happy >=70: 4/5
+unhappy <50: 0/5
+journeys: 5/5
+required activity evidence: 5/5
+release gate: PASS
+```
+
+The 65-score session completed its workflow but found required Notes hard to
+discover and wanted a richer post-save interaction receipt. That is captured in
+the P1 roadmap.
+
+## Important Files
+
+- `AGENTS.md`: repository and Mem0 rules.
+- `docs/ai-handoff-2026-07-17.md`: this authoritative state.
+- `.superpowers/sdd/progress.md`: detailed task/commit ledger; ignored locally.
+- `docs/superpowers/plans/2026-07-17-integrations-workspace.md`: current
+  executable plan.
+- `docs/plans/2026-07-17-integrations-workspace-design.md`: approved design.
+- `docs/runbooks/calendar-location-operations.md`: integration operations.
+- `docs/runbooks/database-backup-restore.md`: backup/restore evidence and limits.
+- `docs/integrations/hermes-social-brief.md`: Hermes daily brief operation.
+- `docs/integrations/hermes-mcp.md`: Hermes MCP client setup.
+- `scripts/coolify.sh`: current Coolify helper; treat secret-bearing argv as a
+  known limitation until P1 hardening is complete.
+
+## Resume Checklist
+
+1. Read `AGENTS.md` and this document.
+2. Run `git status --short --branch`, `git log --oneline -12`, and compare local,
+   origin, and production SHAs.
+3. Inspect active/subagent state before modifying Integrations files.
+4. Read the Integrations design, plan, current task report, and diff.
+5. Preserve all existing work and real-data boundaries.
+6. Finish Task 2, review it, and complete the full P0 release gate.
+7. Deploy disabled-first, then activate Calendar, Pixel, events, and event briefs
+   one at a time.
+8. Finish and prove the Hermes Discord reply loop.
+9. Update this handoff with exact commits, test results, deployment UUID, backup
+   execution, aggregate verification, and remaining external blockers.
 
 ## Continuation Prompt
 
 Give the following prompt to another AI:
 
 ```text
-Continue Socos in /Users/mac/Desktop/projects/personal/socos on the existing
-main branch. Read docs/ai-handoff-2026-07-17.md first; it is the authoritative
-state. Then read AGENTS.md, .superpowers/sdd/progress.md, and the plans under
-docs/superpowers/plans/ for the task you are resuming.
+Continue Socos end to end in /Users/mac/Desktop/projects/personal/socos on the
+existing main branch. You are taking over an active personal-first CRM project,
+not starting a new implementation.
 
-Do not reset, clean, stash, rewrite history, or discard any user changes.
-Check git status and exact SHAs before acting. Real personal data must remain
-only in Coolify PostgreSQL; use synthetic local data and never print secrets,
-contact rows, private notes, calendar contents, or coordinates.
+First read, in order:
+1. AGENTS.md
+2. docs/ai-handoff-2026-07-17.md
+3. docs/plans/2026-07-17-integrations-workspace-design.md
+4. docs/superpowers/plans/2026-07-17-integrations-workspace.md
+5. .superpowers/sdd/progress.md
+6. any current .superpowers/sdd/integrations-task-*-report.md files
 
-Preserve the autonomy contract: automatic read/summarize/log/suggest is
-allowed, but messages, introductions, invitations, merges, and deletions need
-human approval. Approval is not execution. XP must come only from verified
-server evidence.
+Then inspect git status, the last 12 commits, local HEAD, origin/main, active
+subagents, and current production SHA. The handoff snapshot may be behind an
+active Integrations Task 2 agent, so trust the current worktree and commit
+evidence over the snapshot. Do not reset, clean, stash, rewrite history, switch
+branches, or discard any existing/user changes. Work directly on the current
+main branch as authorized.
 
-Current deployed application head is
-b0e88ccc535ba79d71a5586f341e0d3ac6be8ac1. The passing formal cohort is
-.betabots/runs/20260717-052117-daily-cockpit-proof-gate-rerun-real-postgres:
-verified real backend, GPT-5.5, median 81, 5/5 journeys, 5/5 activity evidence,
-0 errors. Independent final review approved with no Critical or Important
-findings. Commit b0e88cc contains only the verified deployment packaging fix.
-Fresh verification commands, release UUIDs, and smoke results are in the
-handoff.
+Use Mem0 only with user_id="yev" across all agent scopes, never Codex-only scope,
+when personal context is needed. Preferred command from
+/Users/mac/Desktop/projects/claw is:
+python3 second-brain/scripts/mem0_query.py profile --top-k 20
+Review only relevant Second Brain Socos/networking/gamification/event material.
+Do not copy raw private notes into code, tests, prompts, logs, screenshots, or
+handoff documents.
 
-First verify git status, origin/main, the current production SHA, and that all
-four integration flags are still false. Then prioritize Google Calendar
-consent and read-only connection, Pixel OwnTracks enrollment, one certified
-Dubai-relevant event source, and the Hermes Discord reply-to-approved-action
-loop. Enable one feature flag at a time only after backup, health, and
-aggregate verification. Ask Yev only for unavoidable Google consent or Pixel
-device actions.
+Non-negotiable data boundary: all real contacts, calendar data, location
+history, event data, and private notes remain only in Coolify PostgreSQL. Use
+synthetic local fixtures. Never print secrets, OAuth tokens, one-time device
+credentials, private feed URLs, exact coordinates, personal contact rows, or
+raw notes. Never pass secret values in shell argv. Query production only for
+fixed status codes and aggregate proof.
 
-Continue the product roadmap test-first using subagent-driven development,
-independent task/final review, broad verification, and fresh real-backend
-Betabots. Fix every Critical/Important finding before deployment. Do not ask
-routine questions; make conservative choices from the codebase and document
-external blockers precisely.
+Preserve the autonomy contract: Socos may automatically read, summarize, log,
+update activity, and suggest. Outbound messages, introductions, invitations,
+merges, and deletions require explicit human approval. Approval is not
+execution. XP must come only from server-verified evidence. Disconnect/revoke
+must not be described as erasure.
+
+Current production is healthy at https://socos.rachkovan.com on SHA
+b0e88ccc535ba79d71a5586f341e0d3ac6be8ac1. At the handoff snapshot local main
+was d01757e, origin/main was d57ada4, and local was four commits ahead. The 106
+real Monica contacts plus 7 isolated demo contacts are cloud-only. The passing
+Daily Cockpit cohort is
+.betabots/runs/20260717-052117-daily-cockpit-proof-gate-rerun-real-postgres
+with verified real backend, GPT-5.5, median 81, 5/5 journeys, 5/5 activity
+evidence, and 0 errors.
+
+Immediate objective:
+1. Finish Integrations Task 2 at /dashboard/integrations test-first.
+2. Independently review it and fix every Critical/Important issue.
+3. Run whole-slice review, broad tests, and a new five-session real-backend
+   GPT-5.5 Betabot activation cohort with synthetic data.
+4. Push main, take a fresh verified backup, deploy the exact SHA with
+   CALENDAR_SYNC_ENABLED, LOCATION_INGEST_ENABLED, EVENT_DISCOVERY_ENABLED, and
+   EVENT_BRIEF_ENABLED all false, then smoke production.
+5. Activate Google Calendar read-only sync and verify aggregate state.
+6. Enroll the Pixel through OwnTracks and verify aggregate ingest/last-seen
+   state. Ask Yev only for unavoidable phone permission/install actions.
+7. Allowlist www.meetup.com, certify one Dubai AI/tech ICS source, enable event
+   discovery, verify aggregates and visible ranking/conflict behavior, then
+   enable event briefs last.
+8. Implement and prove a real Hermes Discord reply mapping to stable brief
+   items using socos_brief_feedback, socos_complete_quest, and
+   socos_propose_action. Keep outbound execution approval-gated and unavailable
+   until a provider executor is explicitly reviewed.
+9. Update the authoritative handoff with exact evidence.
+
+Use strict TDD, subagent-driven development, independent task/final reviews,
+verification-before-completion, and Betabots. Do not ask routine questions;
+make conservative choices from the codebase. Do not claim a feature is active,
+an action is executed, or a restore is proven without direct evidence. Continue
+until the integrations and Hermes loop are genuinely usable or an unavoidable
+Google/Pixel action is precisely identified.
 ```
