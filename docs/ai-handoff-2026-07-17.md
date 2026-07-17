@@ -28,8 +28,10 @@ not deployed: a durable interaction receipt, truthful compact integration
 status/mobile cues, and a cloud-only disposable restore release gate. The
 receipt adds migration 12, so it must not be deployed until the forced-command
 runner is provisioned and produces a live restore receipt for the exact
-candidate SHA. Repository tests are evidence for the implementation, not a
-substitute for that live proof.
+candidate SHA. The reviewed source candidate is
+`6db95c49e21465b5cbe35c25527086ac6e08c67b`; production remains on
+`1b25328de683e5b7923d4219d0401a1f93f168b2`. Repository tests are evidence for
+the implementation, not a substitute for that live proof.
 
 The tracked Hermes `socos-social-loop` skill is installed and attached to the
 active 09:00 Asia/Dubai Discord cron. The gateway is supervised. Today's
@@ -43,9 +45,10 @@ Snapshot taken in `/Users/mac/Desktop/projects/personal/socos`.
 | Area | State |
 | --- | --- |
 | Reviewed application SHA | `1b25328de683e5b7923d4219d0401a1f93f168b2` |
+| Reviewed source candidate SHA | `6db95c49e21465b5cbe35c25527086ac6e08c67b` |
 | Pre-activation-tooling baseline SHA | `69e6ac0444a50ae92d811155493fcff559774a86` |
-| Production application SHA | same reviewed SHA |
-| Current source branch | `main`; verify local and `origin/main` before use |
+| Production application SHA | `1b25328de683e5b7923d4219d0401a1f93f168b2` |
+| Current source branch | `main`; application candidate is the SHA above; later documentation-only commits may follow |
 | Production status | `running:healthy` |
 | Production URL | `https://socos.rachkovan.com` |
 | Real contacts | 106 non-demo, cloud-only |
@@ -64,6 +67,19 @@ Snapshot taken in `/Users/mac/Desktop/projects/personal/socos`.
 This handoff itself may be a later documentation-only commit than the reviewed
 production SHA. Re-run `git status`, `git log -1`, and `git ls-remote`
 before changing or deploying anything.
+
+Recommended restart order:
+
+1. Verify the worktree and exact local, remote, and production SHAs.
+2. Fix the direct CRM deletion-policy bypass and MCP scoped-discovery metadata
+   using tests and synthetic data; these do not require personal-data access.
+3. Package read-only Codex and Claude plugins around the authenticated MCP.
+4. Provision and prove the live cloud restore gate before deploying migration
+   12 or adding another migration.
+5. Resume Google, Pixel, events, briefs, and the controlled Discord proof only
+   at their documented user-action gates.
+6. Build relationship memory and weekly social planning as separate bounded
+   slices after the safety and release gates are sound.
 
 ## Product And Safety Contract
 
@@ -418,9 +434,54 @@ schema-neutral release.
 - It should also be updated after the first live cloud restore receipt and the
   migration-12 deployment are proven.
 
+## Known Gaps And Audit Findings
+
+These are source-audit findings, not claims that the corresponding features are
+already delivered.
+
+- Direct human-JWT DELETE routes for contacts, interactions, and reminders
+  currently bypass the product rule that deletions require explicit approval.
+  Contact deletion cascades relationship history. Interaction deletion also
+  decrements XP before deleting outside one transaction, so a failed delete can
+  leave XP inconsistent. Close this boundary before expanding destructive
+  workflows.
+- Socos has no durable relationship-fact ledger. Contact bio, first-met data,
+  dates, methods, reminders, raw interactions, and import provenance exist, but
+  confidence, per-fact provenance, review state, correction lineage,
+  person-level deduplication, relationship export, and durable memory deletion
+  do not.
+- The Monica import brought in 106 directory contacts with source provenance;
+  it did not import complete Monica notes, interactions, methods, dates,
+  reminders, relationships, or history. Do not describe it as a full Monica
+  history migration.
+- Monica reruns can overwrite corrected imported scalar fields. Current contact
+  edits replace methods and scalar values without durable prior-value history.
+- Important dates, daily focus ranking, reminders, cadence inputs, quests, XP,
+  and the Today workflow are active. Weekly planning/reflection, group plans,
+  and social-adventure workflows do not exist.
+- Celebration recurrence and attachment services exist in the API and feed the
+  daily brief, but the modern dashboard has no usable celebration-management
+  workspace. `Gift`, `Activity`, and `Task` are dormant schema surfaces rather
+  than shipped workflows.
+- The modern web reads streak state but does not call the existing streak
+  check-in mutation. Achievements lack a first-class modern view.
+- Codex and Claude currently use manual MCP configuration. First-class tracked
+  plugin packages do not exist. MCP tool discovery is not filtered by principal
+  scope, destructive execution tools advertise non-destructive metadata, and
+  the documented default Hermes profile grants an unnecessary
+  `approvals:execute` scope.
+- Hermes has not yet proven a post-skill-attachment brief followed by one real,
+  idempotent Discord reply mutation.
+
 ## Remaining Work
 
 ### P0: Finish Personal Activation
+
+Before activation work, close the direct contact/interaction/reminder DELETE
+bypass or route those operations through the proposal/approval boundary. Make
+interaction deletion transactional if any approved deletion executor is later
+introduced. Add a regression test proving no direct CRM hard-delete route can
+bypass approval.
 
 For every remaining flag stage: take fresh backup evidence, update both
 production and preview copies, deploy the exact reviewed SHA, require health and
@@ -485,13 +546,26 @@ stage-local smoke, and restore the prior flag plus redeploy on failure.
 
 ### P2: Relationship Memory And Social Planning
 
-- Add memory extraction with confidence, provenance, corrections,
-  deduplication, export, deletion, and merge-approval UX.
-- Build weekly planning/reflection, celebrations, gifts, group plans, social
-  adventures, and better cadence management.
+- First add an append-only owner-scoped relationship-memory ledger with
+  confidence, provenance, canonical deduplication, review state, idempotent
+  capture, correction/rejection lineage, REST/MCP access, and contact-profile
+  UX. Keep raw values out of mutation audit metadata. Defer LLM extraction,
+  export, and merge execution until this substrate is verified.
+- Then add extraction, relationship-data export/deletion, duplicate-candidate
+  review, and merge-approval UX. Prevent Monica reruns from overwriting newer
+  user corrections.
+- Build a bounded weekly social-commitments workflow with 1-3 plans, multiple
+  participants, celebration/group/adventure kinds, rescheduling, completion or
+  skip, short reflection, no outbound side effects, and exactly-once XP only
+  for verified completion.
+- Follow with modern celebration and gift management, bulk/learned cadence,
+  achievements, and a values-first accountability loop. Do not count dormant
+  legacy schema models as delivered product.
 - Improve proactive introduction ranking after enough graph evidence exists.
-- Package first-class Codex and Claude plugins around the authenticated MCP
-  surface.
+- Filter MCP tool discovery by scope, mark destructive execution metadata
+  accurately, remove unnecessary execute scope from the default Hermes profile,
+  and package first-class read-only Codex and Claude plugins around the
+  authenticated MCP surface using environment-backed tokens only.
 - Add provider executors only behind exact payload review, durable outbox,
   replay protection, audit, and explicit approval.
 
@@ -544,14 +618,31 @@ SHA, feature flags, Hermes gateway/cron state, and the final Betabot verifier.
 Trust current evidence over any stale snapshot. Do not reset, clean, stash,
 rewrite history, switch branches, or discard existing/user changes.
 
-The current source adds migration 12 InteractionReceipt, exact/compact receipt
-UX, strict Calendar scope summaries/mobile cues, and the cloud-only disposable
+The reviewed application-code candidate is
+6db95c49e21465b5cbe35c25527086ac6e08c67b. Current HEAD may include a later
+documentation-only handoff commit, so verify the diff rather than assuming the
+relationship. The candidate adds migration 12 InteractionReceipt,
+exact/compact receipt UX,
+strict Calendar scope summaries/mobile cues, and the cloud-only disposable
 restore gate. These changes are reviewed but not deployed. Before any schema
 deployment, provision the forced-command runner exactly as documented and run
 `scripts/run-cloud-restore-release-gate.mjs` for the exact trusted origin/main
 SHA. Require its fixed success receipt. Never treat its 20/20 repository tests,
 a Coolify backup, or an older drill as live restore proof. Then deploy that exact
 SHA and verify the new receipt/UI behavior without exposing personal rows.
+
+Before new product migrations, fix two audited source boundaries with focused
+tests: direct human-JWT contact/interaction/reminder deletion currently bypasses
+the explicit approval rule, and interaction deletion is not atomic with its XP
+decrement. Also make MCP tools/list scope-aware, mark destructive execution
+metadata accurately, and remove the unnecessary approvals:execute scope from
+the default Hermes profile. Do not add a merge/delete executor in this step.
+
+The highest-value unblocked agent slice is to package separate tracked,
+read-only Codex and Claude plugins using environment-backed tokens. The current
+Codex and Claude support is manual MCP configuration, not a first-class plugin.
+Verify scoped tools/list, denied mutations, manifest validation, secret scans,
+and initialize/list/read-only MCP smokes. Never commit a token.
 
 The reviewed application SHA is
 1b25328de683e5b7923d4219d0401a1f93f168b2. It is deployed and healthy at
@@ -633,5 +724,7 @@ Preserve the autonomy contract: automatic read/summarize/log/activity updates
 and suggestions are allowed. Outbound messages, introductions, invitations,
 merges, and deletions require approval. Approval is not execution. Continue
 until activation and the Discord reply proof are genuine, or identify the exact
-unavoidable user action without inventing evidence.
+unavoidable user action without inventing evidence. After the operational gates,
+implement relationship memory and weekly social commitments as separate slices;
+their detailed done/gap definitions are in this handoff.
 ```
