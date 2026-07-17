@@ -120,6 +120,7 @@ async function installApi(
     briefReady?: boolean;
     failApprovals?: boolean;
     failBriefAfterQuest?: boolean;
+    failReminderRefreshAfterCreate?: boolean;
     holdFeedback?: boolean;
     holdQuestComplete?: boolean;
     holdReminderCreate?: boolean;
@@ -294,6 +295,12 @@ async function installApi(
         timeZone: options.briefTimeZone ?? brief.timeZone,
       });
     }
+    if (
+      url.pathname === "/api/reminders/upcoming" &&
+      options.failReminderRefreshAfterCreate &&
+      state.reminderBodies.length > 0
+    )
+      return json(route, { message: "Synthetic reminder refresh failure" }, 503);
     if (url.pathname === "/api/reminders/upcoming")
       return json(route, {
         reminders: [
@@ -879,6 +886,57 @@ test("prefills a birthday reminder from an exact structured person-date match", 
   });
 });
 
+test("shows one focused reminder receipt only after exact POST success and keeps it through refresh failure", async ({
+  page,
+}) => {
+  const api = await installApi(page, {
+    holdReminderCreate: true,
+    failReminderRefreshAfterCreate: true,
+  });
+  await page.goto("/dashboard/today");
+
+  const person = page
+    .locator("li")
+    .filter({ hasText: "Synthetic Person" })
+    .first();
+  await person.getByRole("button", { name: "Create reminder" }).click();
+  const dialog = page.getByRole("dialog", { name: "Create reminder" });
+  await dialog.getByLabel("Type").selectOption("birthday");
+  await dialog.getByLabel("Title").fill("Edited synthetic birthday");
+  await dialog.getByLabel("Scheduled at").fill("2026-07-19T09:30");
+  await dialog.getByRole("button", { name: "Create reminder" }).click();
+
+  await expect.poll(() => api.reminderBodies).toHaveLength(1);
+  expect(api.reminderBodies[0]).toEqual({
+    contactId: "contact-synthetic",
+    type: "birthday",
+    title: "Edited synthetic birthday",
+    scheduledAt: "2026-07-19T05:30:00.000Z",
+  });
+  await expect(
+    page.getByRole("heading", { name: "Reminder created" })
+  ).toHaveCount(0);
+
+  api.releaseReminderCreate();
+
+  await expect(dialog).toBeHidden();
+  const receipt = page.getByRole("status").filter({
+    has: page.getByRole("heading", { name: "Reminder created" }),
+  });
+  await expect(receipt).toHaveCount(1);
+  await expect(
+    receipt.getByRole("heading", { name: "Reminder created" })
+  ).toBeFocused();
+  await expect(receipt).toContainText("Synthetic Person");
+  await expect(receipt).toContainText("Birthday");
+  await expect(receipt).toContainText("Edited synthetic birthday");
+  await expect(receipt).toContainText("Jul 19, 9:30 AM");
+  await expect(receipt).not.toContainText("XP");
+  await expect(receipt.getByText(/sent|message|invitation/i)).toHaveCount(0);
+  await expect(page.getByText("Synthetic reminder refresh failure")).toBeVisible();
+  await expect(receipt).toHaveCount(1);
+});
+
 test("retries lost committed cockpit POST responses with stable intent keys", async ({
   page,
 }) => {
@@ -898,11 +956,20 @@ test("retries lost committed cockpit POST responses with stable intent keys", as
   await expect(reminderDialog.getByRole("alert")).toContainText(
     "Synthetic lost reminder response"
   );
+  await expect(
+    page.getByRole("heading", { name: "Reminder created" })
+  ).toHaveCount(0);
   await reminderDialog.getByRole("button", { name: "Create reminder" }).click();
   await expect(reminderDialog).toBeHidden();
   expect(api.reminderBodies).toHaveLength(2);
   expect(api.reminderBodies[1]).toEqual(api.reminderBodies[0]);
   expect(api.reminderKeys[1]).toBe(api.reminderKeys[0]);
+  await expect(
+    page.getByRole("heading", { name: "Reminder created" })
+  ).toHaveCount(1);
+  await expect(
+    page.getByRole("heading", { name: "Reminder created" })
+  ).toBeFocused();
 
   const quest = page
     .locator("li")
@@ -1296,6 +1363,30 @@ test("fits and navigates at Pixel 412x915", async ({ page }, testInfo) => {
   await expect(
     page.getByRole("navigation", { name: "Mobile dashboard" })
   ).toBeVisible();
+  const questLink = page.getByRole("link", { name: "2 open quests" });
+  const approvalsLink = page.getByRole("link", { name: /pending approvals/ });
+  await expect(questLink).toBeVisible();
+  const questBox = await questLink.boundingBox();
+  const approvalsBox = await approvalsLink.boundingBox();
+  expect(questBox).not.toBeNull();
+  expect(approvalsBox).not.toBeNull();
+  expect((questBox?.x ?? 0) + (questBox?.width ?? 0)).toBeLessThanOrEqual(412);
+  expect((approvalsBox?.x ?? 0) + (approvalsBox?.width ?? 0)).toBeLessThanOrEqual(
+    412
+  );
+  expect(
+    questBox && approvalsBox
+      ? questBox.x + questBox.width <= approvalsBox.x ||
+          approvalsBox.x + approvalsBox.width <= questBox.x ||
+          questBox.y + questBox.height <= approvalsBox.y ||
+          approvalsBox.y + approvalsBox.height <= questBox.y
+      : false
+  ).toBe(true);
+  await questLink.click();
+  await expect(page).toHaveURL(/#quests-heading$/);
+  await expect(
+    page.getByRole("heading", { name: "Verified quests" })
+  ).toBeFocused();
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
     .toBeLessThanOrEqual(412);

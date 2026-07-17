@@ -17,7 +17,11 @@ export default function QuestList({
       className="border-t border-outline-variant/25 pt-5"
     >
       <div className="flex items-center justify-between gap-3">
-        <h2 id="quests-heading" className="text-base font-black">
+        <h2
+          id="quests-heading"
+          tabIndex={-1}
+          className="text-base font-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-secondary"
+        >
           Verified quests
         </h2>
         <span className="text-xs font-bold text-secondary">

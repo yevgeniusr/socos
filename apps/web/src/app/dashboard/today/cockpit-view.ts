@@ -13,6 +13,21 @@ export interface ReminderDraft {
   timeZone: string;
 }
 
+export type ReminderRequestBody = {
+  contactId: string;
+  type: ReminderDraft["type"];
+  title: string;
+  scheduledAt: string;
+};
+
+export interface ReminderReceipt {
+  contact: ReminderDraft["contact"];
+  type: ReminderRequestBody["type"];
+  title: string;
+  scheduledAt: string;
+  timeZone: string;
+}
+
 export interface QuestCompletionResult {
   questId: string;
   status: "completed";
@@ -241,6 +256,20 @@ export function buildDateReminderDraft(
     title: item.title,
     scheduledAt: `${item.date}T09:00`,
     sourceLabel: `${sourceType} · ${formattedDate}`,
+    timeZone,
+  };
+}
+
+export function buildReminderReceipt(
+  body: ReminderRequestBody,
+  contact: ReminderDraft["contact"],
+  timeZone: string
+): ReminderReceipt {
+  return {
+    contact,
+    type: body.type,
+    title: body.title,
+    scheduledAt: body.scheduledAt,
     timeZone,
   };
 }

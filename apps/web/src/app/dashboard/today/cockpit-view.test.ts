@@ -7,6 +7,7 @@ import {
   buildPersonReminderDraft,
   buildPersonReminderDraftFromDates,
   buildQuestReceipt,
+  buildReminderReceipt,
   formatBriefDate,
   healthBandLabel,
   itemStateLabel,
@@ -324,5 +325,28 @@ describe("cockpit view", () => {
         xpAwarded: 20,
       })
     ).toThrow("Quest verification response does not match the request");
+  });
+
+  it("builds a reminder receipt from the exact accepted request", () => {
+    const body = {
+      contactId: "contact-synthetic",
+      type: "birthday" as const,
+      title: "Edited synthetic birthday",
+      scheduledAt: "2026-07-19T05:30:00.000Z",
+    };
+
+    expect(
+      buildReminderReceipt(
+        body,
+        { id: "contact-synthetic", name: "Synthetic Person" },
+        "Asia/Dubai"
+      )
+    ).toEqual({
+      contact: { id: "contact-synthetic", name: "Synthetic Person" },
+      type: "birthday",
+      title: "Edited synthetic birthday",
+      scheduledAt: "2026-07-19T05:30:00.000Z",
+      timeZone: "Asia/Dubai",
+    });
   });
 });

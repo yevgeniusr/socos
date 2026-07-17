@@ -5,8 +5,11 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { apiJson } from "@/lib/api-client";
 import { getFocusLoopTarget } from "../../contacts/_components/dialog-focus";
 import {
+  buildReminderReceipt,
   zonedLocalDateTimeToIso,
   type ReminderDraft,
+  type ReminderReceipt,
+  type ReminderRequestBody,
 } from "../cockpit-view";
 import { IntentRegistry } from "../intent-registry";
 
@@ -17,7 +20,7 @@ export default function ReminderDialog({
 }: {
   draft: ReminderDraft;
   onClose: () => void;
-  onSuccess: () => Promise<void>;
+  onSuccess: (receipt: ReminderReceipt) => void;
 }) {
   const [type, setType] = useState<ReminderDraft["type"]>(draft.type);
   const [title, setTitle] = useState(draft.title);
@@ -64,7 +67,7 @@ export default function ReminderDialog({
     setBusy(true);
     setError("");
     try {
-      const body = {
+      const body: ReminderRequestBody = {
         contactId: draft.contact.id,
         type,
         title: title.trim(),
@@ -81,8 +84,7 @@ export default function ReminderDialog({
         body: JSON.stringify(body),
       });
       registry.current.resolve(draft.contact.id, "reminder:create", body);
-      onClose();
-      void onSuccess().catch(() => undefined);
+      onSuccess(buildReminderReceipt(body, draft.contact, draft.timeZone));
     } catch (reason) {
       setError(
         reason instanceof Error ? reason.message : "Could not create reminder."

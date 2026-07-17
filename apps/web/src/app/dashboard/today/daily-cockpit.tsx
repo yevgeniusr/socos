@@ -23,6 +23,7 @@ import {
   momentumState,
   type QuestReceipt,
   type ReminderDraft,
+  type ReminderReceipt,
 } from "./cockpit-view";
 
 type Loadable<T> =
@@ -94,6 +95,8 @@ export default function DailyCockpit() {
     {}
   );
   const [reminderDraft, setReminderDraft] = useState<ReminderDraft | null>(null);
+  const [reminderReceipt, setReminderReceipt] =
+    useState<ReminderReceipt | null>(null);
   const [selectedQuest, setSelectedQuest] = useState<
     DailyBrief["quests"][number] | null
   >(null);
@@ -101,14 +104,21 @@ export default function DailyCockpit() {
     (QuestReceipt & { timeZone: string }) | null
   >(null);
   const reminderTriggerRef = useRef<HTMLButtonElement>(null);
+  const reminderReceiptFocusRef = useRef<HTMLHeadingElement>(null);
   const questTriggerRef = useRef<HTMLButtonElement>(null);
   const questReceiptFocusRef = useRef<HTMLHeadingElement>(null);
   const intents = useRef(new IntentRegistry());
 
-  const closeReminderDialog = useCallback(() => {
-    setReminderDraft(null);
-    window.requestAnimationFrame(() => reminderTriggerRef.current?.focus());
-  }, []);
+  const closeReminderDialog = useCallback(
+    (focusTarget: "trigger" | "receipt" = "trigger") => {
+      setReminderDraft(null);
+      window.requestAnimationFrame(() => {
+        if (focusTarget === "receipt") reminderReceiptFocusRef.current?.focus();
+        else reminderTriggerRef.current?.focus();
+      });
+    },
+    []
+  );
 
   const closeQuestDialog = useCallback(
     (focusTarget: "trigger" | "receipt" = "trigger") => {
@@ -287,6 +297,10 @@ export default function DailyCockpit() {
           (proposal) => proposal.status === "pending"
         ).length
       : 0;
+  const pendingQuests =
+    brief.status === "ready"
+      ? brief.data.quests.filter((quest) => quest.status === "pending").length
+      : 0;
   const momentum = momentumState(
     statsStatus,
     streak.status === "error"
@@ -312,21 +326,68 @@ export default function DailyCockpit() {
             A bounded view of the relationships that matter now.
           </p>
         </div>
-        <Link
-          href="/dashboard/approvals?status=pending"
-          className="flex min-h-11 items-center gap-2 rounded-lg border border-outline-variant/40 px-3 text-sm font-bold focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
-        >
-          <span
-            className="material-symbols-outlined text-[19px]"
-            aria-hidden="true"
+        <div className="flex max-w-full flex-wrap items-center justify-end gap-2">
+          {pendingQuests > 0 ? (
+            <a
+              href="#quests-heading"
+              className="flex min-h-11 items-center gap-2 rounded-lg border border-secondary/40 px-3 text-sm font-bold text-secondary focus-visible:outline focus-visible:outline-2 focus-visible:outline-secondary"
+            >
+              <span
+                className="material-symbols-outlined text-[19px]"
+                aria-hidden="true"
+              >
+                military_tech
+              </span>
+              {pendingQuests} open {pendingQuests === 1 ? "quest" : "quests"}
+            </a>
+          ) : null}
+          <Link
+            href="/dashboard/approvals?status=pending"
+            className="flex min-h-11 items-center gap-2 rounded-lg border border-outline-variant/40 px-3 text-sm font-bold focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
           >
-            approval
-          </span>
-          {approvals.status === "ready"
-            ? `${pendingApprovals} pending approvals`
-            : "Approvals"}
-        </Link>
+            <span
+              className="material-symbols-outlined text-[19px]"
+              aria-hidden="true"
+            >
+              approval
+            </span>
+            {approvals.status === "ready"
+              ? `${pendingApprovals} pending approvals`
+              : "Approvals"}
+          </Link>
+        </div>
       </header>
+
+      {reminderReceipt ? (
+        <section
+          role="status"
+          aria-live="polite"
+          className="mb-6 border-y border-tertiary/40 bg-tertiary/5 px-3 py-4"
+        >
+          <h2
+            ref={reminderReceiptFocusRef}
+            tabIndex={-1}
+            className="text-base font-black text-tertiary"
+          >
+            Reminder created
+          </h2>
+          <p className="mt-1 text-sm font-bold text-on-surface">
+            {reminderReceipt.contact.name}
+          </p>
+          <p className="mt-1 text-sm text-on-surface-variant">
+            {{
+              birthday: "Birthday",
+              followup: "Follow-up",
+              anniversary: "Anniversary",
+              custom: "Custom",
+            }[reminderReceipt.type]}{" "}
+            · {reminderReceipt.title}
+          </p>
+          <p className="mt-1 text-xs text-on-surface-variant">
+            Scheduled {formatBriefDate(reminderReceipt.scheduledAt, reminderReceipt.timeZone)}
+          </p>
+        </section>
+      ) : null}
 
       <div className="grid min-w-0 gap-8 lg:grid-cols-[minmax(0,1.6fr)_minmax(300px,.8fr)]">
         <div className="min-w-0">
@@ -506,10 +567,12 @@ export default function DailyCockpit() {
       {reminderDraft ? (
         <ReminderDialog
           draft={reminderDraft}
-          onClose={closeReminderDialog}
-          onSuccess={async () => {
+          onClose={() => closeReminderDialog()}
+          onSuccess={(receipt) => {
+            setReminderReceipt(receipt);
+            closeReminderDialog("receipt");
             loadReminders();
-            await refreshUpcomingReminders();
+            void refreshUpcomingReminders().catch(() => undefined);
           }}
         />
       ) : null}
