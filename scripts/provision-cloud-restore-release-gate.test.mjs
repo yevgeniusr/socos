@@ -122,6 +122,16 @@ function run(input, env, args = []) {
   return spawnSync('bash', [provisioner, ...args], { encoding: 'utf8', input, env });
 }
 
+function pidExists(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error.code === 'ESRCH') return false;
+    throw error;
+  }
+}
+
 test('local wrapper defaults to a one-hour end-to-end SSH timeout', () => {
   assert.equal(DEFAULT_SSH_TIMEOUT_MS, 3_600_000);
 });
@@ -270,6 +280,64 @@ test('package wiring and runbook cover secure provisioning, audits, rotation, st
   assert.ok(runbook.indexOf("'launcher_status=failed'") < runbook.indexOf('audit_rejected()'));
   assert.doesNotMatch(runbook, /exact trusted `origin\/main` is currently\s*`[0-9a-f]{40}`/);
   assert.doesNotMatch(runbook, /&& exit 1 \|\| true/);
+});
+
+test('runbook bounded helper terminates the command process group on deadline', () => {
+  const runbook = readFileSync(join(repositoryRoot, 'docs/runbooks/database-backup-restore.md'), 'utf8');
+  const helperStart = runbook.indexOf('bounded() {');
+  const helperEnd = runbook.indexOf('\n}\n\nif auth_output', helperStart);
+  assert.notEqual(helperStart, -1);
+  assert.notEqual(helperEnd, -1);
+  const helper = runbook.slice(helperStart, helperEnd + 2);
+  assert.match(helper, /use POSIX qw\(setpgid\)/);
+  assert.match(helper, /setpgid\(0, 0\)/);
+  assert.match(helper, /kill "TERM", -\$pid/);
+  assert.match(helper, /kill "KILL", -\$pid/);
+
+  const normalFailure = spawnSync(
+    '/bin/bash',
+    ['-c', `${helper}\nbounded 10 /usr/bin/false`],
+    { encoding: 'utf8', timeout: 5_000 },
+  );
+  assert.equal(normalFailure.status, 1, normalFailure.stderr);
+  const signalFailure = spawnSync(
+    '/bin/bash',
+    ['-c', `${helper}\nbounded 10 /bin/sh -c 'kill -TERM $$'`],
+    { encoding: 'utf8', timeout: 5_000 },
+  );
+  assert.equal(signalFailure.status, 143, signalFailure.stderr);
+
+  const dir = mkdtempSync(join(tmpdir(), 'socos-bounded-helper-'));
+  const command = join(dir, 'forking-command');
+  const leaderFile = join(dir, 'leader.pid');
+  const descendantFile = join(dir, 'descendant.pid');
+  executable(command, `
+printf '%s' "$$" > "$1"
+sleep 30 &
+descendant=$!
+printf '%s' "$descendant" > "$2"
+wait "$descendant"
+`);
+
+  const result = spawnSync(
+    '/bin/bash',
+    ['-c', `${helper}\nbounded 1 "$1" "$2" "$3"`, 'bounded-test', command, leaderFile, descendantFile],
+    { encoding: 'utf8', timeout: 5_000 },
+  );
+  assert.equal(result.status, 124, `${result.stdout}${result.stderr}`);
+  const pids = [leaderFile, descendantFile].map((path) => Number.parseInt(readFileSync(path, 'utf8'), 10));
+  assert.ok(pids.every(Number.isSafeInteger));
+  try {
+    const deadline = Date.now() + 2_000;
+    while (pids.some(pidExists) && Date.now() < deadline) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
+    assert.deepEqual(pids.map(pidExists), [false, false]);
+  } finally {
+    for (const pid of pids) {
+      if (pidExists(pid)) process.kill(pid, 'SIGKILL');
+    }
+  }
 });
 
 test('provisioner is idempotent and its launcher rejects command/input abuse before exact-ref execution', () => {

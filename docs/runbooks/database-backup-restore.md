@@ -299,18 +299,32 @@ bounded() {
   /usr/bin/perl -e '
     use strict;
     use warnings;
+    use POSIX qw(setpgid);
     my $seconds = shift @ARGV;
     exit 127 unless defined $seconds && $seconds =~ /\A[1-9][0-9]*\z/ && @ARGV;
+    pipe(my $ready_read, my $ready_write) or exit 127;
     my $pid = fork();
     exit 127 unless defined $pid;
     if ($pid == 0) {
+      close $ready_read;
+      exit 127 unless setpgid(0, 0) == 0;
+      exit 127 unless syswrite($ready_write, "1") == 1;
+      close $ready_write;
       exec { $ARGV[0] } @ARGV;
       exit 127;
     }
+    close $ready_write;
+    my $ready = "";
+    my $ready_count = sysread($ready_read, $ready, 1);
+    close $ready_read;
+    unless (defined $ready_count && $ready_count == 1 && $ready eq "1") {
+      waitpid $pid, 0;
+      exit 127;
+    }
     local $SIG{ALRM} = sub {
-      kill "TERM", $pid;
+      kill "TERM", -$pid;
       select undef, undef, undef, 0.2;
-      kill "KILL", $pid;
+      kill "KILL", -$pid;
       waitpid $pid, 0;
       exit 124;
     };
@@ -374,6 +388,8 @@ each nonzero transport result count as rejection. The dispatcher rejects the
 remote command while it is still unprivileged, before sudo clears the SSH
 environment. The operator-side `bounded` helper uses macOS `/usr/bin/perl`,
 executes argv without shell interpolation, and reports deadline expiry as 124.
+It pipe-synchronizes creation of a dedicated child process group before arming
+the alarm, signals that entire group on timeout, and reaps the group leader.
 Audit role flags, memberships, and database ACLs without selecting passwords or
 application rows:
 
