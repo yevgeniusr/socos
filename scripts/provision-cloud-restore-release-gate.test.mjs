@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdtempSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   statSync,
   writeFileSync,
@@ -54,6 +55,23 @@ case "$name" in
     : > "$SHIM_STATE/account"
     ;;
   usermod|passwd|visudo)
+    ;;
+  chmod)
+    if [[ " $* " == *'/socos-release-gate.env.'* ]]; then
+      [[ $(wc -l < "\${!#}" | tr -d '[:space:]') == '13' ]] || exit 1
+      printf '%s\\n' 'env_stage' >> "$SHIM_STATE/acl-events"
+    fi
+    /bin/chmod "$@"
+    ;;
+  mv)
+    if [[ " \${!#} " == *'/etc/socos-release-gate.env '* ]]; then
+      if [[ "\${SHIM_FAIL_ENV_MV_ONCE:-0}" == '1' && ! -f "$SHIM_STATE/env-mv-failed" ]]; then
+        : > "$SHIM_STATE/env-mv-failed"
+        exit 1
+      fi
+      printf '%s\\n' 'env_publish' >> "$SHIM_STATE/acl-events"
+    fi
+    /bin/mv "$@"
     ;;
   id)
     [[ " $* " == *' -gn socos-release-gate '* ]] && printf '%s\n' 'socos-release-gate'
@@ -110,6 +128,24 @@ case "$name" in
       else
         printf '%s\\n' 't'
       fi
+    elif [[ " $* " == *' run '* && " $* " == *' --env-file '* && " $* " == *' psql '* ]]; then
+      args=("$@")
+      for ((index = 0; index < \${#args[@]}; index += 1)); do
+        if [[ "\${args[$index]}" == '--env-file' ]]; then
+          probe_env=\${args[$((index + 1))]}
+          break
+        fi
+      done
+      [[ -n "\${probe_env:-}" && -f "$probe_env" ]] || exit 1
+      probe_user=$(sed -n 's/^PGUSER=//p' "$probe_env")
+      probe_database=$(sed -n 's/^PGDATABASE=//p' "$probe_env")
+      probe_password=$(sed -n 's/^PGPASSWORD=//p' "$probe_env")
+      [[ "$probe_password" =~ ^[0-9a-f]{64}$ ]] || exit 1
+      printf 'probe_%s\\n' "\${probe_user#socos_release_gate_}" >> "$SHIM_STATE/acl-events"
+      if [[ "\${SHIM_FAIL_CREDENTIAL_PROBE:-}" == 'all' || "\${SHIM_FAIL_CREDENTIAL_PROBE:-}" == "$probe_user" ]]; then
+        exit 1
+      fi
+      printf '%s|%s\\n' "$probe_user" "$probe_database"
     elif [[ " $* " == *' exec '* && " $* " == *' psql '* ]]; then
       if [[ " $* " == *' --dbname=socos '* ]]; then
         phase_count=0
@@ -130,6 +166,9 @@ case "$name" in
         cat > "$SHIM_STATE/role-sql-$role_phase_count"
         cat "$SHIM_STATE/role-sql-$role_phase_count" >> "$SHIM_STATE/role-sql"
         printf 'role_%s\\n' "$role_phase_count" >> "$SHIM_STATE/acl-events"
+        if [[ "$role_phase_count" -eq 2 && "\${SHIM_UNCERTAIN_ROTATION:-0}" == '1' ]]; then
+          exit 1
+        fi
       fi
     elif [[ " $* " == *' run '* && " $* " == *' scripts/cloud-restore-release-gate.mjs '* ]]; then
       printf '%s\\n' '{"gate":"socos-cloud-restore-release","version":1,"status":"passed"}'
@@ -156,7 +195,7 @@ case "$name" in
     ;;
 esac
 `);
-  for (const name of ['getent', 'useradd', 'usermod', 'passwd', 'visudo', 'id', 'openssl', 'git', 'docker', 'flock', 'chown', 'timeout', 'sudo', 'sleep']) {
+  for (const name of ['getent', 'useradd', 'usermod', 'passwd', 'visudo', 'id', 'openssl', 'git', 'docker', 'flock', 'chown', 'chmod', 'mv', 'timeout', 'sudo', 'sleep']) {
     execFileSync('ln', ['-s', shim, join(bin, name)]);
   }
 
@@ -264,8 +303,16 @@ test('provisioner renders the locked account, exact resources, database boundary
   const productionSql = readFileSync(join(f.state, 'production-role-sql'), 'utf8');
   const productionPhaseA = readFileSync(join(f.state, 'production-role-sql-1'), 'utf8');
   const productionPhaseB = readFileSync(join(f.state, 'production-role-sql-2'), 'utf8');
-  assert.equal(readFileSync(join(f.state, 'acl-events'), 'utf8'), 'role_1\nphase_1\ncutoff\npoll\nphase_2\nrole_2\n');
+  assert.equal(
+    readFileSync(join(f.state, 'acl-events'), 'utf8'),
+    'role_1\nphase_1\ncutoff\npoll\nphase_2\nenv_stage\nrole_2\nprobe_read\nprobe_admin\nprobe_restore\nenv_publish\n',
+  );
   const calls = readFileSync(f.log, 'utf8');
+  const generatedPasswords = [1, 2, 3].map((value) => value.toString(16).padStart(64, '0'));
+  for (const password of generatedPasswords) {
+    assert.equal(`${result.stdout}${result.stderr}`.includes(password), false);
+    assert.equal(calls.includes(password), false);
+  }
   assert.match(calls, /xact_start <= to_timestamp\(1784289600000000 \/ 1000000\.0\)/);
   assert.match(calls, /pg_prepared_xacts WHERE owner = 'socos_app'/);
   assert.doesNotMatch(calls, /pg_prepared_xacts WHERE[^;]*prepared/);
@@ -275,6 +322,21 @@ test('provisioner renders the locked account, exact resources, database boundary
   assert.match(passwordPhase, /^BEGIN;[\s\S]*ALTER ROLE socos_release_gate_read WITH PASSWORD '[0-9a-f]{64}';/);
   assert.match(passwordPhase, /ALTER ROLE socos_release_gate_admin WITH PASSWORD '[0-9a-f]{64}';/);
   assert.match(passwordPhase, /ALTER ROLE socos_release_gate_restore WITH PASSWORD '[0-9a-f]{64}';[\s\S]*COMMIT;\n$/);
+  const probeCalls = calls
+    .split('\n')
+    .filter((line) => line.startsWith('docker ') && line.includes('<--env-file>') && line.includes('<psql>'));
+  assert.equal(probeCalls.length, 3);
+  for (const call of probeCalls) {
+    assert.match(
+      call,
+      /docker <run> <--rm> <--network> <coolify> <--cap-drop> <ALL> <--security-opt> <no-new-privileges:true> <--env-file> <[^>]+> <socos-release-gate-runtime:[^>]+> <psql>/,
+    );
+    assert.match(call, /<--command=SELECT current_user, current_database\(\);>/);
+    assert.doesNotMatch(
+      call,
+      /postgresql:\/\/|PGPASSWORD|000000000000000000000000000000000000000000000000000000000000000[123]/,
+    );
+  }
   assert.match(productionPhaseA, /^BEGIN;[\s\S]*ALTER DEFAULT PRIVILEGES FOR ROLE socos_app/);
   assert.match(productionPhaseA, /COMMIT;\n$/);
   assert.doesNotMatch(productionPhaseA, /ON ALL (?:TABLES|SEQUENCES|ROUTINES)/);
@@ -429,6 +491,61 @@ test('phase B failure preserves installed credentials and skips password rotatio
   assert.equal(readFileSync(envPath, 'utf8'), 'installed-credentials-remain\n');
 });
 
+test('uncertain password rotation response publishes after all exact credential proofs succeed', () => {
+  const f = fixture();
+  const etc = join(f.root, 'etc');
+  mkdirSync(etc);
+  const envPath = join(etc, 'socos-release-gate.env');
+  writeFileSync(envPath, 'installed-credentials-are-old\n', { mode: 0o600 });
+  const result = run(f.input, { ...f.env, SHIM_UNCERTAIN_ROTATION: '1' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(
+    readFileSync(envPath, 'utf8'),
+    /^SOCOS_RELEASE_GATE_DATABASE_URL=postgresql:\/\/socos_release_gate_read:/m,
+  );
+  assert.match(
+    readFileSync(join(f.state, 'acl-events'), 'utf8'),
+    /env_stage\nrole_2\nprobe_read\nprobe_admin\nprobe_restore\nenv_publish\n$/,
+  );
+});
+
+test('failed credential proof preserves installed env and removes every credential temp', () => {
+  const f = fixture();
+  const etc = join(f.root, 'etc');
+  mkdirSync(etc);
+  const envPath = join(etc, 'socos-release-gate.env');
+  writeFileSync(envPath, 'installed-credentials-remain\n', { mode: 0o600 });
+  const result = run(f.input, { ...f.env, SHIM_FAIL_CREDENTIAL_PROBE: 'socos_release_gate_admin' });
+  assert.notEqual(result.status, 0);
+  assert.equal(result.stdout, '');
+  assert.equal(result.stderr, 'provision_status=failed\n');
+  assert.equal(readFileSync(envPath, 'utf8'), 'installed-credentials-remain\n');
+  assert.equal(readdirSync(etc).some((name) => name.startsWith('socos-release-gate.env.')), false);
+  assert.equal(
+    readdirSync(join(f.root, 'var/lib/socos-release-gate')).some((name) => name.startsWith('credential-probe.')),
+    false,
+  );
+  assert.match(readFileSync(join(f.state, 'acl-events'), 'utf8'), /probe_read\nprobe_admin\nprobe_restore\n$/);
+});
+
+test('post-verification normal failure publishes the staged env from EXIT cleanup', () => {
+  const f = fixture();
+  const etc = join(f.root, 'etc');
+  mkdirSync(etc);
+  const envPath = join(etc, 'socos-release-gate.env');
+  writeFileSync(envPath, 'installed-credentials-are-old\n', { mode: 0o600 });
+  const result = run(f.input, { ...f.env, SHIM_FAIL_ENV_MV_ONCE: '1' });
+  assert.notEqual(result.status, 0);
+  assert.equal(result.stdout, '');
+  assert.equal(result.stderr, 'provision_status=failed\n');
+  assert.match(
+    readFileSync(envPath, 'utf8'),
+    /^SOCOS_RELEASE_GATE_DATABASE_URL=postgresql:\/\/socos_release_gate_read:/m,
+  );
+  assert.equal(readdirSync(etc).some((name) => name.startsWith('socos-release-gate.env.')), false);
+  assert.match(readFileSync(join(f.state, 'acl-events'), 'utf8'), /probe_restore\nenv_publish\n$/);
+});
+
 test('package wiring and runbook cover secure provisioning, audits, rotation, stale locks, and the exact candidate', () => {
   const pkg = JSON.parse(readFileSync(join(repositoryRoot, 'package.json'), 'utf8'));
   assert.match(pkg.scripts.test, /scripts\/provision-cloud-restore-release-gate\.test\.mjs/);
@@ -474,6 +591,9 @@ test('package wiring and runbook cover secure provisioning, audits, rotation, st
     /60 attempts.*two\s+seconds/is,
     /ten-second external timeout/i,
     /password rotation.*after Phase B/is,
+    /root-only `--env-file`/i,
+    /current_user.*current_database/is,
+    /SIGKILL.*mandatory immediate\s+rerun/is,
     /token and role rotation/i,
     /rmdir \/var\/lock\/socos-release-gate\/gate\.lock/,
     /084b7addb0ccc765aa343c5412ed8f5fe5f6da0b.*ancestor/s,

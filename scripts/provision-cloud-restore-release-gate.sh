@@ -13,6 +13,7 @@ readonly RUNTIME_IMAGE='socos-release-gate-runtime:node22-pnpm10.10.0-pg16-v2'
 readonly ACL_QUIESCENCE_ATTEMPTS=60
 readonly ACL_QUIESCENCE_SLEEP_SECONDS=2
 readonly ACL_QUERY_TIMEOUT_SECONDS=10
+readonly CREDENTIAL_PROBE_TIMEOUT_SECONDS=15
 
 ROOT_PREFIX=${SOCOS_PROVISION_TEST_ROOT:-}
 TEST_BIN=${SOCOS_PROVISION_TEST_BIN:-}
@@ -20,15 +21,33 @@ effective_euid=${SOCOS_PROVISION_TEST_EUID:-$EUID}
 finished=0
 input_file=''
 build_context=''
+env_path=''
+env_tmp=''
+credential_probe_tmp=''
+credentials_verified=0
 
 cleanup() {
+  original_status=$?
+  trap - EXIT HUP INT TERM
   [[ -z "$input_file" ]] || rm -f -- "$input_file"
   [[ -z "$build_context" ]] || rm -rf -- "$build_context"
+  [[ -z "$credential_probe_tmp" ]] || rm -f -- "$credential_probe_tmp"
+  credential_probe_tmp=''
+  if [[ -n "$env_tmp" ]]; then
+    if [[ "$credentials_verified" -eq 1 ]] && mv -f -- "$env_tmp" "$env_path" >/dev/null 2>&1; then
+      env_tmp=''
+    fi
+    [[ -z "$env_tmp" ]] || rm -f -- "$env_tmp"
+  fi
   if [[ "$finished" -ne 1 ]]; then
     printf '%s\n' 'provision_status=failed' >&2
   fi
+  exit "$original_status"
 }
 trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 fail() {
   exit 1
@@ -45,6 +64,7 @@ root_path() {
 [[ "$effective_euid" == '0' ]] || fail
 [[ "$#" -eq 0 ]] || fail
 [[ "$ACL_QUERY_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || fail
+[[ "$CREDENTIAL_PROBE_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || fail
 
 tmp_root=$(root_path '/var/lib/socos-release-gate')
 quiet install -d -m 0700 "$tmp_root"
@@ -320,17 +340,6 @@ restore_password=$(openssl rand -hex 32 2>/dev/null) || fail
 [[ "$read_password" =~ ^[0-9a-f]{64}$ && "$admin_password" =~ ^[0-9a-f]{64}$ && "$restore_password" =~ ^[0-9a-f]{64}$ ]] || fail
 [[ "$read_password" != "$admin_password" && "$read_password" != "$restore_password" && "$admin_password" != "$restore_password" ]] || fail
 
-if ! docker exec -i "$DATABASE_CONTAINER" psql -X --set=ON_ERROR_STOP=1 --username=postgres --dbname=postgres >/dev/null 2>&1 <<SQL
-BEGIN;
-ALTER ROLE socos_release_gate_read WITH PASSWORD '$read_password';
-ALTER ROLE socos_release_gate_admin WITH PASSWORD '$admin_password';
-ALTER ROLE socos_release_gate_restore WITH PASSWORD '$restore_password';
-COMMIT;
-SQL
-then
-  fail
-fi
-
 env_tmp=$(mktemp "$etc_dir/socos-release-gate.env.XXXXXX")
 cat > "$env_tmp" <<ENV
 SOCOS_RELEASE_GATE_REPOSITORY=/gate/repository
@@ -348,7 +357,88 @@ SOCOS_RELEASE_GATE_OPERATION_TIMEOUT_MS=1800000
 SOCOS_RELEASE_GATE_CLEANUP_TIMEOUT_MS=120000
 ENV
 quiet chmod 0600 "$env_tmp"
-quiet mv -f -- "$env_tmp" "$env_path"
+staged_environment=()
+while IFS= read -r environment_line; do
+  staged_environment[${#staged_environment[@]}]=$environment_line
+done < "$env_tmp"
+expected_environment=(
+  'SOCOS_RELEASE_GATE_REPOSITORY=/gate/repository'
+  'SOCOS_RELEASE_GATE_WORK_ROOT=/gate/work'
+  'SOCOS_RELEASE_GATE_LOCK_DIR=/gate/locks/gate.lock'
+  "SOCOS_RELEASE_GATE_DATABASE_URL=postgresql://socos_release_gate_read:$read_password@$database_endpoint/socos"
+  "SOCOS_RELEASE_GATE_ADMIN_DATABASE_URL=postgresql://socos_release_gate_admin:$admin_password@$database_endpoint/postgres"
+  "SOCOS_RELEASE_GATE_RESTORE_DATABASE_URL=postgresql://socos_release_gate_restore:$restore_password@$database_endpoint/postgres"
+  "SOCOS_RELEASE_GATE_CLUSTER_ID=$cluster_id"
+  "SOCOS_RELEASE_GATE_COOLIFY_BASE_URL=$COOLIFY_URL"
+  "SOCOS_RELEASE_GATE_COOLIFY_TOKEN=$coolify_token"
+  "SOCOS_RELEASE_GATE_DATABASE_UUID=$DATABASE_CONTAINER"
+  "SOCOS_RELEASE_GATE_BACKUP_UUID=$BACKUP_UUID"
+  'SOCOS_RELEASE_GATE_OPERATION_TIMEOUT_MS=1800000'
+  'SOCOS_RELEASE_GATE_CLEANUP_TIMEOUT_MS=120000'
+)
+[[ -f "$env_tmp" && ! -L "$env_tmp" && "${#staged_environment[@]}" -eq "${#expected_environment[@]}" ]] || fail
+for ((environment_index = 0; environment_index < ${#expected_environment[@]}; environment_index += 1)); do
+  [[ "${staged_environment[$environment_index]}" == "${expected_environment[$environment_index]}" ]] || fail
+done
+unset staged_environment expected_environment environment_line
+
+# COMMIT may succeed even when its client response is lost; the TCP proofs below
+# are the authority for whether the staged credentials can be published.
+rotation_status=0
+docker exec -i "$DATABASE_CONTAINER" psql -X --set=ON_ERROR_STOP=1 --username=postgres --dbname=postgres >/dev/null 2>&1 <<SQL || rotation_status=$?
+BEGIN;
+ALTER ROLE socos_release_gate_read WITH PASSWORD '$read_password';
+ALTER ROLE socos_release_gate_admin WITH PASSWORD '$admin_password';
+ALTER ROLE socos_release_gate_restore WITH PASSWORD '$restore_password';
+COMMIT;
+SQL
+
+database_host=$database_endpoint
+database_port=5432
+if [[ "$database_endpoint" == *:* ]]; then
+  database_host=${database_endpoint%:*}
+  database_port=${database_endpoint##*:}
+fi
+[[ "$database_host" =~ ^[A-Za-z0-9_.-]+$ && "$database_port" =~ ^[0-9]+$ ]] || fail
+credential_probe_tmp=$(mktemp "$tmp_root/credential-probe.XXXXXX")
+quiet chmod 0600 "$credential_probe_tmp"
+
+probe_credential() {
+  local probe_user=$1
+  local probe_password=$2
+  local probe_database=$3
+  local probe_proof=''
+  cat > "$credential_probe_tmp" <<PROBE_ENV
+PGHOST=$database_host
+PGPORT=$database_port
+PGUSER=$probe_user
+PGPASSWORD=$probe_password
+PGDATABASE=$probe_database
+PGCONNECT_TIMEOUT=10
+PROBE_ENV
+  quiet chmod 0600 "$credential_probe_tmp"
+  probe_proof=$(timeout --signal=TERM --kill-after=5s "$CREDENTIAL_PROBE_TIMEOUT_SECONDS" \
+    docker run --rm --network "$NETWORK" --cap-drop ALL --security-opt no-new-privileges:true \
+    --env-file "$credential_probe_tmp" "$RUNTIME_IMAGE" \
+    psql -X --set=ON_ERROR_STOP=1 --tuples-only --no-align --field-separator='|' \
+    --command='SELECT current_user, current_database();' 2>/dev/null) || return 1
+  [[ "$probe_proof" == "$probe_user|$probe_database" ]]
+}
+
+credential_probes_valid=1
+probe_credential 'socos_release_gate_read' "$read_password" 'socos' || credential_probes_valid=0
+probe_credential 'socos_release_gate_admin' "$admin_password" 'postgres' || credential_probes_valid=0
+probe_credential 'socos_release_gate_restore' "$restore_password" 'postgres' || credential_probes_valid=0
+rm -f -- "$credential_probe_tmp"
+credential_probe_tmp=''
+unset rotation_status database_host database_port
+[[ "$credential_probes_valid" -eq 1 ]] || fail
+credentials_verified=1
+if quiet mv -f -- "$env_tmp" "$env_path"; then
+  env_tmp=''
+else
+  fail
+fi
 
 dispatcher_tmp=$(mktemp "$(dirname "$dispatcher_path")/socos-release-gate-dispatch.XXXXXX")
 dispatcher_path_value='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'

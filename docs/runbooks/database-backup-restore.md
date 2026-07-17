@@ -519,11 +519,30 @@ Never edit the environment, authorized key, or role passwords by hand.
 Password rotation occurs only after Phase B commits successfully. The earlier
 role phase creates missing roles and resets flags, memberships, and ACLs without
 changing an installed password. After Phase B, the provisioner generates three
-new values, changes all three passwords in one transaction, and immediately
-atomically replaces the root-only environment file. A cutoff, polling, or Phase
-B failure therefore preserves both the installed passwords and their matching
-environment. On a first run, newly created roles have no password until the same
-final success path; rerunning provisioning follows the identical order.
+new values and stages the complete validated mode-`600` environment before it
+changes all three passwords in one transaction. Because loss of the SQL response
+does not prove whether that transaction committed, the provisioner then tests all
+three new credentials over TCP on the private Docker network. Each fixed `psql`
+probe receives its `PG*` values through a root-only `--env-file`, never through a
+URL or password argument, and must return the exact `current_user` and
+`current_database` pair: read on `socos`, and admin and restore on `postgres`.
+
+Only three successful identity proofs authorize atomic publication of the staged
+environment, even when the password transaction's client response was nonzero.
+Before that proof, EXIT cleanup removes the staged environment and probe file and
+preserves the installed environment. After proof, a normal failure or catchable
+signal makes EXIT cleanup retry publication so the installed file matches the
+committed passwords. A cutoff, polling, or Phase B failure occurs before staging
+or rotation and therefore preserves both the installed passwords and their
+matching environment. On a first run, newly created roles have no password until
+the same final path; rerunning provisioning follows the identical order.
+
+`SIGKILL` cannot run EXIT cleanup, so there is an unavoidable commit-to-rename
+window in which PostgreSQL may have new passwords while the installed environment
+is still old. Any interrupted or failed provisioning has a mandatory immediate
+rerun before a gate is allowed. The rerun reconciles uncertain state by generating
+the next three credentials, rotating them transactionally, proving all three over
+the private network, and publishing their matching staged environment.
 
 ### Stale-lock recovery
 
