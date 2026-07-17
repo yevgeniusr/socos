@@ -343,7 +343,10 @@ export default function EventDiscoveryPanel() {
                       ) : null}
                       <p className="mt-1 break-words text-xs text-on-surface-variant">
                         Last poll {formatTimestamp(source.lastPolledAt)} / Next
-                        poll {formatTimestamp(source.nextPollAt)}
+                        poll{" "}
+                        {source.status === "disabled"
+                          ? "Not scheduled while disabled"
+                          : formatTimestamp(source.nextPollAt)}
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">

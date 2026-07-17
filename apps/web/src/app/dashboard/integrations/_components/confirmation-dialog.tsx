@@ -7,7 +7,6 @@ type ConfirmationDialogProps = {
   description: string;
   confirmLabel: string;
   busy?: boolean;
-  restoreFocus?: boolean;
   restoreFocusRef?: RefObject<HTMLElement | null>;
   onCancel: () => void;
   onConfirm: () => void;
@@ -25,28 +24,29 @@ export default function ConfirmationDialog({
   description,
   confirmLabel,
   busy = false,
-  restoreFocus = true,
   restoreFocusRef,
   onCancel,
   onConfirm,
 }: ConfirmationDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const confirmedRef = useRef(false);
 
   useEffect(() => {
     const previousFocus = document.activeElement as HTMLElement | null;
     cancelRef.current?.focus();
 
     return () => {
-      if (!restoreFocus) return;
       requestAnimationFrame(() => {
-        const target = focusTarget(restoreFocusRef, previousFocus);
+        const target = confirmedRef.current
+          ? focusTarget(restoreFocusRef, previousFocus)
+          : previousFocus;
         if (target?.isConnected && !target.matches(":disabled")) {
           target.focus();
         }
       });
     };
-  }, [restoreFocus, restoreFocusRef]);
+  }, [restoreFocusRef]);
 
   useEffect(() => {
     if (busy) dialogRef.current?.focus();
@@ -55,6 +55,7 @@ export default function ConfirmationDialog({
   function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape" && !busy) {
       event.preventDefault();
+      confirmedRef.current = false;
       onCancel();
       return;
     }
@@ -109,7 +110,10 @@ export default function ConfirmationDialog({
             ref={cancelRef}
             type="button"
             disabled={busy}
-            onClick={onCancel}
+            onClick={() => {
+              confirmedRef.current = false;
+              onCancel();
+            }}
             className="min-h-11 border border-outline-variant/60 px-4 text-sm font-bold text-on-surface hover:bg-surface-container-high focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
           >
             Cancel
@@ -117,7 +121,10 @@ export default function ConfirmationDialog({
           <button
             type="button"
             disabled={busy}
-            onClick={onConfirm}
+            onClick={() => {
+              confirmedRef.current = true;
+              onConfirm();
+            }}
             className="min-h-11 bg-error-container px-4 text-sm font-bold text-on-error-container hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
           >
             {busy ? "Working..." : confirmLabel}

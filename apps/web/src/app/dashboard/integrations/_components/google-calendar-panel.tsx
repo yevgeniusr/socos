@@ -79,6 +79,7 @@ export default function GoogleCalendarPanel({
   async function connect() {
     setBusy(true);
     setActionError(null);
+    setReceipt(null);
     try {
       const response = await apiJson<CalendarConnectResponse>(
         "/api/integrations/google-calendar/connect",

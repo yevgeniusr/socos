@@ -64,6 +64,7 @@ export default function PixelLocationPanel() {
   const [receipt, setReceipt] = useState<string | null>(null);
   const receiptRef = useRef<HTMLParagraphElement>(null);
   const credentialReturnFocusRef = useRef<HTMLElement | null>(null);
+  const credentialDialogFocusRef = useRef<HTMLButtonElement>(null);
 
   const loadPixel = useCallback(async (signal?: AbortSignal) => {
     setState({ status: "loading" });
@@ -125,7 +126,6 @@ export default function PixelLocationPanel() {
   }
 
   async function rotate(device: LocationDeviceResponse) {
-    let rotated = false;
     setBusy(true);
     setActionError(null);
     setReceipt(null);
@@ -136,7 +136,6 @@ export default function PixelLocationPanel() {
       );
       setCredentials(response.credentials);
       setReceipt("Pixel credentials rotated. Configure the replacement now.");
-      rotated = true;
     } catch (error) {
       setActionError(
         error instanceof Error ? error.message : "Credential rotation failed."
@@ -144,14 +143,6 @@ export default function PixelLocationPanel() {
     } finally {
       setBusy(false);
       setPendingAction(null);
-      if (!rotated) {
-        requestAnimationFrame(() => {
-          const target = credentialReturnFocusRef.current;
-          if (target?.isConnected && !target.matches(":disabled")) {
-            target.focus();
-          }
-        });
-      }
     }
   }
 
@@ -182,13 +173,16 @@ export default function PixelLocationPanel() {
     state.status === "ready"
       ? state.data.devices.filter((device) => device.status === "active")
       : [];
-  const latestDeviceSeenAt = activeDevices.reduce<string | null>(
-    (latest, device) =>
-      device.lastSeenAt && (!latest || device.lastSeenAt > latest)
-        ? device.lastSeenAt
-        : latest,
-    null
-  );
+  const latestDeviceSeenAt =
+    state.status === "ready"
+      ? state.data.devices.reduce<string | null>(
+          (latest, device) =>
+            device.lastSeenAt && (!latest || device.lastSeenAt > latest)
+              ? device.lastSeenAt
+              : latest,
+          null
+        )
+      : null;
   const contextSourceLabel =
     state.status === "ready"
       ? {
@@ -458,7 +452,7 @@ export default function PixelLocationPanel() {
           description="Existing credentials will stop working immediately. The replacement password is shown only once."
           confirmLabel="Rotate credentials"
           busy={busy}
-          restoreFocus={false}
+          restoreFocusRef={credentialDialogFocusRef}
           onCancel={() => setPendingAction(null)}
           onConfirm={() => void rotate(pendingAction.device)}
         />
@@ -479,6 +473,7 @@ export default function PixelLocationPanel() {
           endpoint={`${window.location.origin}/api/location/owntracks`}
           username={credentials.username}
           password={credentials.password}
+          initialFocusRef={credentialDialogFocusRef}
           restoreFocusRef={credentialReturnFocusRef}
           onClose={() => setCredentials(null)}
         />

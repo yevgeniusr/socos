@@ -6,6 +6,7 @@ type OneTimeCredentialsDialogProps = {
   endpoint: string;
   username: string;
   password: string;
+  initialFocusRef?: RefObject<HTMLButtonElement | null>;
   restoreFocusRef?: RefObject<HTMLElement | null>;
   onClose: () => void;
 };
@@ -21,10 +22,12 @@ export default function OneTimeCredentialsDialog({
   endpoint,
   username,
   password,
+  initialFocusRef,
   restoreFocusRef,
   onClose,
 }: OneTimeCredentialsDialogProps) {
-  const closeRef = useRef<HTMLButtonElement>(null);
+  const internalCloseRef = useRef<HTMLButtonElement>(null);
+  const closeRef = initialFocusRef ?? internalCloseRef;
 
   useEffect(() => {
     const previousFocus = document.activeElement as HTMLElement | null;
@@ -37,7 +40,7 @@ export default function OneTimeCredentialsDialog({
         }
       });
     };
-  }, [restoreFocusRef]);
+  }, [closeRef, restoreFocusRef]);
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape") {

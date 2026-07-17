@@ -106,6 +106,9 @@ type SyntheticOptions = {
   holdLocationRotation?: boolean;
   pixelAwaitingFirstSample?: boolean;
   eventErrorOnly?: boolean;
+  eventDisabled?: boolean;
+  failCalendarConnect?: boolean;
+  pixelRevokedWithHistory?: boolean;
 };
 
 async function json(route: Route, body: unknown, status = 200) {
@@ -162,20 +165,24 @@ async function installSyntheticApi(page: Page, options: SyntheticOptions = {}) {
     preferencePayloads: [] as unknown[],
     createdDevice: options.emptyPixel
       ? null
-      : options.pixelAwaitingFirstSample
-        ? { ...locationDevice, lastSeenAt: null }
-        : locationDevice,
+      : options.pixelRevokedWithHistory
+        ? { ...locationDevice, status: "revoked", lastSeenAt: ISO_NOW }
+        : options.pixelAwaitingFirstSample
+          ? { ...locationDevice, lastSeenAt: null }
+          : locationDevice,
     createdEventSource: options.emptyEvents
       ? null
-      : options.eventErrorOnly
-        ? {
-            ...eventSource,
-            status: "error",
-            errorCode: "upstream_timeout",
-            lastPolledAt: "2026-07-17T07:00:00.000Z",
-            nextPollAt: "2026-07-17T09:00:00.000Z",
-          }
-        : eventSource,
+      : options.eventDisabled
+        ? { ...eventSource, status: "disabled", errorCode: null }
+        : options.eventErrorOnly
+          ? {
+              ...eventSource,
+              status: "error",
+              errorCode: "upstream_timeout",
+              lastPolledAt: "2026-07-17T07:00:00.000Z",
+              nextPollAt: "2026-07-17T09:00:00.000Z",
+            }
+          : eventSource,
   };
 
   await page.route("**/api/**", async (route) => {
@@ -247,6 +254,9 @@ async function installSyntheticApi(page: Page, options: SyntheticOptions = {}) {
       method === "POST"
     ) {
       state.calendarConnectPayloads.push(request.postDataJSON());
+      if (options.failCalendarConnect) {
+        return json(route, { message: "Synthetic connect failure" }, 500);
+      }
       return json(route, {
         authorizationUrl: "/dashboard/integrations?synthetic-oauth=google",
       });
@@ -647,32 +657,74 @@ test.describe("authenticated Integrations workspace", () => {
       name: "Rotate credentials for Synthetic Pixel",
     });
 
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      await rotateButton.click();
+      await page
+        .getByRole("dialog", { name: "Rotate Pixel credentials" })
+        .getByRole("button", { name: "Rotate credentials" })
+        .click();
+
+      const busyDialog = page.getByRole("dialog", {
+        name: "Rotate Pixel credentials",
+      });
+      await expect.poll(() => api.locationRotations).toBe(attempt);
+      await expect.poll(() => api.releaseLocationRotation).toBeDefined();
+      await page.keyboard.press("Tab");
+      const focusStayedInDialog = await busyDialog.evaluate(
+        (dialog) => dialog === document.activeElement
+      );
+      api.releaseLocationRotation?.();
+      api.releaseLocationRotation = undefined;
+      expect(focusStayedInDialog).toBe(true);
+
+      await expect(
+        pixel
+          .getByRole("alert")
+          .filter({ hasText: "Synthetic rotation failure" })
+      ).toBeVisible();
+      await expect(rotateButton).toBeEnabled();
+      await expect(rotateButton).toBeFocused();
+      await expect(
+        page.getByRole("dialog", { name: "One-time Pixel credentials" })
+      ).toHaveCount(0);
+    }
+  });
+
+  test("restores exact confirmation openers on cancel despite existing receipts", async ({
+    page,
+  }) => {
+    await installSyntheticApi(page);
+    await page.goto("/dashboard/integrations");
+
+    const calendar = page.getByRole("region", { name: "Google Calendar" });
+    await calendar
+      .getByRole("checkbox", { name: "Use Synthetic primary calendar" })
+      .uncheck();
+    await expect(
+      calendar
+        .getByRole("status")
+        .filter({ hasText: "Calendar selection saved" })
+    ).toBeVisible();
+    const disconnectButton = calendar.getByRole("button", {
+      name: "Disconnect Google Calendar",
+    });
+    await disconnectButton.click();
+    await page
+      .getByRole("dialog", { name: "Disconnect Google Calendar" })
+      .getByRole("button", { name: "Cancel" })
+      .click();
+    await expect(disconnectButton).toBeFocused();
+
+    const pixel = page.getByRole("region", { name: "Pixel location" });
+    const rotateButton = pixel.getByRole("button", {
+      name: "Rotate credentials for Synthetic Pixel",
+    });
     await rotateButton.click();
     await page
       .getByRole("dialog", { name: "Rotate Pixel credentials" })
-      .getByRole("button", { name: "Rotate credentials" })
+      .getByRole("button", { name: "Cancel" })
       .click();
-
-    const busyDialog = page.getByRole("dialog", {
-      name: "Rotate Pixel credentials",
-    });
-    await expect.poll(() => api.releaseLocationRotation).toBeDefined();
-    await page.keyboard.press("Tab");
-    const focusStayedInDialog = await busyDialog.evaluate(
-      (dialog) => dialog === document.activeElement
-    );
-    api.releaseLocationRotation?.();
-    expect(focusStayedInDialog).toBe(true);
-
-    await expect.poll(() => api.locationRotations).toBe(1);
-    await expect(
-      pixel.getByRole("alert").filter({ hasText: "Synthetic rotation failure" })
-    ).toBeVisible();
-    await expect(rotateButton).toBeEnabled();
     await expect(rotateButton).toBeFocused();
-    await expect(
-      page.getByRole("dialog", { name: "One-time Pixel credentials" })
-    ).toHaveCount(0);
   });
 
   test("shows truthful Pixel enrollment and Event polling health states", async ({
@@ -708,6 +760,55 @@ test.describe("authenticated Integrations workspace", () => {
       events.getByText("Ready for sources", { exact: true })
     ).toHaveCount(0);
     await expect(events).not.toContainText(FEED_URL);
+  });
+
+  test("keeps historical freshness and qualifies inactive scheduling state", async ({
+    page,
+  }) => {
+    await installSyntheticApi(page, {
+      eventDisabled: true,
+      failCalendarConnect: true,
+      pixelRevokedWithHistory: true,
+    });
+    await page.goto("/dashboard/integrations");
+
+    const calendar = page.getByRole("region", { name: "Google Calendar" });
+    await calendar
+      .getByRole("checkbox", { name: "Use Synthetic primary calendar" })
+      .uncheck();
+    await expect(
+      calendar
+        .getByRole("status")
+        .filter({ hasText: "Calendar selection saved" })
+    ).toBeVisible();
+    await calendar
+      .getByRole("button", { name: "Reconnect Google Calendar" })
+      .click();
+    await expect(
+      calendar
+        .getByRole("alert")
+        .filter({ hasText: "Synthetic connect failure" })
+    ).toBeVisible();
+    await expect(
+      calendar
+        .getByRole("status")
+        .filter({ hasText: "Calendar selection saved" })
+    ).toHaveCount(0);
+
+    const pixel = page.getByRole("region", { name: "Pixel location" });
+    await expect(
+      pixel.getByText("No active devices", { exact: true }).first()
+    ).toBeVisible();
+    await expect(pixel.getByText("No device samples received")).toHaveCount(0);
+    await expect(pixel.getByText(/7\/17\/2026/).first()).toBeVisible();
+
+    const events = page.getByRole("region", { name: "Event discovery" });
+    await expect(
+      events.getByText("Polling paused", { exact: true }).first()
+    ).toBeVisible();
+    await expect(
+      events.getByText("Next poll Not scheduled while disabled")
+    ).toBeVisible();
   });
 
   test("renders non-active Calendar states and consumes an error callback", async ({
