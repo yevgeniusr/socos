@@ -526,9 +526,28 @@ three new credentials over TCP on the private Docker network. Each fixed `psql`
 probe receives its `PG*` values through a root-only `--env-file`, never through a
 URL or password argument, and must return the exact `current_user` and
 `current_database` pair: read on `socos`, and admin and restore on `postgres`.
+The password transaction itself has an external timeout with TERM/KILL escalation;
+zero, nonzero, and timeout responses all continue into the same reconciliation.
 
-Only three successful identity proofs authorize atomic publication of the staged
-environment, even when the password transaction's client response was nonzero.
+Authentication proof is a pair for each role. A wrong password for each role is
+derived deterministically and must receive `psql`'s connection-failure status; a
+separate container using the correct password must return the exact identity pair.
+A timeout or arbitrary nonzero result is not accepted as wrong-password rejection.
+If any wrong password connects, provisioning rejects a trust or other
+password-independent HBA configuration and preserves the installed environment.
+
+Every probe container has a root-only cidfile and the fixed ownership label
+`com.socos.owner=socos-release-gate-credential-probe`. Completion, timeout, signal,
+and EXIT cleanup validate the full container ID and label before force-removing the
+container, then remove its cidfile and secret env file. After taking the updater
+lock, every rerun also validates and removes only exact staged-environment, probe,
+and cidfile temporary-name patterns left as stale `SIGKILL` artifacts. It validates
+and force-removes both labeled probe containers and labeled CIDs recovered from
+cidfiles; unrelated containers and nonmatching files are never cleanup targets.
+
+Only all three wrong-password rejections and all three successful identity proofs
+authorize atomic publication of the staged environment, even when the password
+transaction's client response was nonzero or timed out.
 Before that proof, EXIT cleanup removes the staged environment and probe file and
 preserves the installed environment. After proof, a normal failure or catchable
 signal makes EXIT cleanup retry publication so the installed file matches the

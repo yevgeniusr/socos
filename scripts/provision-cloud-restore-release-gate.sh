@@ -13,7 +13,11 @@ readonly RUNTIME_IMAGE='socos-release-gate-runtime:node22-pnpm10.10.0-pg16-v2'
 readonly ACL_QUIESCENCE_ATTEMPTS=60
 readonly ACL_QUIESCENCE_SLEEP_SECONDS=2
 readonly ACL_QUERY_TIMEOUT_SECONDS=10
+readonly PASSWORD_ROTATION_TIMEOUT_SECONDS=15
 readonly CREDENTIAL_PROBE_TIMEOUT_SECONDS=15
+readonly CREDENTIAL_PROBE_LABEL_KEY='com.socos.owner'
+readonly CREDENTIAL_PROBE_LABEL_VALUE='socos-release-gate-credential-probe'
+readonly CREDENTIAL_PROBE_LABEL="$CREDENTIAL_PROBE_LABEL_KEY=$CREDENTIAL_PROBE_LABEL_VALUE"
 
 ROOT_PREFIX=${SOCOS_PROVISION_TEST_ROOT:-}
 TEST_BIN=${SOCOS_PROVISION_TEST_BIN:-}
@@ -24,13 +28,47 @@ build_context=''
 env_path=''
 env_tmp=''
 credential_probe_tmp=''
+credential_probe_cidfile=''
 credentials_verified=0
+
+cleanup_probe_container() {
+  local probe_cid=''
+  local probe_extra=''
+  local probe_owner=''
+  local probe_cleanup_status=0
+  if [[ -n "$credential_probe_cidfile" && ( -e "$credential_probe_cidfile" || -L "$credential_probe_cidfile" ) ]]; then
+    if [[ -f "$credential_probe_cidfile" && ! -L "$credential_probe_cidfile" ]]; then
+      chmod 0600 "$credential_probe_cidfile" >/dev/null 2>&1 || probe_cleanup_status=1
+      IFS= read -r probe_cid < "$credential_probe_cidfile" || probe_cleanup_status=1
+      if IFS= read -r probe_extra < <(tail -n +2 "$credential_probe_cidfile"); then
+        probe_cleanup_status=1
+      fi
+      if [[ "$probe_cid" =~ ^[0-9a-f]{64}$ ]]; then
+        probe_owner=$(docker inspect --format "{{ index .Config.Labels \"$CREDENTIAL_PROBE_LABEL_KEY\" }}" "$probe_cid" 2>/dev/null) \
+          || probe_cleanup_status=1
+        if [[ "$probe_owner" == "$CREDENTIAL_PROBE_LABEL_VALUE" ]]; then
+          docker rm -f -- "$probe_cid" >/dev/null 2>&1 || probe_cleanup_status=1
+        else
+          probe_cleanup_status=1
+        fi
+      else
+        probe_cleanup_status=1
+      fi
+    else
+      probe_cleanup_status=1
+    fi
+    rm -f -- "$credential_probe_cidfile" >/dev/null 2>&1 || probe_cleanup_status=1
+  fi
+  credential_probe_cidfile=''
+  return "$probe_cleanup_status"
+}
 
 cleanup() {
   original_status=$?
   trap - EXIT HUP INT TERM
   [[ -z "$input_file" ]] || rm -f -- "$input_file"
   [[ -z "$build_context" ]] || rm -rf -- "$build_context"
+  cleanup_probe_container || true
   [[ -z "$credential_probe_tmp" ]] || rm -f -- "$credential_probe_tmp"
   credential_probe_tmp=''
   if [[ -n "$env_tmp" ]]; then
@@ -64,6 +102,7 @@ root_path() {
 [[ "$effective_euid" == '0' ]] || fail
 [[ "$#" -eq 0 ]] || fail
 [[ "$ACL_QUERY_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || fail
+[[ "$PASSWORD_ROTATION_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || fail
 [[ "$CREDENTIAL_PROBE_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || fail
 
 tmp_root=$(root_path '/var/lib/socos-release-gate')
@@ -135,6 +174,88 @@ quiet install -d -m 0755 "$(dirname "$repository")"
 quiet install -d -m 0700 "$repository" "$work_root" "$lock_root"
 exec 8>"$lock_root/updater.lock"
 quiet flock -x 8
+
+stale_probe_cids=()
+stale_probe_cidfiles=()
+stale_probe_cid_count=0
+stale_probe_cidfile_count=0
+append_stale_probe_cid() {
+  local candidate_cid=$1
+  local existing_cid=''
+  local stale_probe_index=0
+  [[ "$candidate_cid" =~ ^[0-9a-f]{64}$ ]] || fail
+  for ((stale_probe_index = 0; stale_probe_index < stale_probe_cid_count; stale_probe_index += 1)); do
+    existing_cid=${stale_probe_cids[$stale_probe_index]}
+    [[ "$existing_cid" != "$candidate_cid" ]] || return 0
+  done
+  stale_probe_cids[$stale_probe_cid_count]=$candidate_cid
+  stale_probe_cid_count=$((stale_probe_cid_count + 1))
+}
+
+labeled_probe_cids=$(docker ps --all --quiet --no-trunc --filter "label=$CREDENTIAL_PROBE_LABEL" 2>/dev/null) || fail
+if [[ -n "$labeled_probe_cids" ]]; then
+  while IFS= read -r stale_probe_cid; do
+    append_stale_probe_cid "$stale_probe_cid"
+  done <<< "$labeled_probe_cids"
+fi
+
+for stale_probe_cidfile in "$tmp_root"/credential-probe-cid.??????; do
+  [[ -e "$stale_probe_cidfile" || -L "$stale_probe_cidfile" ]] || continue
+  stale_probe_basename=${stale_probe_cidfile##*/}
+  [[ "$stale_probe_basename" =~ ^credential-probe-cid\.[A-Za-z0-9]{6}$ ]] || fail
+  [[ -f "$stale_probe_cidfile" && ! -L "$stale_probe_cidfile" ]] || fail
+  quiet chmod 0600 "$stale_probe_cidfile"
+  if [[ ! -s "$stale_probe_cidfile" ]]; then
+    stale_probe_cidfiles[$stale_probe_cidfile_count]=$stale_probe_cidfile
+    stale_probe_cidfile_count=$((stale_probe_cidfile_count + 1))
+    continue
+  fi
+  stale_probe_cid=''
+  stale_probe_extra=''
+  IFS= read -r stale_probe_cid < "$stale_probe_cidfile" || fail
+  if IFS= read -r stale_probe_extra < <(tail -n +2 "$stale_probe_cidfile"); then
+    fail
+  fi
+  [[ "$stale_probe_cid" =~ ^[0-9a-f]{64}$ ]] || fail
+  stale_probe_owner=''
+  if stale_probe_owner=$(docker inspect --format "{{ index .Config.Labels \"$CREDENTIAL_PROBE_LABEL_KEY\" }}" "$stale_probe_cid" 2>/dev/null); then
+    [[ "$stale_probe_owner" == "$CREDENTIAL_PROBE_LABEL_VALUE" ]] || fail
+    append_stale_probe_cid "$stale_probe_cid"
+  fi
+  stale_probe_cidfiles[$stale_probe_cidfile_count]=$stale_probe_cidfile
+  stale_probe_cidfile_count=$((stale_probe_cidfile_count + 1))
+done
+
+for ((stale_probe_index = 0; stale_probe_index < stale_probe_cid_count; stale_probe_index += 1)); do
+  stale_probe_cid=${stale_probe_cids[$stale_probe_index]}
+  quiet docker rm -f -- "$stale_probe_cid" || fail
+done
+remaining_probe_cids=$(docker ps --all --quiet --no-trunc --filter "label=$CREDENTIAL_PROBE_LABEL" 2>/dev/null) || fail
+[[ -z "$remaining_probe_cids" ]] || fail
+for ((stale_probe_index = 0; stale_probe_index < stale_probe_cidfile_count; stale_probe_index += 1)); do
+  stale_probe_cidfile=${stale_probe_cidfiles[$stale_probe_index]}
+  rm -f -- "$stale_probe_cidfile"
+done
+
+for stale_env_tmp in "$etc_dir"/socos-release-gate.env.??????; do
+  [[ -e "$stale_env_tmp" || -L "$stale_env_tmp" ]] || continue
+  stale_env_basename=${stale_env_tmp##*/}
+  [[ "$stale_env_basename" =~ ^socos-release-gate\.env\.[A-Za-z0-9]{6}$ ]] || fail
+  [[ -f "$stale_env_tmp" && ! -L "$stale_env_tmp" ]] || fail
+  rm -f -- "$stale_env_tmp"
+done
+for stale_probe_tmp in "$tmp_root"/credential-probe.??????; do
+  [[ -e "$stale_probe_tmp" || -L "$stale_probe_tmp" ]] || continue
+  stale_probe_basename=${stale_probe_tmp##*/}
+  [[ "$stale_probe_basename" =~ ^credential-probe\.[A-Za-z0-9]{6}$ ]] || fail
+  [[ -f "$stale_probe_tmp" && ! -L "$stale_probe_tmp" ]] || fail
+  rm -f -- "$stale_probe_tmp"
+done
+unset stale_probe_cids stale_probe_cidfiles labeled_probe_cids remaining_probe_cids
+unset stale_probe_cid_count stale_probe_cidfile_count stale_probe_index
+unset stale_probe_cid stale_probe_cidfile stale_probe_owner stale_probe_extra
+unset stale_probe_tmp stale_env_tmp stale_probe_basename stale_env_basename
+
 if [[ ! -d "$repository/.git" ]]; then
   quiet git -C "$repository" init
   quiet git -C "$repository" remote add origin "$REMOTE_URL"
@@ -385,7 +506,9 @@ unset staged_environment expected_environment environment_line
 # COMMIT may succeed even when its client response is lost; the TCP proofs below
 # are the authority for whether the staged credentials can be published.
 rotation_status=0
-docker exec -i "$DATABASE_CONTAINER" psql -X --set=ON_ERROR_STOP=1 --username=postgres --dbname=postgres >/dev/null 2>&1 <<SQL || rotation_status=$?
+timeout --signal=TERM --kill-after=5s "$PASSWORD_ROTATION_TIMEOUT_SECONDS" \
+  docker exec -i "$DATABASE_CONTAINER" psql -X --set=ON_ERROR_STOP=1 \
+  --username=postgres --dbname=postgres >/dev/null 2>&1 <<SQL || rotation_status=$?
 BEGIN;
 ALTER ROLE socos_release_gate_read WITH PASSWORD '$read_password';
 ALTER ROLE socos_release_gate_admin WITH PASSWORD '$admin_password';
@@ -407,7 +530,15 @@ probe_credential() {
   local probe_user=$1
   local probe_password=$2
   local probe_database=$3
+  local probe_expectation=$4
   local probe_proof=''
+  local probe_status=0
+  local probe_cleanup_status=0
+  credential_probe_cidfile=$(mktemp "$tmp_root/credential-probe-cid.XXXXXX") || return 1
+  if ! rm -f -- "$credential_probe_cidfile"; then
+    cleanup_probe_container || true
+    return 1
+  fi
   cat > "$credential_probe_tmp" <<PROBE_ENV
 PGHOST=$database_host
 PGPORT=$database_port
@@ -418,17 +549,48 @@ PGCONNECT_TIMEOUT=10
 PROBE_ENV
   quiet chmod 0600 "$credential_probe_tmp"
   probe_proof=$(timeout --signal=TERM --kill-after=5s "$CREDENTIAL_PROBE_TIMEOUT_SECONDS" \
-    docker run --rm --network "$NETWORK" --cap-drop ALL --security-opt no-new-privileges:true \
+    docker run --network "$NETWORK" --cap-drop ALL --security-opt no-new-privileges:true \
+    --label "$CREDENTIAL_PROBE_LABEL" --cidfile "$credential_probe_cidfile" \
     --env-file "$credential_probe_tmp" "$RUNTIME_IMAGE" \
     psql -X --set=ON_ERROR_STOP=1 --tuples-only --no-align --field-separator='|' \
-    --command='SELECT current_user, current_database();' 2>/dev/null) || return 1
-  [[ "$probe_proof" == "$probe_user|$probe_database" ]]
+    --command='SELECT current_user, current_database();' 2>/dev/null) || probe_status=$?
+  cleanup_probe_container || probe_cleanup_status=$?
+  [[ "$probe_cleanup_status" -eq 0 ]] || return 1
+  case "$probe_expectation" in
+    reject)
+      [[ "$probe_status" -eq 2 && -z "$probe_proof" ]]
+      ;;
+    exact)
+      [[ "$probe_status" -eq 0 && "$probe_proof" == "$probe_user|$probe_database" ]]
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+probe_credential_pair() {
+  local probe_user=$1
+  local correct_password=$2
+  local probe_database=$3
+  local wrong_password=''
+  local pair_invalid=0
+  if [[ "${correct_password:0:1}" == '0' ]]; then
+    wrong_password="1${correct_password:1}"
+  else
+    wrong_password="0${correct_password:1}"
+  fi
+  [[ "$wrong_password" =~ ^[0-9a-f]{64}$ && "$wrong_password" != "$correct_password" ]] || return 1
+  probe_credential "$probe_user" "$wrong_password" "$probe_database" reject || pair_invalid=1
+  probe_credential "$probe_user" "$correct_password" "$probe_database" exact || pair_invalid=1
+  unset wrong_password
+  return "$pair_invalid"
 }
 
 credential_probes_valid=1
-probe_credential 'socos_release_gate_read' "$read_password" 'socos' || credential_probes_valid=0
-probe_credential 'socos_release_gate_admin' "$admin_password" 'postgres' || credential_probes_valid=0
-probe_credential 'socos_release_gate_restore' "$restore_password" 'postgres' || credential_probes_valid=0
+probe_credential_pair 'socos_release_gate_read' "$read_password" 'socos' || credential_probes_valid=0
+probe_credential_pair 'socos_release_gate_admin' "$admin_password" 'postgres' || credential_probes_valid=0
+probe_credential_pair 'socos_release_gate_restore' "$restore_password" 'postgres' || credential_probes_valid=0
 rm -f -- "$credential_probe_tmp"
 credential_probe_tmp=''
 unset rotation_status database_host database_port

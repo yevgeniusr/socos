@@ -96,11 +96,26 @@ case "$name" in
   docker)
     if [[ " $* " == *' image inspect '* ]]; then
       [[ -f "$SHIM_STATE/runtime-image" ]]
+    elif [[ " $* " == *' inspect --format '* && "\${!#}" =~ ^[0-9a-f]{64}$ ]]; then
+      [[ -f "$SHIM_STATE/container-\${!#}" ]] || exit 1
+      printf '%s\\n' 'socos-release-gate-credential-probe'
     elif [[ " $* " == *' build '* ]]; then
       cp "\${!#}/Dockerfile" "$SHIM_STATE/runtime.Dockerfile"
       : > "$SHIM_STATE/runtime-image"
     elif [[ " $* " == *' run '* && " $* " == *' pnpm install --frozen-lockfile '* && "\${SHIM_FAIL_INSTALL:-0}" == '1' ]]; then
       exit 1
+    elif [[ " $* " == *' ps '* && " $* " == *' label=com.socos.owner=socos-release-gate-credential-probe '* ]]; then
+      if [[ -n "\${SHIM_STALE_CONTAINER_CIDS:-}" ]]; then
+        while IFS= read -r stale_container_id; do
+          [[ -f "$SHIM_STATE/container-$stale_container_id" ]] && printf '%s\\n' "$stale_container_id"
+        done <<< "$SHIM_STALE_CONTAINER_CIDS"
+      fi
+      :
+    elif [[ " $* " == *' rm -f '* ]]; then
+      container_id=\${!#}
+      [[ "$container_id" =~ ^[0-9a-f]{64}$ ]] || exit 1
+      rm -f -- "$SHIM_STATE/container-$container_id"
+      printf '%s\\n' "$container_id" >> "$SHIM_STATE/probe-removals"
     elif [[ " $* " == *' ps '* ]]; then
       printf '%s\\n' 'api-swwcg80gkw4k0k4oco8w8wgw-current'
     elif [[ " $* " == *' exec '* && " $* " == *'DATABASE_URL'* ]]; then
@@ -133,15 +148,43 @@ case "$name" in
       for ((index = 0; index < \${#args[@]}; index += 1)); do
         if [[ "\${args[$index]}" == '--env-file' ]]; then
           probe_env=\${args[$((index + 1))]}
-          break
+        elif [[ "\${args[$index]}" == '--cidfile' ]]; then
+          probe_cidfile=\${args[$((index + 1))]}
         fi
       done
-      [[ -n "\${probe_env:-}" && -f "$probe_env" ]] || exit 1
+      [[ -n "\${probe_env:-}" && -f "$probe_env" && -n "\${probe_cidfile:-}" ]] || exit 1
+      [[ " $* " == *' --label com.socos.owner=socos-release-gate-credential-probe '* ]] || exit 1
+      probe_container_count=0
+      [[ -f "$SHIM_STATE/probe-container-count" ]] && probe_container_count=$(<"$SHIM_STATE/probe-container-count")
+      probe_container_count=$((probe_container_count + 1))
+      printf '%s' "$probe_container_count" > "$SHIM_STATE/probe-container-count"
+      probe_container_id=$(printf '%064x' "$((4096 + probe_container_count))")
+      printf '%s\\n' "$probe_container_id" > "$probe_cidfile"
+      : > "$SHIM_STATE/container-$probe_container_id"
       probe_user=$(sed -n 's/^PGUSER=//p' "$probe_env")
       probe_database=$(sed -n 's/^PGDATABASE=//p' "$probe_env")
       probe_password=$(sed -n 's/^PGPASSWORD=//p' "$probe_env")
       [[ "$probe_password" =~ ^[0-9a-f]{64}$ ]] || exit 1
-      printf 'probe_%s\\n' "\${probe_user#socos_release_gate_}" >> "$SHIM_STATE/acl-events"
+      probe_role=\${probe_user#socos_release_gate_}
+      role_probe_count=0
+      [[ -f "$SHIM_STATE/probe-count-$probe_role" ]] && role_probe_count=$(<"$SHIM_STATE/probe-count-$probe_role")
+      role_probe_count=$((role_probe_count + 1))
+      printf '%s' "$role_probe_count" > "$SHIM_STATE/probe-count-$probe_role"
+      if [[ "$((role_probe_count % 2))" -eq 1 ]]; then
+        probe_kind=wrong
+        printf '%s' "$probe_password" > "$SHIM_STATE/wrong-password-$probe_role"
+      else
+        probe_kind=correct
+        [[ "$probe_password" != "$(<"$SHIM_STATE/wrong-password-$probe_role")" ]] || exit 1
+      fi
+      printf 'probe_%s_%s\\n' "$probe_role" "$probe_kind" >> "$SHIM_STATE/acl-events"
+      if [[ "$probe_kind" == 'wrong' ]]; then
+        if [[ "\${SHIM_WRONG_PASSWORD_SUCCEEDS:-}" == 'all' || "\${SHIM_WRONG_PASSWORD_SUCCEEDS:-}" == "$probe_user" ]]; then
+          printf '%s|%s\\n' "$probe_user" "$probe_database"
+          exit 0
+        fi
+        exit 2
+      fi
       if [[ "\${SHIM_FAIL_CREDENTIAL_PROBE:-}" == 'all' || "\${SHIM_FAIL_CREDENTIAL_PROBE:-}" == "$probe_user" ]]; then
         exit 1
       fi
@@ -184,6 +227,27 @@ case "$name" in
     fi
     if [[ "\${SHIM_HANG_ACL_QUERY:-}" == 'poll' && " $* " == *'pg_stat_activity'* ]]; then
       exit 124
+    fi
+    if [[ "\${SHIM_TIMEOUT_ROTATION:-0}" == '1' && " $* " == *' docker exec -i '* && " $* " == *' --dbname=postgres '* ]]; then
+      "$@" || true
+      exit 124
+    fi
+    if [[ -n "\${SHIM_TIMEOUT_CREDENTIAL_PROBE:-}" && " $* " == *' docker run '* && " $* " == *' --env-file '* ]]; then
+      probe_env=''
+      args=("$@")
+      for ((index = 0; index < \${#args[@]}; index += 1)); do
+        [[ "\${args[$index]}" == '--env-file' ]] && probe_env=\${args[$((index + 1))]}
+      done
+      probe_user=$(sed -n 's/^PGUSER=//p' "$probe_env")
+      probe_role=\${probe_user#socos_release_gate_}
+      next_count=1
+      [[ -f "$SHIM_STATE/probe-count-$probe_role" ]] && next_count=$(( $(<"$SHIM_STATE/probe-count-$probe_role") + 1 ))
+      probe_kind=wrong
+      [[ "$((next_count % 2))" -eq 1 ]] || probe_kind=correct
+      if [[ "$SHIM_TIMEOUT_CREDENTIAL_PROBE" == "\${probe_user}_$probe_kind" ]]; then
+        "$@" || true
+        exit 124
+      fi
     fi
     exec "$@"
     ;;
@@ -305,11 +369,12 @@ test('provisioner renders the locked account, exact resources, database boundary
   const productionPhaseB = readFileSync(join(f.state, 'production-role-sql-2'), 'utf8');
   assert.equal(
     readFileSync(join(f.state, 'acl-events'), 'utf8'),
-    'role_1\nphase_1\ncutoff\npoll\nphase_2\nenv_stage\nrole_2\nprobe_read\nprobe_admin\nprobe_restore\nenv_publish\n',
+    'role_1\nphase_1\ncutoff\npoll\nphase_2\nenv_stage\nrole_2\nprobe_read_wrong\nprobe_read_correct\nprobe_admin_wrong\nprobe_admin_correct\nprobe_restore_wrong\nprobe_restore_correct\nenv_publish\n',
   );
   const calls = readFileSync(f.log, 'utf8');
   const generatedPasswords = [1, 2, 3].map((value) => value.toString(16).padStart(64, '0'));
-  for (const password of generatedPasswords) {
+  const generatedWrongPasswords = generatedPasswords.map((password) => `1${password.slice(1)}`);
+  for (const password of [...generatedPasswords, ...generatedWrongPasswords]) {
     assert.equal(`${result.stdout}${result.stderr}`.includes(password), false);
     assert.equal(calls.includes(password), false);
   }
@@ -325,11 +390,11 @@ test('provisioner renders the locked account, exact resources, database boundary
   const probeCalls = calls
     .split('\n')
     .filter((line) => line.startsWith('docker ') && line.includes('<--env-file>') && line.includes('<psql>'));
-  assert.equal(probeCalls.length, 3);
+  assert.equal(probeCalls.length, 6);
   for (const call of probeCalls) {
     assert.match(
       call,
-      /docker <run> <--rm> <--network> <coolify> <--cap-drop> <ALL> <--security-opt> <no-new-privileges:true> <--env-file> <[^>]+> <socos-release-gate-runtime:[^>]+> <psql>/,
+      /docker <run> <--network> <coolify> <--cap-drop> <ALL> <--security-opt> <no-new-privileges:true> <--label> <com\.socos\.owner=socos-release-gate-credential-probe> <--cidfile> <[^>]+> <--env-file> <[^>]+> <socos-release-gate-runtime:[^>]+> <psql>/,
     );
     assert.match(call, /<--command=SELECT current_user, current_database\(\);>/);
     assert.doesNotMatch(
@@ -337,6 +402,14 @@ test('provisioner renders the locked account, exact resources, database boundary
       /postgresql:\/\/|PGPASSWORD|000000000000000000000000000000000000000000000000000000000000000[123]/,
     );
   }
+  assert.equal(readFileSync(join(f.state, 'probe-removals'), 'utf8').trim().split('\n').length, 6);
+  assert.equal(readdirSync(f.state).some((name) => name.startsWith('container-')), false);
+  assert.equal(
+    readdirSync(join(f.root, 'var/lib/socos-release-gate')).some(
+      (name) => name.startsWith('credential-probe.') || name.startsWith('credential-probe-cid.'),
+    ),
+    false,
+  );
   assert.match(productionPhaseA, /^BEGIN;[\s\S]*ALTER DEFAULT PRIVILEGES FOR ROLE socos_app/);
   assert.match(productionPhaseA, /COMMIT;\n$/);
   assert.doesNotMatch(productionPhaseA, /ON ALL (?:TABLES|SEQUENCES|ROUTINES)/);
@@ -505,7 +578,7 @@ test('uncertain password rotation response publishes after all exact credential 
   );
   assert.match(
     readFileSync(join(f.state, 'acl-events'), 'utf8'),
-    /env_stage\nrole_2\nprobe_read\nprobe_admin\nprobe_restore\nenv_publish\n$/,
+    /env_stage\nrole_2\nprobe_read_wrong\nprobe_read_correct\nprobe_admin_wrong\nprobe_admin_correct\nprobe_restore_wrong\nprobe_restore_correct\nenv_publish\n$/,
   );
 });
 
@@ -525,7 +598,10 @@ test('failed credential proof preserves installed env and removes every credenti
     readdirSync(join(f.root, 'var/lib/socos-release-gate')).some((name) => name.startsWith('credential-probe.')),
     false,
   );
-  assert.match(readFileSync(join(f.state, 'acl-events'), 'utf8'), /probe_read\nprobe_admin\nprobe_restore\n$/);
+  assert.match(
+    readFileSync(join(f.state, 'acl-events'), 'utf8'),
+    /probe_read_wrong\nprobe_read_correct\nprobe_admin_wrong\nprobe_admin_correct\nprobe_restore_wrong\nprobe_restore_correct\n$/,
+  );
 });
 
 test('post-verification normal failure publishes the staged env from EXIT cleanup', () => {
@@ -543,7 +619,97 @@ test('post-verification normal failure publishes the staged env from EXIT cleanu
     /^SOCOS_RELEASE_GATE_DATABASE_URL=postgresql:\/\/socos_release_gate_read:/m,
   );
   assert.equal(readdirSync(etc).some((name) => name.startsWith('socos-release-gate.env.')), false);
-  assert.match(readFileSync(join(f.state, 'acl-events'), 'utf8'), /probe_restore\nenv_publish\n$/);
+  assert.match(readFileSync(join(f.state, 'acl-events'), 'utf8'), /probe_restore_correct\nenv_publish\n$/);
+});
+
+test('wrong-password success fails closed after all negative and positive probes', () => {
+  const f = fixture();
+  const etc = join(f.root, 'etc');
+  mkdirSync(etc);
+  const envPath = join(etc, 'socos-release-gate.env');
+  writeFileSync(envPath, 'installed-credentials-remain\n', { mode: 0o600 });
+  const result = run(f.input, { ...f.env, SHIM_WRONG_PASSWORD_SUCCEEDS: 'socos_release_gate_admin' });
+  assert.notEqual(result.status, 0);
+  assert.equal(result.stdout, '');
+  assert.equal(result.stderr, 'provision_status=failed\n');
+  assert.equal(readFileSync(envPath, 'utf8'), 'installed-credentials-remain\n');
+  assert.match(
+    readFileSync(join(f.state, 'acl-events'), 'utf8'),
+    /probe_read_wrong\nprobe_read_correct\nprobe_admin_wrong\nprobe_admin_correct\nprobe_restore_wrong\nprobe_restore_correct\n$/,
+  );
+  assert.equal(readdirSync(f.state).some((name) => name.startsWith('container-')), false);
+});
+
+test('password rotation timeout still reconciles all credentials and publishes', () => {
+  const f = fixture();
+  const result = run(f.input, { ...f.env, SHIM_TIMEOUT_ROTATION: '1' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(existsSync(join(f.state, 'role-sql-2')), true);
+  assert.match(
+    readFileSync(join(f.state, 'acl-events'), 'utf8'),
+    /role_2\nprobe_read_wrong\nprobe_read_correct\nprobe_admin_wrong\nprobe_admin_correct\nprobe_restore_wrong\nprobe_restore_correct\nenv_publish\n$/,
+  );
+  assert.match(
+    readFileSync(f.log, 'utf8'),
+    /timeout <--signal=TERM> <--kill-after=5s> <15> <docker> <exec> <-i> <zwkk0scogckskkwss8oo48k4>/,
+  );
+});
+
+test('timed-out credential probe force-removes its orphan and every cidfile', () => {
+  const f = fixture();
+  const etc = join(f.root, 'etc');
+  mkdirSync(etc);
+  const envPath = join(etc, 'socos-release-gate.env');
+  writeFileSync(envPath, 'installed-credentials-remain\n', { mode: 0o600 });
+  const result = run(f.input, {
+    ...f.env,
+    SHIM_TIMEOUT_CREDENTIAL_PROBE: 'socos_release_gate_admin_correct',
+  });
+  assert.notEqual(result.status, 0);
+  assert.equal(result.stderr, 'provision_status=failed\n');
+  assert.equal(readFileSync(envPath, 'utf8'), 'installed-credentials-remain\n');
+  assert.equal(readdirSync(f.state).some((name) => name.startsWith('container-')), false);
+  assert.equal(
+    readdirSync(join(f.root, 'var/lib/socos-release-gate')).some((name) => name.startsWith('credential-probe-cid.')),
+    false,
+  );
+  assert.equal(readFileSync(join(f.state, 'probe-removals'), 'utf8').trim().split('\n').length, 6);
+});
+
+test('rerun cleans only validated stale SIGKILL artifacts and labeled probe containers', () => {
+  const f = fixture();
+  const etc = join(f.root, 'etc');
+  const tmpRoot = join(f.root, 'var/lib/socos-release-gate');
+  mkdirSync(etc);
+  mkdirSync(tmpRoot, { recursive: true });
+  const staleCid = 'a'.repeat(64);
+  const labeledCid = 'b'.repeat(64);
+  const stalePaths = [
+    join(etc, 'socos-release-gate.env.AbC123'),
+    join(tmpRoot, 'credential-probe.DeF456'),
+    join(tmpRoot, 'credential-probe-cid.GhI789'),
+    join(tmpRoot, 'credential-probe-cid.JkL012'),
+  ];
+  writeFileSync(stalePaths[0], 'stale-staged-secret\n', { mode: 0o600 });
+  writeFileSync(stalePaths[1], 'stale-probe-secret\n', { mode: 0o600 });
+  writeFileSync(stalePaths[2], `${staleCid}\n`, { mode: 0o600 });
+  writeFileSync(stalePaths[3], '', { mode: 0o600 });
+  writeFileSync(join(etc, 'socos-release-gate.env.keep'), 'keep\n');
+  writeFileSync(join(tmpRoot, 'credential-probe.keep'), 'keep\n');
+  writeFileSync(join(f.state, `container-${staleCid}`), '');
+  writeFileSync(join(f.state, `container-${labeledCid}`), '');
+
+  const result = run(f.input, { ...f.env, SHIM_STALE_CONTAINER_CIDS: labeledCid });
+  assert.equal(result.status, 0, result.stderr);
+  for (const path of stalePaths) assert.equal(existsSync(path), false);
+  assert.equal(existsSync(join(etc, 'socos-release-gate.env.keep')), true);
+  assert.equal(existsSync(join(tmpRoot, 'credential-probe.keep')), true);
+  assert.equal(existsSync(join(f.state, `container-${staleCid}`)), false);
+  assert.equal(existsSync(join(f.state, `container-${labeledCid}`)), false);
+  const calls = readFileSync(f.log, 'utf8');
+  assert.ok(calls.indexOf('flock <-x>') < calls.indexOf('<label=com.socos.owner=socos-release-gate-credential-probe>'));
+  assert.match(calls, new RegExp(`docker <rm> <-f> <--> <${staleCid}>`));
+  assert.match(calls, new RegExp(`docker <rm> <-f> <--> <${labeledCid}>`));
 });
 
 test('package wiring and runbook cover secure provisioning, audits, rotation, stale locks, and the exact candidate', () => {
@@ -593,6 +759,11 @@ test('package wiring and runbook cover secure provisioning, audits, rotation, st
     /password rotation.*after Phase B/is,
     /root-only `--env-file`/i,
     /current_user.*current_database/is,
+    /wrong password.*each.*role/is,
+    /password-independent HBA/i,
+    /cidfile.*ownership label/is,
+    /stale.*SIGKILL.*artifacts/is,
+    /password transaction.*external timeout.*reconciliation/is,
     /SIGKILL.*mandatory immediate\s+rerun/is,
     /token and role rotation/i,
     /rmdir \/var\/lock\/socos-release-gate\/gate\.lock/,
