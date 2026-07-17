@@ -8,6 +8,7 @@ import test from 'node:test';
 import {
   configFromEnvironment,
   GateFailure,
+  makeCommandRunner,
   publicFailureReceipt,
   requireExactCandidate,
   runGate,
@@ -49,6 +50,41 @@ async function waitForFile(path, timeoutMs = 15_000) {
   }
   assert.fail(`Timed out after ${timeoutMs}ms waiting for readiness marker: ${path}`);
 }
+
+function realCommandRunner() {
+  return makeCommandRunner(new AbortController().signal, {
+    operationTimeoutMs: 5_000,
+    cleanupTimeoutMs: 5_000,
+    terminationGraceMs: 100,
+  });
+}
+
+test('command runner converts an early-exit large-input write failure to fixed command_failed', async () => {
+  const run = realCommandRunner();
+  await assert.rejects(
+    run(
+      process.execPath,
+      ['-e', 'process.stdin.destroy(); process.exit(0);'],
+      { input: 'x'.repeat(16 * 1024 * 1024) },
+    ),
+    (error) => {
+      assert.equal(error instanceof GateFailure, true);
+      assert.equal(error.code, 'command_failed');
+      assert.equal(error.message, 'command_failed');
+      assert.doesNotMatch(error.message, /EPIPE|broken pipe|write/i);
+      return true;
+    },
+  );
+});
+
+test('command runner accepts an empty-input command that closes stdin and exits zero', async () => {
+  const run = realCommandRunner();
+  const output = await run(
+    process.execPath,
+    ['-e', "process.stdin.destroy(); process.stdout.write('empty_input_ok\\n');"],
+  );
+  assert.equal(output, 'empty_input_ok\n');
+});
 
 test('local wrapper validates the candidate before invoking ssh', () => {
   const dir = mkdtempSync(join(tmpdir(), 'socos-release-local-invalid-'));

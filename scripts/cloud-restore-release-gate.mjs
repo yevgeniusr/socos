@@ -357,7 +357,7 @@ function killProcessGroup(child, signalName) {
   try { process.kill(-child.pid, signalName); } catch { try { child.kill(signalName); } catch {} }
 }
 
-function makeCommandRunner(signal, config) {
+export function makeCommandRunner(signal, config) {
   return (command, args, options = {}) => new Promise((resolveCommand, rejectCommand) => {
     if (signal.aborted && !options.cleanup) {
       rejectCommand(new GateFailure('interrupted'));
@@ -369,9 +369,61 @@ function makeCommandRunner(signal, config) {
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: true,
     });
+    const input = options.input ?? '';
+    const hasInput = typeof input === 'string' ? input.length > 0 : (input?.byteLength ?? 0) > 0;
     let stdout = '';
     let outputLength = 0;
     const limit = 64 * 1024;
+    let timedOut = false;
+    let killTimer;
+    let timeout;
+    let settled = false;
+    let stdinSettled = !hasInput;
+    let inputWriteFailed = false;
+    let pendingSuccessfulClose = false;
+
+    const terminate = () => {
+      if (killTimer) return;
+      killProcessGroup(child, 'SIGTERM');
+      killTimer = setTimeout(() => killProcessGroup(child, 'SIGKILL'), config.terminationGraceMs);
+      killTimer.unref();
+    };
+    const abort = () => {
+      terminate();
+      if (pendingSuccessfulClose) rejectFixed('interrupted');
+    };
+    const clear = () => {
+      clearTimeout(timeout);
+      clearTimeout(killTimer);
+      if (!options.cleanup) signal.removeEventListener('abort', abort);
+    };
+    const rejectFixed = (code) => {
+      if (settled) return;
+      settled = true;
+      clear();
+      rejectCommand(new GateFailure(code));
+    };
+    const resolveFixed = () => {
+      if (settled) return;
+      settled = true;
+      clear();
+      resolveCommand(stdout);
+    };
+    const finishPendingSuccessfulClose = () => {
+      if (!pendingSuccessfulClose || !stdinSettled || settled) return;
+      pendingSuccessfulClose = false;
+      if (inputWriteFailed) rejectFixed('command_failed');
+      else resolveFixed();
+    };
+    const finishStdin = (writeFailed) => {
+      if (settled) return;
+      stdinSettled = true;
+      if (hasInput && writeFailed) {
+        inputWriteFailed = true;
+        terminate();
+      }
+      finishPendingSuccessfulClose();
+    };
     const collect = (target) => (chunk) => {
       outputLength += chunk.length;
       if (target) stdout += chunk.toString('utf8');
@@ -379,43 +431,35 @@ function makeCommandRunner(signal, config) {
     };
     child.stdout.on('data', collect(true));
     child.stderr.on('data', collect(false));
-    let timedOut = false;
-    let killTimer;
-    const terminate = () => {
-      if (killTimer) return;
-      killProcessGroup(child, 'SIGTERM');
-      killTimer = setTimeout(() => killProcessGroup(child, 'SIGKILL'), config.terminationGraceMs);
-      killTimer.unref();
-    };
-    const abort = terminate;
     if (!options.cleanup) signal.addEventListener('abort', abort, { once: true });
-    const timeout = setTimeout(() => {
+    timeout = setTimeout(() => {
       timedOut = true;
       terminate();
+      if (pendingSuccessfulClose) rejectFixed('operation_timeout');
     }, options.timeoutMs ?? (options.cleanup ? config.cleanupTimeoutMs : config.operationTimeoutMs));
     timeout.unref();
-    const clear = () => {
-      clearTimeout(timeout);
-      clearTimeout(killTimer);
-      if (!options.cleanup) signal.removeEventListener('abort', abort);
-    };
     child.once('error', () => {
-      clear();
-      rejectCommand(new GateFailure(signal.aborted ? 'interrupted' : timedOut ? 'operation_timeout' : 'command_failed'));
+      rejectFixed(signal.aborted ? 'interrupted' : timedOut ? 'operation_timeout' : 'command_failed');
     });
     child.once('close', (code, childSignal) => {
-      clear();
       if (signal.aborted && !options.cleanup) {
-        rejectCommand(new GateFailure('interrupted'));
+        rejectFixed('interrupted');
       } else if (timedOut) {
-        rejectCommand(new GateFailure('operation_timeout'));
-      } else if (code !== 0 || childSignal || outputLength > limit) {
-        rejectCommand(new GateFailure('command_failed'));
+        rejectFixed('operation_timeout');
+      } else if (inputWriteFailed || code !== 0 || childSignal || outputLength > limit) {
+        rejectFixed('command_failed');
+      } else if (hasInput && !stdinSettled) {
+        pendingSuccessfulClose = true;
       } else {
-        resolveCommand(stdout);
+        resolveFixed();
       }
     });
-    child.stdin.end(options.input ?? '');
+    child.stdin.on('error', () => finishStdin(true));
+    try {
+      child.stdin.end(input, (error) => finishStdin(Boolean(error)));
+    } catch {
+      finishStdin(true);
+    }
   });
 }
 
