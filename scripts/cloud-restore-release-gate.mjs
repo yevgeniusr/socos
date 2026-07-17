@@ -753,7 +753,7 @@ export function createDependencies(config, signal) {
       void candidateSha;
       void workspace;
       await run('dropdb', ['--if-exists', '--force', restore.databaseName], {
-        env: commandEnvironment(config.adminPg),
+        env: commandEnvironment(pgEnvironment(config.restoreBaseUrl)),
         cleanup: true,
       });
     },

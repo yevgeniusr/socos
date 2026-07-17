@@ -284,6 +284,71 @@ if (process.env.SOCOS_SNAPSHOT_FILE) {
   );
 });
 
+test('restore cleanup dropdb uses the owning restore identity without URL or secret argv', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'socos-release-drop-restore-'));
+  const bin = join(dir, 'bin');
+  const callLog = join(dir, 'dropdb-call.json');
+  spawnSync('mkdir', ['-p', bin]);
+  nodeExecutable(
+    bin,
+    'dropdb',
+    `const fs = require('node:fs');
+fs.writeFileSync('${callLog}', JSON.stringify({
+  args: process.argv.slice(2),
+  isRestoreUser: process.env.PGUSER === 'socos_release_gate_restore',
+  hasRestorePassword: process.env.PGPASSWORD === 'restore-secret-password',
+  isAdminUser: process.env.PGUSER === 'socos_release_gate_admin',
+  hasAdminPassword: process.env.PGPASSWORD === 'admin-secret-password',
+  host: process.env.PGHOST,
+  port: process.env.PGPORT,
+  database: process.env.PGDATABASE,
+  sslmode: process.env.PGSSLMODE,
+  appname: process.env.PGAPPNAME,
+  hasDatabaseUrl: Object.hasOwn(process.env, 'DATABASE_URL'),
+}));`,
+  );
+  const dependencies = createDependencies({
+    adminPg: {
+      PGHOST: 'database.internal',
+      PGPORT: '6543',
+      PGUSER: 'socos_release_gate_admin',
+      PGPASSWORD: 'admin-secret-password',
+      PGDATABASE: 'postgres',
+    },
+    restoreBaseUrl: new URL(
+      'postgresql://socos_release_gate_restore:restore-secret-password@database.internal:6543/postgres?sslmode=require&application_name=restore-cleanup',
+    ),
+    operationTimeoutMs: 5_000,
+    cleanupTimeoutMs: 5_000,
+    terminationGraceMs: 100,
+  }, new AbortController().signal);
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${bin}:${originalPath}`;
+  try {
+    await dependencies.dropRestoreDatabase(
+      candidate,
+      { workspace: dir },
+      { databaseName: 'socos_release_gate_disposable' },
+    );
+  } finally {
+    process.env.PATH = originalPath;
+  }
+
+  const call = JSON.parse(readFileSync(callLog, 'utf8'));
+  assert.deepEqual(call.args, ['--if-exists', '--force', 'socos_release_gate_disposable']);
+  assert.equal(call.isRestoreUser, true);
+  assert.equal(call.hasRestorePassword, true);
+  assert.equal(call.isAdminUser, false);
+  assert.equal(call.hasAdminPassword, false);
+  assert.equal(call.host, 'database.internal');
+  assert.equal(call.port, '6543');
+  assert.equal(call.database, 'postgres');
+  assert.equal(call.sslmode, 'require');
+  assert.equal(call.appname, 'restore-cleanup');
+  assert.equal(call.hasDatabaseUrl, false);
+  assert.doesNotMatch(JSON.stringify(call.args), /postgres(?:ql)?:\/\/|secret-password/);
+});
+
 test('local wrapper validates the candidate before invoking ssh', () => {
   const dir = mkdtempSync(join(tmpdir(), 'socos-release-local-invalid-'));
   const called = join(dir, 'called');
