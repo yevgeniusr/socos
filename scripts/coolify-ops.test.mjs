@@ -64,6 +64,49 @@ test('Coolify deploy reports deployment UUID and exact commit identity', () => {
     `deployment_preflight=main source_revision=HEAD verification=post-deploy\ndeployment_uuid=deployment-123\ndeployment_status=finished\ndeployment_commit=${commit}`,
   );
   assert.doesNotMatch(`${result.stdout}${result.stderr}`, /synthetic-coolify-token/);
+  assert.doesNotMatch(result.requests, /synthetic-coolify-token|Authorization: Bearer/);
+  assert.doesNotMatch(result.requests, /\{"uuid"|--data-binary \{/);
+});
+
+test('Coolify helper fails closed instead of accepting environment secrets in argv', () => {
+  const result = spawnSync('bash', [
+    'scripts/coolify.sh',
+    'add-env',
+    'application-123',
+    'GOOGLE_CALENDAR_CLIENT_SECRET',
+    'secret-that-must-not-be-accepted',
+  ], {
+    cwd: root,
+    encoding: 'utf8',
+    env: { ...process.env, COOLIFY_TOKEN: 'synthetic-coolify-token' },
+  });
+
+  assert.equal(result.status, 64);
+  assert.match(result.stderr, /coolify-activate\.mjs/);
+  assert.doesNotMatch(`${result.stdout}${result.stderr}`, /secret-that-must-not-be-accepted|synthetic-coolify-token/);
+});
+
+test('Coolify helper rejects an HTTP base URL before invoking curl', () => {
+  const bin = mkdtempSync(join(tmpdir(), 'socos-coolify-http-test-'));
+  const curl = join(bin, 'curl');
+  const requests = join(bin, 'requests.log');
+  writeFileSync(curl, `#!/bin/sh\nprintf '%s\n' "$*" >> '${requests}'\n`);
+  chmodSync(curl, 0o755);
+
+  const result = spawnSync('bash', ['scripts/coolify.sh', 'list-apps'], {
+    cwd: root,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      COOLIFY_TOKEN: 'synthetic-coolify-token',
+      COOLIFY_BASE_URL: 'http://coolify.example.invalid',
+      PATH: `${bin}:${process.env.PATH}`,
+    },
+  });
+
+  assert.equal(result.status, 64);
+  assert.match(result.stderr, /HTTPS/);
+  assert.equal(existsSync(requests), false);
 });
 
 test('Coolify deploy rejects a non-main branch before activation', () => {

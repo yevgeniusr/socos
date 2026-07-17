@@ -4,10 +4,24 @@ set -euo pipefail
 : "${COOLIFY_TOKEN:?COOLIFY_TOKEN is required}"
 BASE_URL="${COOLIFY_BASE_URL:-https://qed.quest}"
 
+case "$BASE_URL" in
+  https://*) ;;
+  *)
+    echo "COOLIFY_BASE_URL must use HTTPS." >&2
+    exit 64
+    ;;
+esac
+
+if [[ "$COOLIFY_TOKEN" == *$'\n'* || "$COOLIFY_TOKEN" == *$'\r'* ]]; then
+  echo "COOLIFY_TOKEN is invalid." >&2
+  exit 64
+fi
+
 api() {
   curl --fail-with-body --silent --show-error \
-    -H "Authorization: Bearer $COOLIFY_TOKEN" \
-    "$@"
+    --header @/dev/fd/3 \
+    "$@" \
+    3<<<"Authorization: Bearer $COOLIFY_TOKEN"
 }
 
 case "${1:-}" in
@@ -30,10 +44,8 @@ case "${1:-}" in
       jq -r '.logs[-20:][] | .output'
     ;;
   add-env)
-    payload=$(jq -nc --arg key "$3" --arg value "$4" '{key:$key,value:$value}')
-    api -X POST "$BASE_URL/api/v1/applications/$2/envs" \
-      -H "Content-Type: application/json" \
-      --data-binary "$payload"
+    echo "add-env is disabled; use scripts/coolify-activate.mjs with one JSON document on stdin." >&2
+    exit 64
     ;;
   deploy)
     expected_commit=${COOLIFY_EXPECTED_COMMIT_SHA:-}
@@ -65,10 +77,10 @@ case "${1:-}" in
       esac
     fi
 
-    payload=$(jq -nc --arg uuid "$2" '{uuid:$uuid,force:true}')
-    response=$(api -X POST "$BASE_URL/api/v1/deploy" \
-      -H "Content-Type: application/json" \
-      --data-binary "$payload")
+    response=$(jq -nc --arg uuid "$2" '{uuid:$uuid,force:true}' |
+      api -X POST "$BASE_URL/api/v1/deploy" \
+        -H "Content-Type: application/json" \
+        --data-binary @-)
     deployment_uuid=$(jq -er '.deployments[0].deployment_uuid' <<<"$response")
     printf 'deployment_uuid=%s\n' "$deployment_uuid"
 
@@ -99,7 +111,7 @@ case "${1:-}" in
     exit 1
     ;;
   *)
-    echo "Usage: $0 {list-apps|get-app|start|stop|logs|add-env|deploy} [args]" >&2
+    echo "Usage: $0 {list-apps|get-app|start|stop|logs|deploy} [args]" >&2
     exit 64
     ;;
 esac

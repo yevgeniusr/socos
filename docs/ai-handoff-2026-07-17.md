@@ -35,7 +35,7 @@ Snapshot taken in `/Users/mac/Desktop/projects/personal/socos`.
 | Area | State |
 | --- | --- |
 | Reviewed application SHA | `1b25328de683e5b7923d4219d0401a1f93f168b2` |
-| Documentation baseline SHA | `6d67953b40c79f887b0bfe7b235bf2f3aa0f709a` |
+| Pre-activation-tooling baseline SHA | `69e6ac0444a50ae92d811155493fcff559774a86` |
 | Production application SHA | same reviewed SHA |
 | Production status | `running:healthy` |
 | Production URL | `https://socos.rachkovan.com` |
@@ -103,6 +103,32 @@ The resulting product direction is:
   provenance. No real contact export is stored locally.
 - Kept 7 demo contacts out of personal lists, briefs, scoring, and agent search
   where required.
+
+### Production Activation Operations
+
+- Added `scripts/coolify-activate.mjs`, a fail-closed staged activation client
+  for Calendar, Pixel location, event discovery, and event briefs.
+- Added `scripts/run-coolify-activation.mjs`, which accepts only a stage, exact
+  40-character commit, and optional certified public event hostname. It reads
+  the Coolify token and Calendar credentials from exact macOS Keychain
+  account/service pairs and sends secrets only through child stdin/environment.
+- The client pins `main` to the exact commit, disables automatic deploys,
+  requires one fresh successful positive-size backup, verifies equal
+  production/preview records, enforces dependency order, performs one paired
+  bulk update, deploys, and checks fixed health/auth/status smokes.
+- Any failure after a mutation attempt restores every managed value from the
+  in-memory snapshot, verifies the restore, redeploys the same commit, and
+  smoke-checks the prior feature state. Receipts are fixed and redacted.
+- Disabled legacy secret-bearing `scripts/coolify.sh add-env`; its bearer header
+  and deploy payload also no longer place secrets or JSON bodies in argv.
+- Migrated the live `qed` Coolify token to Keychain account `socos`, service
+  `coolify-cli-qed-token`, verified it, and removed its field from the local
+  Coolify config. The `qed` instance entry now retains only non-secret metadata;
+  the config is mode `0600`.
+- Independent review approved the boundary after two test-first correction
+  rounds. Focused activation/ops/wrapper tests pass 31/31; syntax, executable
+  mode, and diff checks pass. No production feature value was changed by this
+  tooling work.
 
 ### Personal CRM
 
@@ -204,7 +230,19 @@ Calendar/location PostgreSQL integration: passed
 Human-idempotency PostgreSQL integration: passed
 Independent Integrations review: APPROVE
 Independent Hermes review: APPROVE
+Activation/ops/wrapper tests: 31/31
+Independent activation-tooling review: APPROVE
 ```
+
+The latest broad `pnpm test` rerun reached 93 passing API suites, 1 skipped
+suite, and 1,034 passing tests before two cases in
+`agent-auth.controller.spec.ts` failed from a five-second load timeout and the
+subsequent connection reset. That controller and these operations scripts do
+not overlap. The exact controller spec then passed 8/8 with `--runInBand`.
+Because Turbo stopped on that API failure, the root script/security segment was
+verified separately with 145 passing tests, 1 intentional skip, and the
+567-file security scan passing. Do not describe the latest broad command itself
+as green.
 
 Final activation cohort:
 
@@ -341,15 +379,14 @@ stage-local smoke, and restore the prior flag plus redeploy on failure.
    External/Production; document any temporary Testing-mode deviation and its
    token-lifetime consequence.
 3. Create one confidential Web application OAuth client with the exact callback
-   above. Transfer the client ID and secret directly into both Coolify runtime
-   profiles without printing, downloading JSON, storing locally, or putting the
-   secret in argv. Clear the clipboard. Without outputting either value, require
-   both profile copies to be equal, non-empty, and different from the disabled
-   placeholders. Take a fresh backup, redeploy the exact reviewed application
-   SHA, and require health `200`, the unauthenticated Calendar route `401`, and
-   disabled OwnTracks `503`. On any failure, restore both prior credential
-   copies or disable Calendar in both profiles, redeploy the same SHA, and
-   verify health. Do not start Socos Connect before this gate passes.
+   above. Store its ID and secret through the non-echoing Keychain prompts in
+   `docs/runbooks/calendar-location-operations.md`; never download JSON, use a
+   local plaintext file, put a secret in argv, or print it. Run
+   `scripts/run-coolify-activation.mjs calendar-enable <reviewed-40hex-sha>`.
+   The tool must prove the fresh backup, equal production/preview credentials,
+   exact deployment SHA, health `200`, unauthenticated Calendar `401`, disabled
+   OwnTracks `503`, and automatic rollback on failure. Do not start Socos
+   Connect before this gate passes.
 4. Sign in to `/dashboard/integrations`, click Google Calendar Connect, stop
    immediately before the Google account permission grant, obtain separate
    action-time confirmation, then grant read-only access and select calendars.
@@ -381,11 +418,6 @@ stage-local smoke, and restore the prior flag plus redeploy on failure.
 
 ### P1: Operational Hardening
 
-- Replace `scripts/coolify.sh` secret-bearing argv behavior with a fail-closed
-  activation command using stdin or protected files.
-- Permit only known flags, update both profiles consistently, enforce dependency
-  order, require backup evidence, deploy an exact SHA, and restore the prior
-  flag automatically on failure.
 - Add a real disposable cloud restore check before future schema/data releases.
 - Add a durable interaction receipt with exact recorded interaction,
   last-contact update, XP delta, and `Recorded only; nothing sent`.
@@ -438,9 +470,11 @@ Read first:
 1. AGENTS.md
 2. docs/ai-handoff-2026-07-17.md
 3. docs/runbooks/calendar-location-operations.md
-4. docs/runbooks/database-backup-restore.md
-5. docs/integrations/hermes-social-loop.md
-6. integrations/hermes/skills/socos-social-loop/SKILL.md
+4. scripts/run-coolify-activation.mjs
+5. scripts/coolify-activate.mjs
+6. docs/runbooks/database-backup-restore.md
+7. docs/integrations/hermes-social-loop.md
+8. integrations/hermes/skills/socos-social-loop/SKILL.md
 
 Then inspect git status, local/origin HEAD, production application/deployment
 SHA, feature flags, Hermes gateway/cron state, and the final Betabot verifier.
@@ -480,6 +514,19 @@ until this gate passes. Then stop immediately before the Google account
 permission grant for separate action-time confirmation. After that consent,
 select calendars and verify only aggregate connection/source/watch/sync state
 plus the visible UI.
+
+Use the checked-in staged activation wrapper for every feature transition. The
+Coolify token is in macOS Keychain account `socos`, service
+`coolify-cli-qed-token`; the `qed` config is tokenless and supplies only its
+HTTPS endpoint. Calendar credentials must use account `socos` and services
+`socos-google-calendar-client-id` and `socos-google-calendar-client-secret`.
+Populate them only with the runbook's non-echoing prompts. Never pass a value
+after `-w`. The wrapper accepts no secret arguments. It pins the exact commit,
+disables auto deploy, proves a fresh positive-size backup, updates the exact
+production/preview pair, enforces dependencies, deploys, smoke-checks, and
+automatically restores the prior in-memory snapshot on failure. Its focused
+tests pass 31/31 and independent review approved it. No real activation was run
+while the Google legal-consent gate remained closed.
 
 For every stage below, take fresh backup evidence, update both environment
 profiles, deploy the exact reviewed SHA, require health/stage smoke, and restore

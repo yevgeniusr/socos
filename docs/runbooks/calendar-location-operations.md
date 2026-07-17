@@ -76,6 +76,99 @@ Application Basic auth remains authoritative; Traefik must not bypass it.
 
 ## Staged Enablement
 
+### Activation Command
+
+Use `scripts/run-coolify-activation.mjs` for every production feature
+transition. It selects the `qed` instance from
+`~/.config/coolify/config.json` for its non-secret HTTPS FQDN, reads the Coolify
+token and Calendar credentials from Keychain using the exact `socos` account,
+and streams the activation document directly to `scripts/coolify-activate.mjs`.
+The wrapper never reads a token from the Coolify config file. Store or rotate
+the three Keychain values with these commands:
+
+```sh
+security add-generic-password -U -a socos -s coolify-cli-qed-token -w
+security add-generic-password -U -a socos -s socos-google-calendar-client-id -w
+security add-generic-password -U -a socos -s socos-google-calendar-client-secret -w
+```
+
+Keep `-w` as the final argument so macOS prompts without echo.
+Never pass a password after `-w`; doing so exposes it in process arguments. Confirm the
+checked-out commit is the intended production revision, then run each stage in
+order:
+
+```sh
+EXPECTED_COMMIT=$(git rev-parse HEAD)
+./scripts/run-coolify-activation.mjs calendar-enable "$EXPECTED_COMMIT"
+./scripts/run-coolify-activation.mjs location-enable "$EXPECTED_COMMIT"
+./scripts/run-coolify-activation.mjs event-discovery-enable "$EXPECTED_COMMIT" events.example.com
+./scripts/run-coolify-activation.mjs event-brief-enable "$EXPECTED_COMMIT"
+```
+
+Replace `events.example.com` only with the lowercase ASCII public hostname that
+the operator has certified for ICS retrieval. The operation, full commit, and
+certified hostname are non-secret arguments. Do not put the activation document
+or either Calendar credential in a file, here-document, command argument, shell
+trace, or command substitution.
+
+The lower-level `scripts/coolify-activate.mjs` process accepts no arguments and
+reads exactly one JSON document from the wrapper. Its exact top-level schema is:
+
+```json
+{
+  "operation": "calendar-enable",
+  "applicationUuid": "APPLICATION_UUID",
+  "databaseUuid": "DATABASE_UUID",
+  "backupUuid": "BACKUP_CONFIGURATION_UUID",
+  "expectedCommit": "0123456789abcdef0123456789abcdef01234567",
+  "publicBaseUrl": "https://socos.rachkovan.com",
+  "values": {
+    "GOOGLE_CALENDAR_CLIENT_ID": "SECRET_MANAGER_VALUE",
+    "GOOGLE_CALENDAR_CLIENT_SECRET": "SECRET_MANAGER_VALUE"
+  }
+}
+```
+
+No additional fields are accepted. `expectedCommit` is exactly 40 lowercase
+hex characters and `publicBaseUrl` is an HTTPS origin. The accepted operations
+and their exact `values` objects are:
+
+```text
+calendar-enable:        GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET
+location-enable:        no values ({})
+event-discovery-enable: EVENT_SOURCE_ALLOWED_HOSTS (one lowercase public ASCII hostname)
+event-brief-enable:     no values ({})
+```
+
+The client ID and secret must be nonempty, non-placeholder values. The tool
+allows mutations only to the two Google credential keys and the five staged
+feature keys listed in the Safety Boundary. Calendar must be enabled first;
+location requires equal non-placeholder Calendar credentials in production and
+preview; discovery requires Calendar and location; briefs require discovery
+and a nonempty host allowlist.
+
+The command pins the application's `main` branch to `expectedCommit`, disables
+automatic deploys, and re-reads the application before inspecting or changing
+environment records. It then requires one new, unambiguous, successful backup
+execution created after command start with a positive size. Every managed key
+must have exactly one equal production/preview pair. The paired target records
+are changed in one bulk request, verified, deployed, and smoke checked against
+the pinned commit.
+
+Success writes one JSON receipt to stdout containing only
+`activation_status`, `operation`, `backup_uuid`, `deployment_uuid`,
+`deployment_commit`, and the four numeric smoke statuses. Failures write one
+fixed-code JSON receipt to stderr. Receipts never include configuration values,
+tokens, provider responses, or request bodies.
+
+Any failure after an environment mutation attempt automatically bulk-restores
+the in-memory snapshot, verifies every managed pair, redeploys the same pinned
+commit, and smoke checks the prior Calendar/location flag state. A nonzero
+receipt reports `rollback_status` as `succeeded` or `failed`. If rollback is
+reported failed, keep automatic deploy disabled, do not retry a later stage,
+and perform the manual Rollback procedure below from the cloud administration
+environment. The legacy `scripts/coolify.sh add-env` command is disabled.
+
 ### Google
 
 User interaction is required in Google Cloud for API enablement, OAuth consent,
