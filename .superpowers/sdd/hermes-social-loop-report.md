@@ -89,8 +89,9 @@ suite now passes 14 tests, including CLI, custom-home, and symlink integration.
   the exact 24-hour server idempotency window.
 - Item and quest addresses must exactly match a full ID returned by the current
   daily brief.
-- Edited messages are rejected before planning; false edit metadata still uses
-  the same key and reaches the backend request-hash conflict boundary.
+- Edited messages are rejected before planning. If false edit metadata retains
+  the same tool and step, the stable key reaches the backend request-hash
+  conflict boundary; cross-tool or cross-step edits have no such fallback.
 - Planner input is one strict JSON object, limited to 64 KiB and accepted only
   through stdin. Personal input is rejected in argv and is never written to a
   temporary file.
