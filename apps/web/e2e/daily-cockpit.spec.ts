@@ -17,7 +17,7 @@ const brief = {
       health: { score: 44, band: "needs-attention" },
       lastInteractionAt: null,
       reason: "A synthetic follow-up is due.",
-      evidence: [{ code: "days_overdue", value: 61 }],
+      evidence: [{ code: "important_date_days", value: 1 }],
       state: "pending",
     },
   ],
@@ -128,6 +128,7 @@ async function installApi(
     loseFirstReminderCreateResponse?: boolean;
     loseFirstQuestCompletionResponse?: boolean;
     mismatchFirstQuestCompletionResponse?: boolean;
+    matchPersonDate?: boolean;
     durableApprovedHistoryThenOmitAndFail?: boolean;
     failRejectedHistoryAfterDecision?: boolean;
     briefTimeZone?: string;
@@ -171,6 +172,18 @@ async function installApi(
     releaseStats,
   };
   let briefReady = options.briefReady ?? true;
+  const servedBrief = options.matchPersonDate
+    ? {
+        ...brief,
+        dates: [
+          {
+            ...brief.dates[0],
+            contact: brief.people[0].contact,
+            title: "Synthetic Person's birthday",
+          },
+        ],
+      }
+    : brief;
   let reminderQuestCompleted = false;
   let proposals: ProposalHistoryResponse["proposals"] = [
     {
@@ -262,7 +275,7 @@ async function installApi(
     if (url.pathname === "/api/briefs/today")
       return briefReady
         ? json(route, {
-            ...brief,
+            ...servedBrief,
             timeZone: options.briefTimeZone ?? brief.timeZone,
           })
         : json(
@@ -277,7 +290,7 @@ async function installApi(
       state.generateCalls += 1;
       briefReady = true;
       return json(route, {
-        ...brief,
+        ...servedBrief,
         timeZone: options.briefTimeZone ?? brief.timeZone,
       });
     }
@@ -790,7 +803,9 @@ test("explains focus priority and prefills reminders from structured date contex
     .locator("li")
     .filter({ hasText: "Synthetic Person" })
     .first();
-  await expect(person.getByText("Needs attention · 61 days overdue")).toBeVisible();
+  await expect(
+    person.getByText("Needs attention · Important date in 1 day")
+  ).toBeVisible();
   await expect(
     person.getByText("Relationship score 44/100 · No interaction logged")
   ).toBeVisible();
@@ -830,6 +845,38 @@ test("explains focus priority and prefills reminders from structured date contex
     /^\d{4}-\d{2}-\d{2}T09:00$/
   );
   await followupDialog.getByRole("button", { name: "Close" }).click();
+});
+
+test("prefills a birthday reminder from an exact structured person-date match", async ({
+  page,
+}) => {
+  const api = await installApi(page, { matchPersonDate: true });
+  await page.goto("/dashboard/today");
+
+  const person = page
+    .locator("li")
+    .filter({ hasText: "Synthetic Person" })
+    .first();
+  await person.getByRole("button", { name: "Create reminder" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Create reminder" });
+  await expect(dialog.getByLabel("Type")).toHaveValue("birthday");
+  await expect(dialog.getByLabel("Title")).toHaveValue(
+    "Synthetic Person's birthday"
+  );
+  await expect(dialog.getByLabel("Scheduled at")).toHaveValue(
+    "2026-07-18T09:00"
+  );
+  await expect(dialog.getByText("Birthday · Jul 18, 2026")).toBeVisible();
+
+  await dialog.getByRole("button", { name: "Create reminder" }).click();
+  await expect.poll(() => api.reminderBodies).toHaveLength(1);
+  expect(api.reminderBodies[0]).toEqual({
+    contactId: "contact-synthetic",
+    type: "birthday",
+    title: "Synthetic Person's birthday",
+    scheduledAt: "2026-07-18T05:00:00.000Z",
+  });
 });
 
 test("retries lost committed cockpit POST responses with stable intent keys", async ({

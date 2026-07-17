@@ -5,6 +5,7 @@ import {
   buildCockpitView,
   buildDateReminderDraft,
   buildPersonReminderDraft,
+  buildPersonReminderDraftFromDates,
   buildQuestReceipt,
   formatBriefDate,
   healthBandLabel,
@@ -224,6 +225,79 @@ describe("cockpit view", () => {
     expect(
       zonedLocalDateTimeToIso("2026-07-19T09:00", "America/New_York")
     ).toBe("2026-07-19T13:00:00.000Z");
+  });
+
+  it("builds a date draft only from an exact structured person-date match", () => {
+    const person = {
+      ...baseBrief.people[0],
+      reason: "Follow up about their birthday next week.",
+      evidence: [{ code: "important_date_days", value: 2 }],
+    };
+    const birthday = {
+      itemId: "matching-date-item",
+      rank: 3,
+      contact: person.contact,
+      type: "birthday" as const,
+      title: "Synthetic Person's birthday",
+      date: "2026-07-19",
+      daysAway: 2,
+      reason: "Structured birthday date",
+      state: "pending" as const,
+    };
+
+    expect(
+      buildPersonReminderDraftFromDates(
+        person,
+        [
+          {
+            ...birthday,
+            itemId: "wrong-contact",
+            contact: { id: "other-contact", name: "Other Person" },
+          },
+          { ...birthday, itemId: "wrong-day", daysAway: 1 },
+          birthday,
+        ],
+        "Asia/Dubai",
+        new Date("2026-07-17T05:00:00.000Z")
+      )
+    ).toEqual(buildDateReminderDraft(birthday, "Asia/Dubai"));
+  });
+
+  it("keeps the person follow-up draft when no exact structured date exists", () => {
+    const person = {
+      ...baseBrief.people[0],
+      reason: "Birthday tomorrow according to free text.",
+      evidence: [{ code: "important_date_days", value: 2 }],
+    };
+    const unmatchedDate = {
+      itemId: "unmatched-date-item",
+      rank: 1,
+      contact: person.contact,
+      type: "birthday" as const,
+      title: "Synthetic Person's birthday",
+      date: "2026-07-18",
+      daysAway: 1,
+      reason: "Structured birthday date",
+      state: "pending" as const,
+    };
+    const now = new Date("2026-07-17T05:00:00.000Z");
+
+    expect(
+      buildPersonReminderDraftFromDates(
+        person,
+        [
+          unmatchedDate,
+          {
+            ...unmatchedDate,
+            itemId: "same-day-wrong-contact",
+            contact: { id: "other-contact", name: "Other Person" },
+            daysAway: 2,
+          },
+        ],
+        "Asia/Dubai",
+        now
+      )
+    ).toEqual(buildPersonReminderDraft(person, "Asia/Dubai", now));
   });
 
   it("builds quest receipts only from the verified server result", () => {

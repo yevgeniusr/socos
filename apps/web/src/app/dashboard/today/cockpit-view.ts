@@ -191,6 +191,28 @@ export function buildPersonReminderDraft(
   };
 }
 
+export function buildPersonReminderDraftFromDates(
+  item: PersonItem,
+  dates: DateItem[],
+  timeZone: string,
+  now = new Date()
+): ReminderDraft {
+  const importantDateDays = item.evidence.find(
+    (entry) => entry.code === "important_date_days"
+  )?.value;
+  const matchingDate =
+    typeof importantDateDays === "number"
+      ? dates.find(
+          (date) =>
+            date.contact.id === item.contact.id &&
+            date.daysAway === importantDateDays
+        )
+      : undefined;
+  return matchingDate
+    ? buildDateReminderDraft(matchingDate, timeZone)
+    : buildPersonReminderDraft(item, timeZone, now);
+}
+
 export function buildDateReminderDraft(
   item: DateItem,
   timeZone: string

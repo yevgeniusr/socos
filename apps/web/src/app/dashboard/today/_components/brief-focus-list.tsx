@@ -3,7 +3,7 @@ import Link from "next/link";
 import type { DailyBrief } from "@/lib/cockpit-contracts";
 import {
   buildDateReminderDraft,
-  buildPersonReminderDraft,
+  buildPersonReminderDraftFromDates,
   itemStateLabel,
   lastInteractionLabel,
   personPriorityLabel,
@@ -113,7 +113,11 @@ export default function BriefFocusList({
                   onDismiss={onDismiss}
                   onReminder={(trigger) =>
                     onReminder(
-                      buildPersonReminderDraft(item, brief.timeZone),
+                      buildPersonReminderDraftFromDates(
+                        item,
+                        brief.dates,
+                        brief.timeZone
+                      ),
                       trigger
                     )
                   }
