@@ -135,7 +135,7 @@ test('Coolify backup trigger PATCHes the exact config with fixed JSON and accept
   const newExecution = {
     uuid: 'new_execution',
     status: 'success',
-    size: '173187',
+    size: 173187,
     created_at: new Date(Date.now() + 1_000).toISOString(),
   };
   const responses = [
@@ -445,7 +445,7 @@ test('local wrapper rejects receipts with paths, extra fields, or a different SH
   );
 });
 
-test('fresh Coolify proof requires one exact new successful execution and positive decimal string size', () => {
+test('fresh Coolify proof normalizes positive decimal string or safe-integer size', () => {
   const startedAt = Date.parse('2026-07-17T01:00:00.000Z');
   assert.deepEqual(
     validateFreshBackup(
@@ -463,14 +463,35 @@ test('fresh Coolify proof requires one exact new successful execution and positi
     ),
     { executionUuid: 'new_execution', sizeBytes: '173187' },
   );
-  assert.throws(
-    () => validateFreshBackup([], [{ uuid: 'new', status: 'success', size: 12, created_at: '2026-07-17T01:00:01.000Z' }], startedAt),
-    /backup_invalid/,
+  assert.deepEqual(
+    validateFreshBackup(
+      [],
+      [{ uuid: 'new', status: 'success', size: 12, created_at: '2026-07-17T01:00:01.000Z' }],
+      startedAt,
+    ),
+    { executionUuid: 'new', sizeBytes: '12' },
   );
-  assert.throws(
-    () => validateFreshBackup([], [{ uuid: 'new', status: 'success', size: '0', created_at: '2026-07-17T01:00:01.000Z' }], startedAt),
-    /backup_invalid/,
-  );
+  for (const invalidSize of [
+    0,
+    -1,
+    1.5,
+    Number.MAX_SAFE_INTEGER + 1,
+    '0',
+    '-1',
+    '1.5',
+    '1e3',
+    '01',
+    '0x10',
+  ]) {
+    assert.throws(
+      () => validateFreshBackup(
+        [],
+        [{ uuid: 'new', status: 'success', size: invalidSize, created_at: '2026-07-17T01:00:01.000Z' }],
+        startedAt,
+      ),
+      /backup_invalid/,
+    );
+  }
   assert.deepEqual(
     validateFreshBackup(
       [],

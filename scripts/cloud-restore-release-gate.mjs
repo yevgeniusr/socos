@@ -119,10 +119,15 @@ export function validateFreshBackup(before, current, startedAt) {
     throw new GateFailure('backup_failed');
   }
   if (execution.status !== 'success') throw new GateFailure('backup_pending');
-  if (typeof execution.size !== 'string' || !/^[1-9][0-9]*$/.test(execution.size)) {
+  let sizeBytes;
+  if (typeof execution.size === 'string' && /^[1-9][0-9]*$/.test(execution.size)) {
+    sizeBytes = execution.size;
+  } else if (typeof execution.size === 'number' && Number.isSafeInteger(execution.size) && execution.size > 0) {
+    sizeBytes = String(execution.size);
+  } else {
     throw new GateFailure('backup_invalid');
   }
-  return { executionUuid: backupId(execution), sizeBytes: execution.size };
+  return { executionUuid: backupId(execution), sizeBytes };
 }
 
 export async function runGate(candidateSha, deps) {
