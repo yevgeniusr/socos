@@ -201,4 +201,44 @@ describe("ContactsController route ordering", () => {
     expect(prototype.createInteraction).toBeUndefined();
     expect(prototype.getInteractions).toBeUndefined();
   });
+
+  it("does not register a direct contact deletion route", async () => {
+    const contactsService = {
+      delete: jest.fn().mockResolvedValue({ success: true }),
+    };
+    const moduleRef = await Test.createTestingModule({
+      controllers: [ContactsController],
+      providers: [
+        { provide: ContactsService, useValue: contactsService },
+        { provide: InteractionsService, useValue: {} },
+      ],
+    })
+      .overrideGuard(AuthGuard)
+      .useValue({
+        canActivate(context: {
+          switchToHttp(): { getRequest(): { user?: { userId: string } } };
+        }) {
+          context.switchToHttp().getRequest().user = {
+            userId: "synthetic-owner",
+          };
+          return true;
+        },
+      })
+      .compile();
+    const app: INestApplication = moduleRef.createNestApplication();
+    await app.listen(0, "127.0.0.1");
+
+    try {
+      const address = app.getHttpServer().address() as { port: number };
+      const response = await fetch(
+        `http://127.0.0.1:${address.port}/contacts/contact-synthetic`,
+        { method: "DELETE" }
+      );
+
+      expect(response.status).toBe(404);
+      expect(contactsService.delete).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
 });

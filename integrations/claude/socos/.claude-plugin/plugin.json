@@ -1,0 +1,12 @@
+{
+  "name": "socos",
+  "version": "0.1.0",
+  "description": "Read personal CRM context from Socos through its authenticated MCP endpoint.",
+  "author": {
+    "name": "Yev Rachkovan"
+  },
+  "homepage": "https://socos.rachkovan.com",
+  "repository": "https://github.com/yevgeniusr/socos",
+  "license": "MIT",
+  "keywords": ["personal-crm", "relationships", "mcp", "productivity"]
+}

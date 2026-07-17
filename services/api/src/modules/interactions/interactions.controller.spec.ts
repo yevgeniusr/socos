@@ -8,6 +8,7 @@ describe("InteractionsController", () => {
   async function harness() {
     const interactionsService = {
       create: jest.fn(),
+      delete: jest.fn().mockResolvedValue({ success: true }),
       getReceipt: jest.fn().mockResolvedValue({
         outcome: "Recorded only; nothing sent",
       }),
@@ -66,6 +67,21 @@ describe("InteractionsController", () => {
         "owner-synthetic",
         "interaction-synthetic"
       );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("does not register a direct interaction deletion route", async () => {
+    const { app, baseUrl, interactionsService } = await harness();
+    try {
+      const response = await fetch(
+        `${baseUrl}/interactions/interaction-synthetic`,
+        { method: "DELETE" }
+      );
+
+      expect(response.status).toBe(404);
+      expect(interactionsService.delete).not.toHaveBeenCalled();
     } finally {
       await app.close();
     }

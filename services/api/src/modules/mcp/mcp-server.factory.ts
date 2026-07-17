@@ -30,7 +30,13 @@ export class McpServerFactory {
 
   create(principal: AgentPrincipal): McpRequestRuntime {
     const server = new McpServer({ name: "socos", version: "1.0.0" });
-    const definitions = this.registry.definitions();
+    const definitions = Object.freeze(
+      this.registry
+        .definitions(principal)
+        .filter((definition) =>
+          principal.scopes.includes(definition.metadata.requiredScope)
+        )
+    );
     for (const definition of definitions) {
       const { metadata, inputSchema } = definition;
       server.registerTool(
@@ -40,7 +46,7 @@ export class McpServerFactory {
           inputSchema,
           annotations: {
             readOnlyHint: metadata.risk === "read",
-            destructiveHint: false,
+            destructiveHint: metadata.name === "socos_execute_approved_action",
             idempotentHint: metadata.requiresIdempotencyKey,
             openWorldHint: false,
           },

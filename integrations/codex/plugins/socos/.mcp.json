@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "socos": {
+      "type": "http",
+      "url": "https://socos.rachkovan.com/api/mcp",
+      "bearer_token_env_var": "SOCOS_CODEX_TOKEN"
+    }
+  }
+}

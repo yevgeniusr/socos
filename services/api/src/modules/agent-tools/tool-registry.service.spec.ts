@@ -126,6 +126,18 @@ describe("AgentToolRegistryService", () => {
     expect(registry.getDefinition("socos_unknown")).toBeNull();
   });
 
+  it("filters discovery definitions by server-resolved principal scope", () => {
+    const { registry } = harness();
+    const briefsOnly = { ...principal, scopes: ["briefs:read"] as const };
+
+    const definitions = registry.definitions(briefsOnly);
+
+    expect(definitions.map(({ metadata }) => metadata.name)).toEqual([
+      "socos_brief_today",
+    ]);
+    expect(registry.definitions()).toHaveLength(11);
+  });
+
   it("requires a repeat interval exactly for recurring reminders", () => {
     const { registry } = harness();
     const schema = registry.getDefinition("socos_create_reminder")!.inputSchema;

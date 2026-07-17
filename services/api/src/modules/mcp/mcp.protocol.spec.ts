@@ -26,25 +26,65 @@ const principals: Record<string, AgentPrincipal> = {
     clientName: "Hermes B",
     scopes: ["contacts:read"],
   },
+  "credential-all": {
+    ownerId: "owner-all",
+    clientId: "client-all",
+    credentialId: "credential-all",
+    clientName: "Scoped metadata client",
+    scopes: [
+      "contacts:read",
+      "relationships:read",
+      "dates:read",
+      "reminders:read",
+      "briefs:read",
+      "interactions:write",
+      "reminders:write",
+      "feedback:write",
+      "quests:complete",
+      "proposals:write",
+      "approvals:execute",
+    ],
+  },
 };
+
+const definitions = [
+  definition("socos_brief_today", "briefs:read", "read", false),
+  definition("socos_contacts_search", "contacts:read", "read", false),
+  definition("socos_relationship_health", "relationships:read", "read", false),
+  definition("socos_important_dates", "dates:read", "read", false),
+  definition("socos_reminders_list", "reminders:read", "read", false),
+  definition("socos_log_interaction", "interactions:write", "automatic", true),
+  definition("socos_create_reminder", "reminders:write", "automatic", true),
+  definition("socos_brief_feedback", "feedback:write", "automatic", true),
+  definition("socos_complete_quest", "quests:complete", "automatic", true),
+  definition(
+    "socos_propose_action",
+    "proposals:write",
+    "approval_required",
+    true
+  ),
+  definition(
+    "socos_execute_approved_action",
+    "approvals:execute",
+    "approval_required",
+    true
+  ),
+];
 
 describe("MCP Streamable HTTP protocol", () => {
   let app: INestApplication;
   let endpoint: URL;
   let factory: McpServerFactory;
   const registry = {
-    definitions: jest.fn().mockReturnValue([
-      {
-        metadata: {
-          name: "socos_contacts_search",
-          description: "Search owner contacts",
-          requiredScope: "contacts:read",
-          risk: "read",
-          requiresIdempotencyKey: false,
-        },
-        inputSchema: z.strictObject({ query: z.string().min(1).max(100) }),
-      },
-    ]),
+    definitions: jest
+      .fn()
+      .mockImplementation((principal?: AgentPrincipal) =>
+        principal
+          ? definitions.filter(({ metadata }) =>
+              principal.scopes.includes(metadata.requiredScope)
+            )
+          : definitions
+      ),
     call: jest.fn().mockImplementation((name, principal, input) =>
       Promise.resolve({
         ok: true,
@@ -149,6 +189,57 @@ describe("MCP Streamable HTTP protocol", () => {
     );
   });
 
+  it("advertises only scoped tools and marks only approved execution destructive", async () => {
+    const limited = client("credential-a");
+    await step("limited connect", limited.protocol.connect(limited.transport));
+    const limitedList = await step(
+      "limited list",
+      limited.protocol.listTools()
+    );
+    const hiddenCall = await step(
+      "hidden call",
+      limited.protocol.callTool({
+        name: "socos_execute_approved_action",
+        arguments: {},
+      })
+    );
+    await limited.protocol.close();
+
+    expect(limitedList.tools.map(({ name }) => name)).toEqual([
+      "socos_contacts_search",
+    ]);
+    expect(hiddenCall).toEqual(
+      expect.objectContaining({
+        isError: true,
+        content: [
+          expect.objectContaining({
+            text: expect.stringContaining(
+              "Tool socos_execute_approved_action not found"
+            ),
+          }),
+        ],
+      })
+    );
+    expect(registry.call).not.toHaveBeenCalled();
+
+    const all = client("credential-all");
+    await step("all connect", all.protocol.connect(all.transport));
+    const allList = await step("all list", all.protocol.listTools());
+    await all.protocol.close();
+
+    expect(allList.tools).toHaveLength(11);
+    expect(
+      allList.tools
+        .filter(({ annotations }) => annotations?.destructiveHint === true)
+        .map(({ name }) => name)
+    ).toEqual(["socos_execute_approved_action"]);
+    expect(
+      allList.tools
+        .filter(({ name }) => name !== "socos_execute_approved_action")
+        .every(({ annotations }) => annotations?.destructiveHint === false)
+    ).toBe(true);
+  });
+
   it("rejects missing and invalid bearer credentials generically", async () => {
     const missing = await fetch(endpoint, {
       method: "POST",
@@ -251,3 +342,27 @@ describe("MCP Streamable HTTP protocol", () => {
     expect(origin.status).toBe(403);
   });
 });
+
+function definition(
+  name: string,
+  requiredScope: AgentPrincipal["scopes"][number],
+  risk: "read" | "automatic" | "approval_required",
+  requiresIdempotencyKey: boolean
+) {
+  return {
+    metadata: {
+      name,
+      description:
+        name === "socos_contacts_search"
+          ? "Search owner contacts"
+          : `Synthetic definition for ${name}`,
+      requiredScope,
+      risk,
+      requiresIdempotencyKey,
+    },
+    inputSchema:
+      name === "socos_contacts_search"
+        ? z.strictObject({ query: z.string().min(1).max(100) })
+        : z.strictObject({}),
+  };
+}

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards, Request, Headers } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, UseGuards, Request, Headers } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiHeader } from '@nestjs/swagger';
 import { InteractionsService } from './interactions.service.js';
 import { CreateInteractionDto, InteractionQueryDto } from './interactions.dto.js';
@@ -64,12 +64,4 @@ export class InteractionsController {
     return this.interactionsService.getReceipt(req.user.userId, id);
   }
 
-  @Delete(':id')
-  @ApiOperation({ summary: 'Delete an interaction' })
-  async delete(
-    @Request() req: { user: { userId: string } },
-    @Param('id') id: string,
-  ) {
-    return this.interactionsService.delete(req.user.userId, id);
-  }
 }

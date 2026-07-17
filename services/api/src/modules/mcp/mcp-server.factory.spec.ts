@@ -25,6 +25,16 @@ function harness() {
         },
         inputSchema,
       },
+      {
+        metadata: {
+          name: "socos_execute_approved_action",
+          description: "Execute approved action",
+          requiredScope: "approvals:execute",
+          risk: "approval_required",
+          requiresIdempotencyKey: true,
+        },
+        inputSchema: z.strictObject({ grantId: z.string() }),
+      },
     ]),
     call: jest.fn().mockResolvedValue({ ok: true, data: { contacts: [] } }),
   };
@@ -50,12 +60,13 @@ describe("McpServerFactory", () => {
     expect(second.transport.sessionId).toBeUndefined();
   });
 
-  it("registers only explicit registry definitions with their exact schemas", () => {
+  it("registers only principal-scoped definitions with their exact schemas", () => {
     const { factory, inputSchema, registry } = harness();
 
     const runtime = factory.create(principal);
 
     expect(registry.definitions).toHaveBeenCalledTimes(1);
+    expect(registry.definitions).toHaveBeenCalledWith(principal);
     expect(runtime.definitions).toEqual([
       expect.objectContaining({
         metadata: expect.objectContaining({ name: "socos_contacts_search" }),

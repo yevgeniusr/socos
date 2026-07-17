@@ -21,7 +21,7 @@ Use these initial profiles:
 
 | Client | Scopes |
 | --- | --- |
-| Hermes | `contacts:read`, `relationships:read`, `dates:read`, `reminders:read`, `briefs:read`, `interactions:write`, `reminders:write`, `feedback:write`, `quests:complete`, `proposals:write`, `approvals:execute` |
+| Hermes | `contacts:read`, `relationships:read`, `dates:read`, `reminders:read`, `briefs:read`, `interactions:write`, `reminders:write`, `feedback:write`, `quests:complete`, `proposals:write` |
 | Codex | `contacts:read`, `relationships:read`, `dates:read`, `reminders:read`, `briefs:read` |
 | Claude | `contacts:read`, `relationships:read`, `dates:read`, `reminders:read`, `briefs:read` |
 
@@ -30,6 +30,13 @@ automatic but require a stable per-intent `idempotencyKey`. Message, introductio
 invitation, merge, and delete tools only create proposals. A human must approve the
 exact payload before an execution attempt, and every grant is short-lived and
 single-use. Unsupported executors fail without consuming the approval.
+
+Tool discovery is scope-aware: `tools/list` returns only tools whose required scope
+is present on the authenticated client. The default Hermes profile intentionally
+omits `approvals:execute`; use a separate, narrowly operated client if approved
+execution is enabled in a future deployment. Direct calls remain scope-checked even
+when a caller already knows a hidden tool name. Approved execution is advertised as
+destructive to MCP clients; all other current tools are non-destructive.
 
 Rotate a credential immediately after suspected disclosure. Rotation invalidates
 the previous credential. Revoking a client invalidates all its credentials.

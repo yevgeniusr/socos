@@ -62,8 +62,15 @@ export class AgentToolRegistryService {
     return this.tools.map((tool) => tool.metadata);
   }
 
-  definitions(): readonly PublicAgentToolDefinition[] {
-    return this.publicDefinitions;
+  definitions(
+    principal?: AgentPrincipal
+  ): readonly PublicAgentToolDefinition[] {
+    if (!principal) return this.publicDefinitions;
+    return Object.freeze(
+      this.publicDefinitions.filter((definition) =>
+        principal.scopes.includes(definition.metadata.requiredScope)
+      )
+    );
   }
 
   getDefinition(name: string): PublicAgentToolDefinition | null {

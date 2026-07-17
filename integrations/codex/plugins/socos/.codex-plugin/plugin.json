@@ -1,0 +1,30 @@
+{
+  "name": "socos",
+  "version": "0.1.0",
+  "description": "Read personal CRM context from Socos through its authenticated MCP endpoint.",
+  "author": {
+    "name": "Yev Rachkovan",
+    "url": "https://github.com/yevgeniusr"
+  },
+  "homepage": "https://socos.rachkovan.com",
+  "repository": "https://github.com/yevgeniusr/socos",
+  "license": "MIT",
+  "keywords": ["personal-crm", "relationships", "mcp", "productivity"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Socos",
+    "shortDescription": "Read your personal CRM context",
+    "longDescription": "Use a dedicated read-only Socos agent credential to review relationship context, briefs, reminders, important dates, and social suggestions.",
+    "developerName": "Yev Rachkovan",
+    "category": "Productivity",
+    "capabilities": ["Read"],
+    "websiteURL": "https://socos.rachkovan.com",
+    "defaultPrompt": [
+      "Review my Socos brief and surface the most useful next conversations",
+      "Find relationship context and important dates I should remember",
+      "Summarize my current social suggestions without taking external action"
+    ],
+    "brandColor": "#2563EB"
+  }
+}

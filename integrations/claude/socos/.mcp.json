@@ -1,0 +1,9 @@
+{
+  "socos": {
+    "type": "http",
+    "url": "https://socos.rachkovan.com/api/mcp",
+    "headers": {
+      "Authorization": "Bearer ${SOCOS_CLAUDE_TOKEN}"
+    }
+  }
+}

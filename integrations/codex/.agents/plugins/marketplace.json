@@ -1,0 +1,14 @@
+{
+  "name": "socos-codex",
+  "displayName": "Socos Codex Plugins",
+  "description": "Repo-local Codex marketplace for the Socos personal CRM plugin.",
+  "plugins": [
+    {
+      "name": "socos",
+      "source": {
+        "source": "local",
+        "path": "./plugins/socos"
+      }
+    }
+  ]
+}

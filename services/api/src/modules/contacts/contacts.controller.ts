@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Request, Headers } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Param, Query, UseGuards, Request, Headers } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiHeader } from '@nestjs/swagger';
 import { ContactsService } from './contacts.service.js';
 import { CreateContactDto, UpdateContactDto, ContactQueryDto } from './contacts.dto.js';
@@ -83,15 +83,6 @@ export class ContactsController {
     @Body() dto: UpdateContactDto,
   ) {
     return this.contactsService.update(req.user.userId, id, dto);
-  }
-
-  @Delete(':id')
-  @ApiOperation({ summary: 'Delete a contact' })
-  async delete(
-    @Request() req: { user: { userId: string } },
-    @Param('id') id: string,
-  ) {
-    return this.contactsService.delete(req.user.userId, id);
   }
 
   @Post(':id/interactions')

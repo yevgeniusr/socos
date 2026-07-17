@@ -1,0 +1,11 @@
+{
+  "name": "socos-claude",
+  "displayName": "Socos Claude Plugins",
+  "description": "Repo-local Claude Code marketplace for the Socos personal CRM plugin.",
+  "plugins": [
+    {
+      "name": "socos",
+      "source": "./socos"
+    }
+  ]
+}

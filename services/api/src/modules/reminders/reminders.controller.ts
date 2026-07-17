@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Request, Headers } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Param, Query, UseGuards, Request, Headers } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { RemindersService } from './reminders.service.js';
 import { CreateReminderDto, UpdateReminderDto, ReminderQueryDto } from './reminders.dto.js';
@@ -57,12 +57,4 @@ export class RemindersController {
     return this.remindersService.complete(req.user.userId, id);
   }
 
-  @Delete(':id')
-  @ApiOperation({ summary: 'Delete a reminder' })
-  async delete(
-    @Request() req: { user: { userId: string } },
-    @Param('id') id: string,
-  ) {
-    return this.remindersService.delete(req.user.userId, id);
-  }
 }
