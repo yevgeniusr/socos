@@ -15,6 +15,13 @@ import { join, resolve } from 'node:path';
 import test from 'node:test';
 
 const root = resolve(import.meta.dirname, '..');
+const backupPgEnvironment = {
+  PGHOST: 'example.invalid',
+  PGPORT: '5432',
+  PGUSER: 'secret-user',
+  PGPASSWORD: 'secret-password',
+  PGDATABASE: 'socos',
+};
 
 function executable(dir, name, body) {
   const path = join(dir, name);
@@ -67,7 +74,7 @@ if (process.env.SOCOS_SNAPSHOT_FILE) {
   const result = run('scripts/backup-postgres.sh', {
     env: {
       BACKUP_DIR: dir,
-      DATABASE_URL: 'postgresql://secret-user:secret-password@example.invalid/socos',
+      ...backupPgEnvironment,
       PATH: `${bin}:${process.env.PATH}`,
     },
   });
@@ -105,7 +112,7 @@ setInterval(() => {}, 1000);`,
   const result = run('scripts/backup-postgres.sh', {
     env: {
       BACKUP_DIR: dir,
-      DATABASE_URL: 'postgresql://secret-user:secret-password@example.invalid/socos',
+      ...backupPgEnvironment,
       PATH: `${bin}:${process.env.PATH}`,
     },
   });
@@ -146,7 +153,7 @@ if (process.env.SOCOS_SNAPSHOT_FILE) {
   const result = run('scripts/backup-postgres.sh', {
     env: {
       BACKUP_DIR: dir,
-      DATABASE_URL: 'postgresql://secret-user:secret-password@example.invalid/socos',
+      ...backupPgEnvironment,
       SNAPSHOT_CANCEL_GRACE_SECONDS: '0.05',
       PATH: `${bin}:${process.env.PATH}`,
     },
@@ -154,6 +161,41 @@ if (process.env.SOCOS_SNAPSHOT_FILE) {
 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(readFileSync(signalLog, 'utf8'), 'INT\nTERM\n');
+});
+
+test('backup rejects DATABASE_URL-only configuration before launching database clients', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'socos-backup-url-only-test-'));
+  const bin = join(dir, 'bin');
+  const called = join(dir, 'database-client-called');
+  execFileSync('mkdir', ['-p', bin]);
+  executable(bin, 'psql', `touch '${called}'`);
+  executable(bin, 'pg_dump', `touch '${called}'`);
+
+  const result = run('scripts/backup-postgres.sh', {
+    env: {
+      BACKUP_DIR: dir,
+      DATABASE_URL: 'postgresql://secret-user:secret-password@example.invalid/socos',
+      PGHOST: '',
+      PGPORT: '',
+      PGUSER: '',
+      PGPASSWORD: '',
+      PGDATABASE: '',
+      PATH: `${bin}:${process.env.PATH}`,
+    },
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.equal(existsSync(called), false);
+  assert.doesNotMatch(`${result.stdout}${result.stderr}`, /secret-user|secret-password/);
+});
+
+test('independent recovery runbook uses secret-store libpq variables instead of a database URI', () => {
+  const runbook = readFileSync(resolve(root, 'docs/runbooks/database-backup-restore.md'), 'utf8');
+  const independentRecovery = runbook
+    .split('## Independent Recovery Proof')[1]
+    .split('\n## ')[0];
+  assert.match(independentRecovery, /PGHOST.*PGPORT.*PGUSER.*PGPASSWORD.*PGDATABASE/is);
+  assert.doesNotMatch(independentRecovery, /(?:^|[\s(])DATABASE_URL=/m);
 });
 
 test('restore verification always drops its disposable database', () => {

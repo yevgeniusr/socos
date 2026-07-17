@@ -633,7 +633,7 @@ export function createDependencies(config, signal) {
         const output = await run(join(trustedRoot, 'scripts/backup-postgres.sh'), [], {
           cwd: trustedRoot,
           env: commandEnvironment({
-            DATABASE_URL: config.productionUrl,
+            ...config.productionPg,
             BACKUP_DIR: workspace.backupDir,
             TMPDIR: workspace.workspace,
           }),

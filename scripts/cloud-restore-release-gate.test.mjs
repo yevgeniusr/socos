@@ -42,6 +42,13 @@ function executable(dir, name, body) {
   return path;
 }
 
+function nodeExecutable(dir, name, body) {
+  const path = join(dir, name);
+  writeFileSync(path, `#!/usr/bin/env node\n${body}\n`);
+  chmodSync(path, 0o755);
+  return path;
+}
+
 async function waitForFile(path, timeoutMs = 15_000) {
   const startedAt = performance.now();
   const deadline = startedAt + timeoutMs;
@@ -192,6 +199,89 @@ test('Coolify execution-list GET rejects malformed JSON', async () => {
     assert.equal(calls.length, 1);
     assert.equal(calls[0][1].method, 'GET');
   });
+});
+
+test('independent backup child receives libpq environment without DATABASE_URL or secret argv', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'socos-release-independent-backup-'));
+  const bin = join(dir, 'bin');
+  const envLog = join(dir, 'database-client-env.jsonl');
+  const workspace = { workspace: dir, backupDir: join(dir, 'backup') };
+  spawnSync('mkdir', ['-p', bin]);
+  const recordEnvironment = `const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.appendFileSync('${envLog}', JSON.stringify({
+  args,
+  host: process.env.PGHOST,
+  port: process.env.PGPORT,
+  database: process.env.PGDATABASE,
+  sslmode: process.env.PGSSLMODE,
+  appname: process.env.PGAPPNAME,
+  hasUser: typeof process.env.PGUSER === 'string' && process.env.PGUSER.length > 0,
+  hasPassword: typeof process.env.PGPASSWORD === 'string' && process.env.PGPASSWORD.length > 0,
+  hasDatabaseUrl: Object.hasOwn(process.env, 'DATABASE_URL'),
+}) + '\\n');`;
+  nodeExecutable(
+    bin,
+    'pg_dump',
+    `${recordEnvironment}
+const fileIndex = args.indexOf('--file');
+if (fileIndex < 0 || !args[fileIndex + 1]) process.exit(2);
+fs.writeFileSync(args[fileIndex + 1], 'custom-dump');`,
+  );
+  nodeExecutable(
+    bin,
+    'psql',
+    `${recordEnvironment}
+if (process.env.SOCOS_SNAPSHOT_FILE) {
+  fs.writeFileSync(process.env.SOCOS_SNAPSHOT_FILE, '00000003-0000001B-1');
+  fs.writeFileSync(process.env.SOCOS_SNAPSHOT_READY, '');
+  process.on('SIGINT', () => process.exit(0));
+  setInterval(() => {}, 1000);
+} else if (args.join(' ').includes('SET TRANSACTION SNAPSHOT')) {
+  process.stdout.write('table_name\\trow_count\\nContact\\t106\\n');
+} else process.exit(3);`,
+  );
+  const productionPg = {
+    PGHOST: 'database.internal',
+    PGPORT: '6543',
+    PGUSER: 'secret-user',
+    PGPASSWORD: 'secret-password',
+    PGDATABASE: 'socos',
+    PGSSLMODE: 'require',
+    PGAPPNAME: 'restore-gate',
+  };
+  const dependencies = createDependencies({
+    productionUrl: 'postgresql://secret-user:secret-password@database.internal:6543/socos',
+    productionPg,
+    operationTimeoutMs: 5_000,
+    cleanupTimeoutMs: 5_000,
+    terminationGraceMs: 100,
+  }, new AbortController().signal);
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${bin}:${originalPath}`;
+  let result;
+  try {
+    result = await dependencies.createIndependentBackup(candidate, workspace);
+  } finally {
+    process.env.PATH = originalPath;
+  }
+
+  const records = readFileSync(envLog, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+  assert.equal(records.length, 3);
+  for (const record of records) {
+    assert.equal(record.host, productionPg.PGHOST);
+    assert.equal(record.port, productionPg.PGPORT);
+    assert.equal(record.database, productionPg.PGDATABASE);
+    assert.equal(record.sslmode, productionPg.PGSSLMODE);
+    assert.equal(record.appname, productionPg.PGAPPNAME);
+    assert.equal(record.hasUser, true);
+    assert.equal(record.hasPassword, true);
+    assert.equal(record.hasDatabaseUrl, false);
+  }
+  assert.doesNotMatch(
+    `${JSON.stringify(records.map(({ args }) => args))}${JSON.stringify(result)}`,
+    /secret-user|secret-password/,
+  );
 });
 
 test('local wrapper validates the candidate before invoking ssh', () => {

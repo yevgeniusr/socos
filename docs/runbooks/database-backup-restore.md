@@ -80,9 +80,16 @@ its secret store, use an encrypted cloud volume for `BACKUP_DIR`, and destroy th
 runner and volume after verification.
 
 ```bash
+# Load these five values directly from the runner secret store. Do not assemble
+# or pass a database URI to the backup helper.
+: "${PGHOST:?PGHOST is required}"
+: "${PGPORT:?PGPORT is required}"
+: "${PGUSER:?PGUSER is required}"
+: "${PGPASSWORD:?PGPASSWORD is required}"
+: "${PGDATABASE:?PGDATABASE is required}"
+export PGHOST PGPORT PGUSER PGPASSWORD PGDATABASE
 BACKUP_DIR=/secure-ephemeral/socos-backups
-backup_output=$(DATABASE_URL="$PRODUCTION_DATABASE_URL" \
-  BACKUP_DIR="$BACKUP_DIR" scripts/backup-postgres.sh)
+backup_output=$(BACKUP_DIR="$BACKUP_DIR" scripts/backup-postgres.sh)
 printf '%s\n' "$backup_output"
 BACKUP_FILE=$(printf '%s\n' "$backup_output" | sed -n 's/^backup_file=//p')
 [ -f "$BACKUP_FILE" ] || { echo "Backup artifact was not published." >&2; exit 1; }

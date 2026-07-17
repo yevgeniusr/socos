@@ -3,7 +3,11 @@ set -eu
 
 umask 077
 
-: "${DATABASE_URL:?DATABASE_URL is required}"
+: "${PGHOST:?PGHOST is required}"
+: "${PGPORT:?PGPORT is required}"
+: "${PGUSER:?PGUSER is required}"
+: "${PGPASSWORD:?PGPASSWORD is required}"
+: "${PGDATABASE:?PGDATABASE is required}"
 BACKUP_DIR=${BACKUP_DIR:-./backups/postgres}
 timestamp=$(date -u +%Y%m%dT%H%M%SZ)
 backup_file="$BACKUP_DIR/socos-$timestamp-$$.dump"
@@ -62,7 +66,7 @@ EOF
 # Hold one repeatable-read transaction open while both the dump and aggregate
 # query import its snapshot. This makes the metadata describe the dump exactly.
 SOCOS_SNAPSHOT_FILE="$snapshot_file" SOCOS_SNAPSHOT_READY="$snapshot_ready" \
-  PGDATABASE="$DATABASE_URL" psql -X --set=ON_ERROR_STOP=1 --tuples-only --no-align \
+  psql -X --set=ON_ERROR_STOP=1 --tuples-only --no-align \
     --file="$snapshot_sql" >/dev/null 2>&1 &
 snapshot_pid=$!
 
@@ -88,13 +92,13 @@ case "$snapshot_id" in
     ;;
 esac
 
-PGDATABASE="$DATABASE_URL" pg_dump --format=custom --no-owner --no-privileges \
+pg_dump --format=custom --no-owner --no-privileges \
   --snapshot="$snapshot_id" --file "$work_backup" >/dev/null
 chmod 0600 "$work_backup"
 
 # query_to_xml lets PostgreSQL calculate exact counts for every public table
 # without selecting or serializing row values.
-PGDATABASE="$DATABASE_URL" psql -X \
+psql -X \
   --set=ON_ERROR_STOP=1 \
   --quiet \
   --no-align \
