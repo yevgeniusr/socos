@@ -40,6 +40,7 @@ Snapshot taken on 2026-07-17 in `/Users/mac/Desktop/projects/personal/socos`.
 | Production status | `running:healthy` |
 | Production URL | `https://socos.rachkovan.com` |
 | Active implementation | Integrations workspace Task 2; agent may commit after this snapshot |
+| Post-snapshot transfer artifact | Untracked `apps/web/e2e/integrations-workspace.spec.ts` |
 
 Always re-run `git status`, `git log`, and `git rev-parse` before continuing.
 Do not assume that the active Task 2 state is unchanged.
@@ -216,9 +217,13 @@ Completed local work:
 
 ### Integrations Workspace Task 2
 
-An implementation agent was active at the snapshot. It had not yet created a
-tracked diff or commit when this document was written. Inspect the shared
-worktree and agent state before assigning or restarting the task.
+An implementation agent was active at the snapshot. It then created a 601-line
+synthetic Playwright specification at
+`apps/web/e2e/integrations-workspace.spec.ts` before being interrupted for this
+handoff. The file is intentionally untracked, has not been run, and has no
+corresponding UI implementation or commit. Preserve it, review it against the
+task brief, run the required production-build RED phase, and continue from
+there. Inspect the shared worktree before assigning or restarting the task.
 
 Target behavior:
 
@@ -469,8 +474,10 @@ the P1 roadmap.
 1. Read `AGENTS.md` and this document.
 2. Run `git status --short --branch`, `git log --oneline -12`, and compare local,
    origin, and production SHAs.
-3. Inspect active/subagent state before modifying Integrations files.
-4. Read the Integrations design, plan, current task report, and diff.
+3. Inspect active/subagent state and the untracked Task 2 Playwright spec before
+   modifying Integrations files.
+4. Read the Integrations design, plan, current task report, and diff; validate
+   the untracked spec and run its required RED phase before UI implementation.
 5. Preserve all existing work and real-data boundaries.
 6. Finish Task 2, review it, and complete the full P0 release gate.
 7. Deploy disabled-first, then activate Calendar, Pixel, events, and event briefs
@@ -502,6 +509,11 @@ active Integrations Task 2 agent, so trust the current worktree and commit
 evidence over the snapshot. Do not reset, clean, stash, rewrite history, switch
 branches, or discard any existing/user changes. Work directly on the current
 main branch as authorized.
+
+At transfer time, apps/web/e2e/integrations-workspace.spec.ts is an untracked
+601-line synthetic Playwright draft. It has not been run, and the UI files have
+not been implemented. Preserve and review it, then run the required
+production-build RED phase before implementing the workspace.
 
 Use Mem0 only with user_id="yev" across all agent scopes, never Codex-only scope,
 when personal context is needed. Preferred command from
