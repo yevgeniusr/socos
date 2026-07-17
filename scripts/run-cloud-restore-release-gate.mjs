@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 
 const CANDIDATE = /^[0-9a-f]{40}$/;
 const SSH_HOST = 'socos-release-gate';
+export const DEFAULT_SSH_TIMEOUT_MS = 3_600_000;
 const RECEIPT_KEYS = [
   'gate',
   'version',
@@ -81,7 +82,7 @@ async function main() {
     return;
   }
   const candidateSha = process.argv[2];
-  const timeoutMs = duration('SOCOS_RELEASE_GATE_SSH_TIMEOUT_MS', 900_000, 10);
+  const timeoutMs = duration('SOCOS_RELEASE_GATE_SSH_TIMEOUT_MS', DEFAULT_SSH_TIMEOUT_MS, 10);
   const graceMs = duration('SOCOS_RELEASE_GATE_TERMINATION_GRACE_MS', 5_000, 10);
   if (timeoutMs === undefined || graceMs === undefined) {
     writeFailure('invalid_configuration', 64);

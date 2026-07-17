@@ -174,11 +174,17 @@ candidate_sha=$(git rev-parse origin/main)
 node scripts/run-cloud-restore-release-gate.mjs "$candidate_sha"
 ```
 
+The exact trusted `origin/main` is currently
+`1b15d1a239fa5fdf992d2ee49deb6e191733ef0d`. The reviewed application-code SHA
+`084b7addb0ccc765aa343c5412ed8f5fe5f6da0b` is its ancestor, not a valid exact
+gate candidate while main is at `1b15d1a`. Gate, deploy, and smoke checks must
+all use the same exact full `origin/main` SHA.
+
 The local wrapper accepts one lowercase 40-character SHA, connects only to the
 `socos-release-gate` SSH config host with `BatchMode=yes`, and sends only that
 SHA on standard input. The remote account must have a forced command pointing
-to `scripts/cloud-restore-release-gate.mjs`; it must expose neither a shell nor
-a public endpoint. The wrapper accepts only the fixed redacted JSON receipt and
+to `/usr/local/sbin/socos-release-gate-launcher`; it must expose neither a shell
+nor a public endpoint. The wrapper accepts only the fixed redacted JSON receipt and
 rejects extra fields, paths, changed SHAs, remote stderr, or malformed output.
 
 The forced command requires root-managed configuration for its trusted Git
@@ -213,10 +219,138 @@ cannot prevent later temp and lock cleanup. PostgreSQL URLs stay in child
 environments, never CLI arguments; schema drift uses Prisma's supported
 `--from-schema-datasource` mode with `DATABASE_URL` in the environment.
 
-Provisioning the forced-command account and key restriction, root-owned
-environment launcher, restricted database role, private-network access, and
-secret rotation remains an operator gate. Repository tests are mocked and do
-not constitute live recovery evidence.
+### Provision the runner
+
+Pin the real host key before first use and create local SSH aliases with host-key
+checking enabled. Never use `StrictHostKeyChecking=no`.
+
+```sshconfig
+Host socos-coolify-root
+  HostName qed.quest
+  User root
+  IdentityFile ~/.ssh/socos-coolify-root
+  IdentitiesOnly yes
+  BatchMode yes
+  RequestTTY no
+  StrictHostKeyChecking yes
+  UserKnownHostsFile ~/.ssh/known_hosts
+
+Host socos-release-gate
+  HostName qed.quest
+  User socos-release-gate
+  IdentityFile ~/.ssh/socos-release-gate
+  IdentitiesOnly yes
+  BatchMode yes
+  RequestTTY no
+  StrictHostKeyChecking yes
+  UserKnownHostsFile ~/.ssh/known_hosts
+```
+
+On the host, `/root/socos` must be a trusted checkout whose `origin` is exactly
+`https://github.com/yevgeniusr/socos.git`, fetched and detached at exact
+`origin/main`. Retrieve both inputs locally without echoing, build the only JSON
+document with `jq`, stream it to the remote root script, then clear both shell
+variables immediately:
+
+```bash
+IFS= read -r authorized_key < "$HOME/.ssh/socos-release-gate.pub"
+coolify_token=$(security find-generic-password -w -a socos -s coolify-cli-qed-token)
+jq -cn --arg authorized_key "$authorized_key" --arg coolify_token "$coolify_token" \
+  '{authorized_key:$authorized_key,coolify_token:$coolify_token}' \
+  | ssh -o BatchMode=yes -o RequestTTY=no -o StrictHostKeyChecking=yes \
+      socos-coolify-root \
+      'cd /root/socos && test "$(git remote get-url origin)" = "https://github.com/yevgeniusr/socos.git" && exec bash scripts/provision-cloud-restore-release-gate.sh'
+unset authorized_key coolify_token
+```
+
+Success is exactly `provision_status=ready` followed by the trusted SHA. Stop on
+any other output.
+
+### Audit the forced command and role boundary
+
+After provisioning and every rotation, prove ownership/modes, the single key,
+locked account, empty supplemental groups, and one-command sudo boundary:
+
+```bash
+sudo passwd -S socos-release-gate
+sudo id socos-release-gate
+sudo stat -c '%U:%G %a %n' \
+  /var/lib/socos-release-gate/.ssh/authorized_keys \
+  /etc/sudoers.d/socos-release-gate /etc/socos-release-gate.env \
+  /usr/local/sbin/socos-release-gate-launcher
+sudo awk 'END { print NR }' /var/lib/socos-release-gate/.ssh/authorized_keys
+sudo visudo -cf /etc/sudoers.d/socos-release-gate
+sudo -l -U socos-release-gate
+ssh -o BatchMode=yes -o RequestTTY=no socos-release-gate id && exit 1 || true
+sftp -o BatchMode=yes socos-release-gate && exit 1 || true
+ssh -o BatchMode=yes -o RequestTTY=force socos-release-gate && exit 1 || true
+ssh -o BatchMode=yes -o ExitOnForwardFailure=yes -L 15432:127.0.0.1:5432 \
+  socos-release-gate && exit 1 || true
+```
+
+Modes must be `600`, `440`, `600`, and `755`; the key count must be one; sudo
+must allow only the launcher; and shell, SFTP, PTY, and forwarding must fail.
+Audit role flags, memberships, and database ACLs without selecting passwords or
+application rows:
+
+```bash
+sudo docker exec zwkk0scogckskkwss8oo48k4 psql -X --set=ON_ERROR_STOP=1 \
+  --username=postgres --dbname=postgres --tuples-only --no-align <<'SQL'
+SELECT rolname, rolsuper, rolinherit, rolcreatedb, rolcreaterole,
+       rolreplication, rolbypassrls
+FROM pg_roles
+WHERE rolname IN ('socos_release_gate_admin', 'socos_release_gate_restore')
+ORDER BY rolname;
+SELECT member_role.rolname, granted.rolname
+FROM pg_auth_members membership
+JOIN pg_roles granted ON granted.oid = membership.roleid
+JOIN pg_roles member_role ON member_role.oid = membership.member
+WHERE member_role.rolname IN ('socos_release_gate_admin', 'socos_release_gate_restore')
+ORDER BY member_role.rolname, granted.rolname;
+SELECT datname, datacl FROM pg_database
+WHERE datname IN ('postgres', 'socos') ORDER BY datname;
+SQL
+```
+
+Both roles must be non-superuser, `NOINHERIT`, non-createrole,
+non-replication, and non-bypass-RLS. Only `socos_release_gate_admin` may have
+`CREATEDB`, and its only membership is `socos_release_gate_restore`. Restore
+must have no memberships. Production connect remains explicit for `postgres`
+and `socos_app` and denied to both gate roles.
+
+### Token and role rotation
+
+Create the replacement Coolify token first and update the local Keychain item;
+for SSH rotation, use the replacement Ed25519 public key. Prove no gate is
+running, rerun the exact provisioning command, repeat all audits, and complete
+one fixed-receipt gate. The rerun replaces the only authorized key and
+environment file and rotates both generated role passwords. Revoke the old
+token and remove the old private key only after the new path succeeds. Never
+edit the environment, authorized key, or role passwords by hand.
+
+### Stale-lock recovery
+
+A gate lock is a directory, not proof that a process is dead. Diagnose from the
+host and stop if any launcher, gate container, or updater lock is live:
+
+```bash
+sudo pgrep -af 'socos-release-gate-launcher|cloud-restore-release-gate.mjs' || true
+sudo docker ps --filter ancestor=socos-release-gate-runtime:node22-pnpm10.10.0-v1 \
+  --format '{{.ID}} {{.Status}} {{.Names}}'
+sudo flock -n /var/lock/socos-release-gate/updater.lock -c true
+sudo test -d /var/lock/socos-release-gate/gate.lock
+```
+
+Only after `pgrep` and `docker ps` return no live launcher/gate and the updater
+`flock` succeeds may root remove the empty stale directory:
+
+```bash
+sudo rmdir /var/lock/socos-release-gate/gate.lock
+```
+
+If `rmdir` reports nonempty state, stop; never use recursive removal. Repository
+tests use command shims and do not constitute live recovery evidence. Do not
+deploy migration 12 until the live fixed receipt succeeds.
 
 ## Deleted Encrypted Data Recovery Window
 
