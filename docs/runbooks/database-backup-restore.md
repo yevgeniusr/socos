@@ -18,11 +18,12 @@ The Socos PostgreSQL resource has an enabled Coolify backup schedule:
 - Backup configuration: `b85nxfljaz0xpo9xqa57lfr4`
 
 Before a schema deployment, use the configured Coolify context to trigger a new
-execution and wait for that exact execution's `status=success`. Do not use
-`--show-sensitive` or print the database resource response. The CLI cannot
-decode the current execution response because Coolify returns `size` as a
-string. Use the authenticated raw API, immediately project only UUID, status,
-and timestamps, and bind the trigger to exactly one new UUID:
+execution and wait for that exact execution's `status=success` with a valid
+positive size. Do not use `--show-sensitive` or print the database resource
+response. The CLI cannot decode the current execution response because Coolify
+returns `size` as a string. Use the authenticated raw API, immediately project
+only UUID, status, size, and timestamps into local in-memory objects, and bind
+the trigger to exactly one new UUID:
 
 ```bash
 database_uuid=zwkk0scogckskkwss8oo48k4
@@ -40,7 +41,7 @@ backup_executions() {
     "$COOLIFY_BASE_URL/api/v1/databases/$database_uuid/backups/$backup_uuid/executions" |
     jq -ec '
       if (.executions | type) == "array" then
-        [.executions[] | {uuid, status, created_at, updated_at}]
+        [.executions[] | {uuid, status, size, created_at, updated_at}]
       else
         error("unexpected backup execution response")
       end
@@ -71,10 +72,22 @@ for _ in $(seq 1 120); do
   new_count=$(printf '%s\n' "$new_uuid" | sed '/^$/d' | wc -l | tr -d ' ')
   [ "$new_count" -le 1 ] || { echo "Ambiguous backup executions." >&2; exit 1; }
   if [ "$new_count" -eq 1 ]; then
-    status=$(jq -er --arg uuid "$new_uuid" \
-      '.[] | select(.uuid == $uuid) | .status' <<<"$executions")
+    execution=$(jq -ec --arg uuid "$new_uuid" \
+      '.[] | select(.uuid == $uuid)' <<<"$executions")
+    status=$(jq -er '.status' <<<"$execution")
     case "$status" in
-      success) printf 'backup_execution_uuid=%s backup_status=success\n' "$new_uuid"; break ;;
+      success)
+        jq -e '
+          .size |
+          if type == "string" then test("^[1-9][0-9]*$")
+          elif type == "number" then . > 0 and . <= 9007199254740991 and . == floor
+          else false
+          end
+        ' <<<"$execution" >/dev/null ||
+          { echo "Backup execution has invalid size." >&2; exit 1; }
+        printf 'backup_execution_uuid=%s backup_status=success\n' "$new_uuid"
+        break
+        ;;
       failed|cancelled) printf 'backup_status=%s\n' "$status" >&2; exit 1 ;;
     esac
   fi
@@ -83,9 +96,11 @@ done
 [ "${status:-}" = success ] || { echo "Backup polling timed out." >&2; exit 1; }
 ```
 
-The helper never emits the token, `size`, paths, filenames, or the full API
-response. Any unexpected response shape, multiple new UUIDs, terminal failure,
-or timeout stops the deployment.
+The helper retains `size` only in the local projected execution objects and
+never emits it, the token, paths, filenames, or the full API response. A
+successful execution must have a canonical positive decimal string size or a
+positive safe-integer numeric size. Any malformed size or response shape,
+multiple new UUIDs, terminal failure, or timeout stops the deployment.
 
 ## Independent Recovery Proof
 

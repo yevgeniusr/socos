@@ -163,6 +163,21 @@ The resulting product direction is:
   37/37; syntax, executable mode, diff checks, and the security scan pass. No
   production feature value was changed by this tooling work.
 
+### Owner Access Recovery
+
+- A fresh backup execution `z7fzdte9nlv0b5v06bepzon8` succeeded before the
+  credential change.
+- An independent reviewer approved a guarded rotation procedure.
+- A random temporary password stayed only in macOS Keychain. A cost-10 bcrypt
+  hash was applied in an explicit transaction that required the exact owner and
+  exactly 106 non-demo contacts, locked and updated exactly one user row, and
+  returned only `rotation_result=1`.
+- HTTPS verification returned `200` for login and an authenticated route before
+  and after promotion to the primary `socos-production-login` Keychain item.
+- The temporary Keychain item was deleted and the clipboard cleared.
+- Existing stateless JWTs were not revoked by password rotation; they expire on
+  their normal schedule.
+
 ### Personal CRM
 
 - `/dashboard/contacts`: search, filters, pagination, add/edit, dates,
@@ -209,6 +224,17 @@ The resulting product direction is:
 - Independent CRM and restore-gate reviews returned `APPROVE` after all
   Important findings were corrected. The exact live gate and deployment are
   recorded below; validation used only fixed receipts and aggregate evidence.
+
+### Release Baseline: Completed
+
+- The restricted `socos-release-gate` account, forced launcher, trusted mirror,
+  rotating isolated PostgreSQL roles, private work/lock paths, and exact cleanup
+  proofs are live. Preserve this boundary and rerun provisioning after any
+  interrupted credential rotation.
+- Migration 12 and the reviewed P1 source are deployed at exact gated SHA
+  `5f333b532c57f524d3154be744579b320794d5fb`.
+- Every later schema candidate still requires its own exact-SHA live receipt,
+  exact deployment, and aggregate smoke; the current receipt is not reusable.
 
 ### Agent And MCP Surface
 
@@ -446,21 +472,6 @@ for the exact SHA above; later schema candidates require a new receipt.
   has been created or copied into Coolify yet.
 - The real Google account is not connected and no Calendar rows are claimed.
 
-### Owner Access Recovery
-
-- A fresh backup execution `z7fzdte9nlv0b5v06bepzon8` succeeded before the
-  credential change.
-- An independent reviewer approved a guarded rotation procedure.
-- A random temporary password stayed only in macOS Keychain. A cost-10 bcrypt
-  hash was applied in an explicit transaction that required the exact owner and
-  exactly 106 non-demo contacts, locked and updated exactly one user row, and
-  returned only `rotation_result=1`.
-- HTTPS verification returned `200` for login and an authenticated route before
-  and after promotion to the primary `socos-production-login` Keychain item.
-- The temporary Keychain item was deleted and the clipboard cleared.
-- Existing stateless JWTs were not revoked by password rotation; they expire on
-  their normal schedule.
-
 ### Documentation
 
 - This document is the current transfer artifact.
@@ -550,17 +561,6 @@ stage-local smoke, and restore the prior flag plus redeploy on failure.
    controlled unedited `socos ...` Discord reply. Verify one feedback or exact
    evidence CRM mutation occurred exactly once. Replay the exact immutable plan
    or tool input and verify no second mutation. Do not test outbound execution.
-
-### Release Baseline: Completed
-
-- The restricted `socos-release-gate` account, forced launcher, trusted mirror,
-  rotating isolated PostgreSQL roles, private work/lock paths, and exact cleanup
-  proofs are live. Preserve this boundary and rerun provisioning after any
-  interrupted credential rotation.
-- Migration 12 and the reviewed P1 source are deployed at exact gated SHA
-  `5f333b532c57f524d3154be744579b320794d5fb`.
-- Every later schema candidate still requires its own exact-SHA live receipt,
-  exact deployment, and aggregate smoke; the current receipt is not reusable.
 
 ### P1: Relationship Memory And Social Planning
 

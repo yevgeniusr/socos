@@ -239,6 +239,37 @@ test('post-migration recovery example uses required and configured optional libp
   );
 });
 
+test('scheduled backup runbook requires a canonical positive execution size without printing it', () => {
+  const runbook = readFileSync(resolve(root, 'docs/runbooks/database-backup-restore.md'), 'utf8');
+  const scheduledBackup = runbook
+    .split('## Scheduled Backup')[1]
+    .split('\n## ')[0];
+  const successBranch = scheduledBackup.match(/success\)([\s\S]*?)break/);
+
+  assert.match(scheduledBackup, /\{uuid, status, size, created_at, updated_at\}/);
+  assert.ok(successBranch);
+  assert.match(successBranch[1], /type == "string"[\s\S]*?test\("\^\[1-9\]\[0-9\]\*\$"\)/);
+  assert.match(successBranch[1], /type == "number"/);
+  assert.match(successBranch[1], /> 0/);
+  assert.match(successBranch[1], /<= 9007199254740991/);
+  assert.match(successBranch[1], /== floor/);
+  assert.doesNotMatch(successBranch[1], /printf[^\n]*size/);
+});
+
+test('handoff keeps completed owner recovery and release baseline out of active work', () => {
+  const handoff = readFileSync(resolve(root, 'docs/ai-handoff-2026-07-17.md'), 'utf8');
+  const done = handoff.split('## Done And Deployed')[1].split('\n## ')[0];
+  const inProgress = handoff.split('## In Progress')[1].split('\n## ')[0];
+  const remaining = handoff.split('## Remaining Work')[1].split('\n## ')[0];
+
+  assert.match(done, /^### Owner Access Recovery$/m);
+  assert.match(done, /^### Release Baseline: Completed$/m);
+  assert.doesNotMatch(inProgress, /^### Owner Access Recovery$/m);
+  assert.doesNotMatch(remaining, /^### Release Baseline: Completed$/m);
+  assert.equal(handoff.match(/^### Owner Access Recovery$/gm)?.length, 1);
+  assert.equal(handoff.match(/^### Release Baseline: Completed$/gm)?.length, 1);
+});
+
 test('restore verification always drops its disposable database', () => {
   const dir = mkdtempSync(join(tmpdir(), 'socos-restore-test-'));
   const bin = join(dir, 'bin');

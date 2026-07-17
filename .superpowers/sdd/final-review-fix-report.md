@@ -1,73 +1,57 @@
-# Daily Cockpit Final Review Fix Report
-
-Date: 2026-07-17
-Base HEAD: `3ec3193`
-
-## Finding
-
-`QuestCompletionDialog.completeQuest` resolved the completion entry in
-`IntentRegistry` before `buildQuestReceipt` validated the successful response.
-A malformed or mismatched committed response therefore retired the stable
-idempotency key even though the UI rejected the response. Retrying generated a
-new key and could not request replay of the durable result under the original
-intent.
+# Final Review Fix Report
 
 ## Scope
 
-- Added a synthetic browser regression for a durably committed quest completion
-  whose first response has a mismatched `questId`.
-- The regression proves the first response produces a visible validation error,
-  no receipt, and no awarded-XP copy.
-- The retry reuses the exact same nonempty `Idempotency-Key` and exact completion
-  body, while the already-created interaction evidence is not posted again.
-- The durable valid replay produces exactly one focused receipt heading and one
-  `+20 XP awarded` value.
-- Moved registry resolution after successful receipt construction and validation.
-
-No API, wire-contract, evidence, XP, approval, owner-scoping, schema, dependency,
-or deployment changes were made.
+- Updated only the scheduled-backup documentation, handoff structure, and their
+  focused documentation assertions.
+- Did not call Coolify, contact production, or mutate any remote state.
 
 ## RED Evidence
 
-Command, run before the production edit:
+Command:
 
-```bash
-E2E_BASE_URL=http://127.0.0.1:3210 \
-E2E_ALLOWED_HOSTS=127.0.0.1 \
-pnpm --filter @socos/web exec playwright test \
-  e2e/daily-cockpit.spec.ts \
-  --grep "retries a mismatched committed quest response"
+```text
+node --test --test-name-pattern='scheduled backup runbook|handoff keeps completed' scripts/database-ops.test.mjs
 ```
 
-Result: exit 1, 1 failed. The test reached the final stable-key assertion and
-reported different UUIDs for the first and retry requests. This was the expected
-failure: the successful-but-mismatched response had caused the registry entry to
-be resolved before semantic validation.
+Expected result: exit 1, 0 passed, 2 failed.
 
-## Implementation
-
-`completeQuest` now calls `buildQuestReceipt` immediately after `apiJson` returns.
-Only a validated receipt permits `IntentRegistry.resolve`; validation failures
-leave the existing intent and key available for retry. The validated receipt is
-then returned unchanged.
+- The scheduled-backup assertion failed because the documented projection was
+  `{uuid, status, created_at, updated_at}` and had no canonical size guard.
+- The handoff assertion failed because `Owner Access Recovery` and
+  `Release Baseline: Completed` were absent from `Done And Deployed`.
 
 ## GREEN Evidence
 
-- Focused Playwright command above: exit 0, 1/1 passed in 3.1 seconds.
-- `pnpm --filter @socos/web test`: exit 0, 8 files and 50/50 tests passed.
-- `pnpm --filter @socos/web type:check`: exit 0.
-- `ESLINT_USE_FLAT_CONFIG=false pnpm --filter @socos/web exec eslint src/app/dashboard/today/_components/quest-completion-dialog.tsx e2e/daily-cockpit.spec.ts`: exit 0 with only ESLint's configuration deprecation notice.
-- `git diff --check`: exit 0 before report creation and rerun as the final pre-commit gate.
+The same focused command passed after the documentation edits: exit 0, 2/2.
 
-## Files
+Required suite:
 
-- `.superpowers/sdd/final-review-fix-report.md`
-- `apps/web/e2e/daily-cockpit.spec.ts`
-- `apps/web/src/app/dashboard/today/_components/quest-completion-dialog.tsx`
+```text
+node --test scripts/database-ops.test.mjs scripts/coolify-activation.test.mjs scripts/run-coolify-activation.test.mjs scripts/coolify-ops.test.mjs
+```
 
-## Concerns
+Result: exit 0, 79/79 passed.
 
-- No functional blocker remains.
-- ESLint emits its existing eslintrc deprecation notice; there are no lint errors.
-- No ignored `.betabots` artifact was read, changed, or staged.
-- No push or deployment was performed.
+Additional verification:
+
+- Documented size predicate matrix: 4 canonical values accepted and 14 invalid
+  values rejected, including missing, zero, negative, fractional, unsafe
+  numeric, leading-zero, whitespace, exponent-string, boolean, null, array, and
+  object shapes.
+- Scheduled-backup Bash fence: `bash -n` passed.
+- `node --check scripts/database-ops.test.mjs`: passed.
+- `node scripts/security-regression.mjs`: passed, 594 tracked files checked.
+- Markdown fence counts: balanced.
+- Stale handoff heading checks: passed; each moved heading occurs once and is
+  absent from its former active-work section.
+- `git diff --check`: passed.
+
+## Result
+
+The manual scheduled-backup example keeps `size` only in local projected
+execution data, accepts success only with a canonical positive decimal string
+or positive safe-integer numeric size, and emits only its fixed redacted
+receipt. The official PATCH trigger and GET executions flow remain unchanged.
+Completed owner recovery and release baseline facts now sit under
+`Done And Deployed`; in-progress and remaining user-action gates are unchanged.
