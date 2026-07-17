@@ -199,10 +199,12 @@ head, not merely be an ancestor. The updater and forced-command account must
 not allow the caller to change the remote or refs.
 
 Set `SOCOS_RELEASE_GATE_CLUSTER_ID` to the PostgreSQL system identifier from
-`pg_control_system()`. Production, administration, and restore URLs must use
-three distinct roles on that exact cluster. The gate verifies the production
-role has no write/schema/database-create capability, verifies the restore role
-has no elevated role flags, inherited memberships, maintenance-database write
+`pg_control_system()`. Production read, administration, and restore URLs must
+use three distinct rotating gate roles on that exact cluster. The production
+URL uses `socos_release_gate_read`, never the application runtime credential.
+The gate verifies the read role has no write/schema/database-create capability,
+verifies the restore role has no elevated role flags, inherited memberships,
+maintenance-database write
 capabilities, or production access, rejects reuse of the administration
 credential, and uses the restricted role only for the randomly named
 disposable database.
@@ -399,26 +401,32 @@ sudo docker exec zwkk0scogckskkwss8oo48k4 psql -X --set=ON_ERROR_STOP=1 \
 SELECT rolname, rolsuper, rolinherit, rolcreatedb, rolcreaterole,
        rolreplication, rolbypassrls
 FROM pg_roles
-WHERE rolname IN ('socos_release_gate_admin', 'socos_release_gate_restore')
+WHERE rolname IN ('socos_release_gate_read', 'socos_release_gate_admin', 'socos_release_gate_restore')
 ORDER BY rolname;
 SELECT member_role.rolname, granted.rolname
 FROM pg_auth_members membership
 JOIN pg_roles granted ON granted.oid = membership.roleid
 JOIN pg_roles member_role ON member_role.oid = membership.member
-WHERE member_role.rolname IN ('socos_release_gate_admin', 'socos_release_gate_restore')
+WHERE member_role.rolname IN ('socos_release_gate_read', 'socos_release_gate_admin', 'socos_release_gate_restore')
 ORDER BY member_role.rolname, granted.rolname;
 SELECT datname, datacl FROM pg_database
 WHERE datname IN ('postgres', 'socos') ORDER BY datname;
 SQL
 ```
 
-Both roles must be non-superuser, `NOINHERIT`, non-createrole,
+All three gate roles must be non-superuser, `NOINHERIT`, non-createrole,
 non-replication, and non-bypass-RLS. Only `socos_release_gate_admin` may have
-`CREATEDB`, and its only membership is `socos_release_gate_restore`. Restore
-must have no memberships. Production connect remains explicit for `postgres`
-and `socos_app` and denied to both gate roles. `PUBLIC` has neither `TEMPORARY`
-on the maintenance database nor `CREATE` on its public schema, so restore cannot
-write maintenance temp tables.
+`CREATEDB`, and its only membership is `socos_release_gate_restore`. Read and
+restore must have no memberships. The read role has only production `CONNECT`,
+public-schema `USAGE`, and `SELECT` on all public tables and sequences; it has
+no maintenance connection. The application role remains unchanged. `PUBLIC`
+has neither `TEMPORARY` nor `CONNECT` on the maintenance database and lacks
+`CREATE` on its public schema, so restore cannot write maintenance temp tables.
+The maintenance `CONNECT` revoke is intentionally cluster-wide: PostgreSQL
+privileges are additive, so revoking it only from the read role cannot override
+the default `PUBLIC` grant. Provisioning explicitly regrants maintenance access
+to admin and restore; the `postgres` owner retains access, while the application
+continues to use only `socos`.
 
 The immutable runtime tag is
 `socos-release-gate-runtime:node22-pnpm10.10.0-pg16-v2`. Provisioning verifies
@@ -436,9 +444,9 @@ Create the replacement Coolify token first and update the local Keychain item;
 for SSH rotation, use the replacement Ed25519 public key. Prove no gate is
 running, rerun the exact provisioning command, repeat all audits, and complete
 one fixed-receipt gate. The rerun replaces the only authorized key and
-environment file and rotates both generated role passwords. Revoke the old
-token and remove the old private key only after the new path succeeds. Never
-edit the environment, authorized key, or role passwords by hand.
+environment file and rotates all three generated gate-role passwords. Revoke
+the old token and remove the old private key only after the new path succeeds.
+Never edit the environment, authorized key, or role passwords by hand.
 
 ### Stale-lock recovery
 

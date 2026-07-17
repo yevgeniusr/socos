@@ -33,6 +33,7 @@ function fixture() {
   mkdirSync(root);
   mkdirSync(bin);
   mkdirSync(state);
+  writeFileSync(join(state, 'production-role-sql'), '');
 
   execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-C', 'synthetic@test', '-f', join(dir, 'key')]);
   const authorizedKey = readFileSync(join(dir, 'key.pub'), 'utf8').trim();
@@ -87,7 +88,11 @@ case "$name" in
     elif [[ " $* " == *' exec '* && " $* " == *'pg_control_system'* ]]; then
       printf '%s\\n' '7493810472398012345'
     elif [[ " $* " == *' exec '* && " $* " == *' psql '* ]]; then
-      cat >> "$SHIM_STATE/role-sql"
+      if [[ " $* " == *' --dbname=socos '* ]]; then
+        cat >> "$SHIM_STATE/production-role-sql"
+      else
+        cat >> "$SHIM_STATE/role-sql"
+      fi
     elif [[ " $* " == *' run '* && " $* " == *' scripts/cloud-restore-release-gate.mjs '* ]]; then
       printf '%s\\n' '{"gate":"socos-cloud-restore-release","version":1,"status":"passed"}'
     fi
@@ -193,16 +198,45 @@ test('provisioner renders the locked account, exact resources, database boundary
     'SOCOS_RELEASE_GATE_OPERATION_TIMEOUT_MS=1800000',
     'SOCOS_RELEASE_GATE_CLEANUP_TIMEOUT_MS=120000',
   ]) assert.match(envFile, new RegExp(`^${expected}$`, 'm'));
+  assert.match(
+    envFile,
+    /^SOCOS_RELEASE_GATE_DATABASE_URL=postgresql:\/\/socos_release_gate_read:[0-9a-f]{64}@zwkk0scogckskkwss8oo48k4:5432\/socos$/m,
+  );
+  assert.doesNotMatch(envFile, /synthetic-production-password|postgresql:\/\/socos_app:/);
+  const gatePasswords = [...envFile.matchAll(/postgresql:\/\/socos_release_gate_(?:read|admin|restore):([0-9a-f]{64})@/g)]
+    .map((match) => match[1]);
+  assert.equal(gatePasswords.length, 3);
+  assert.equal(new Set(gatePasswords).size, 3);
   assert.equal(statSync(join(f.root, 'etc/socos-release-gate.env')).mode & 0o777, 0o600);
 
   const sql = readFileSync(join(f.state, 'role-sql'), 'utf8');
+  const productionSql = readFileSync(join(f.state, 'production-role-sql'), 'utf8');
+  assert.match(sql, /CREATE ROLE socos_release_gate_read LOGIN/);
   assert.match(sql, /ALTER ROLE socos_release_gate_admin .* CREATEDB /);
   assert.match(sql, /ALTER ROLE socos_release_gate_restore .* NOINHERIT NOCREATEDB /);
+  assert.match(sql, /ALTER ROLE socos_release_gate_read .* NOSUPERUSER NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS/);
+  assert.match(sql, /member_role\.rolname IN \([^)]*'socos_release_gate_read'[^)]*\)/);
+  assert.match(sql, /REVOKE %I FROM socos_release_gate_read/);
   assert.match(sql, /REVOKE CONNECT ON DATABASE socos FROM PUBLIC/);
   assert.match(sql, /GRANT CONNECT ON DATABASE socos TO postgres, socos_app/);
   assert.match(sql, /REVOKE CONNECT ON DATABASE socos FROM socos_release_gate_admin, socos_release_gate_restore/);
+  assert.match(sql, /REVOKE ALL PRIVILEGES ON DATABASE postgres FROM socos_release_gate_read/);
+  assert.match(sql, /REVOKE CONNECT ON DATABASE postgres FROM PUBLIC/);
+  assert.doesNotMatch(sql, /GRANT CONNECT ON DATABASE postgres TO[^;]*socos_release_gate_read/);
   assert.match(sql, /REVOKE CREATE ON SCHEMA public FROM PUBLIC/);
   assert.match(sql, /REVOKE TEMPORARY ON DATABASE postgres FROM PUBLIC/);
+  assert.match(productionSql, /REVOKE ALL PRIVILEGES ON DATABASE socos FROM socos_release_gate_read/);
+  assert.match(productionSql, /REVOKE CREATE ON DATABASE socos FROM PUBLIC/);
+  assert.match(productionSql, /GRANT CONNECT ON DATABASE socos TO socos_release_gate_read/);
+  assert.match(productionSql, /REVOKE ALL PRIVILEGES ON SCHEMA public FROM socos_release_gate_read/);
+  assert.match(productionSql, /REVOKE CREATE ON SCHEMA public FROM PUBLIC/);
+  assert.match(productionSql, /GRANT USAGE ON SCHEMA public TO socos_release_gate_read/);
+  assert.match(productionSql, /REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM socos_release_gate_read/);
+  assert.match(productionSql, /REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON ALL TABLES IN SCHEMA public FROM PUBLIC/);
+  assert.match(productionSql, /GRANT SELECT ON ALL TABLES IN SCHEMA public TO socos_release_gate_read/);
+  assert.match(productionSql, /REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM socos_release_gate_read/);
+  assert.match(productionSql, /GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO socos_release_gate_read/);
+  assert.doesNotMatch(`${sql}\n${productionSql}`, /ALTER ROLE socos_app|ALTER FUNCTION|REVOKE [^;]+ FROM socos_app/);
 
   const calls = readFileSync(f.log, 'utf8');
   assert.match(calls, /usermod .*<--shell> <\/bin\/sh>/);
@@ -261,6 +295,7 @@ test('package wiring and runbook cover secure provisioning, audits, rotation, st
     /sudo -l -U socos-release-gate/,
     /socos_release_gate_admin/,
     /socos_release_gate_restore/,
+    /socos_release_gate_read/,
     /pg_auth_members/,
     /token and role rotation/i,
     /rmdir \/var\/lock\/socos-release-gate\/gate\.lock/,
@@ -343,7 +378,11 @@ wait "$descendant"
 test('provisioner is idempotent and its launcher rejects command/input abuse before exact-ref execution', () => {
   const f = fixture();
   assert.equal(run(f.input, f.env).status, 0);
+  const firstEnvironment = readFileSync(join(f.root, 'etc/socos-release-gate.env'), 'utf8');
   assert.equal(run(f.input, f.env).status, 0);
+  const secondEnvironment = readFileSync(join(f.root, 'etc/socos-release-gate.env'), 'utf8');
+  const readUrl = (value) => value.match(/^SOCOS_RELEASE_GATE_DATABASE_URL=(.+)$/m)?.[1];
+  assert.notEqual(readUrl(firstEnvironment), readUrl(secondEnvironment));
   const keyFile = join(f.root, 'var/lib/socos-release-gate/.ssh/authorized_keys');
   assert.equal(readFileSync(keyFile, 'utf8').trim().split('\n').length, 1);
   const provisionCalls = readFileSync(f.log, 'utf8');

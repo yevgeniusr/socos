@@ -544,7 +544,7 @@ stage-local smoke, and restore the prior flag plus redeploy on failure.
 
 - Provision the restricted `socos-release-gate` forced-SSH account, root-owned
   environment launcher, trusted-mirror updater, private work/lock directories,
-  exact PostgreSQL system identifier, three distinct database roles/ACLs,
+  exact PostgreSQL system identifier, dedicated rotating read/admin/restore roles/ACLs,
   private networking, and secret rotation described in the restore runbook.
 - Run the first live cloud-only restore gate for the exact reviewed candidate.
   Mocked tests and a successful backup are not restore proof.

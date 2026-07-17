@@ -163,24 +163,30 @@ api_matches=$(docker ps --filter status=running --format '{{.Names}}' 2>/dev/nul
 api_count=$(printf '%s\n' "$api_matches" | awk 'NF { count += 1 } END { print count + 0 }')
 [[ "$api_count" -eq 1 && "$api_matches" =~ ^[A-Za-z0-9_.-]+$ ]] || fail
 api_container=$api_matches
-production_url=$(docker exec "$api_container" /bin/sh -c 'printf %s "$DATABASE_URL"' 2>/dev/null) || fail
-[[ -n "$production_url" && "$production_url" != *$'\n'* && "$production_url" != *$'\r'* ]] || fail
-production_url=${production_url%\?schema=public}
-[[ "$production_url" == postgresql://socos_app:*@*/socos || "$production_url" == postgres://socos_app:*@*/socos ]] || fail
-database_endpoint=${production_url#*@}
+application_url=$(docker exec "$api_container" /bin/sh -c 'printf %s "$DATABASE_URL"' 2>/dev/null) || fail
+[[ -n "$application_url" && "$application_url" != *$'\n'* && "$application_url" != *$'\r'* ]] || fail
+application_url=${application_url%\?schema=public}
+[[ "$application_url" == postgresql://socos_app:*@*/socos || "$application_url" == postgres://socos_app:*@*/socos ]] || fail
+database_endpoint=${application_url#*@}
 database_endpoint=${database_endpoint%/socos}
 [[ "$database_endpoint" =~ ^[A-Za-z0-9_.-]+(:[0-9]+)?$ ]] || fail
+unset application_url
 
 cluster_id=$(docker exec "$DATABASE_CONTAINER" psql -X --set=ON_ERROR_STOP=1 --tuples-only --no-align \
   --username=postgres --command='SELECT system_identifier::text FROM pg_control_system();' 2>/dev/null | tr -d '[:space:]') || fail
 [[ "$cluster_id" =~ ^[0-9]{10,24}$ ]] || fail
+read_password=$(openssl rand -hex 32 2>/dev/null) || fail
 admin_password=$(openssl rand -hex 32 2>/dev/null) || fail
 restore_password=$(openssl rand -hex 32 2>/dev/null) || fail
-[[ "$admin_password" =~ ^[0-9a-f]{64}$ && "$restore_password" =~ ^[0-9a-f]{64}$ && "$admin_password" != "$restore_password" ]] || fail
+[[ "$read_password" =~ ^[0-9a-f]{64}$ && "$admin_password" =~ ^[0-9a-f]{64}$ && "$restore_password" =~ ^[0-9a-f]{64}$ ]] || fail
+[[ "$read_password" != "$admin_password" && "$read_password" != "$restore_password" && "$admin_password" != "$restore_password" ]] || fail
 
 if ! docker exec -i "$DATABASE_CONTAINER" psql -X --set=ON_ERROR_STOP=1 --username=postgres --dbname=postgres >/dev/null 2>&1 <<SQL
 DO \$roles\$
 BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'socos_release_gate_read') THEN
+    CREATE ROLE socos_release_gate_read LOGIN;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'socos_release_gate_admin') THEN
     CREATE ROLE socos_release_gate_admin LOGIN;
   END IF;
@@ -198,14 +204,16 @@ BEGIN
     FROM pg_auth_members membership
     JOIN pg_roles granted ON granted.oid = membership.roleid
     JOIN pg_roles member_role ON member_role.oid = membership.member
-    WHERE member_role.rolname IN ('socos_release_gate_admin', 'socos_release_gate_restore')
+    WHERE member_role.rolname IN ('socos_release_gate_read', 'socos_release_gate_admin', 'socos_release_gate_restore')
   LOOP
+    EXECUTE format('REVOKE %I FROM socos_release_gate_read', inherited_role.rolname);
     EXECUTE format('REVOKE %I FROM socos_release_gate_admin', inherited_role.rolname);
     EXECUTE format('REVOKE %I FROM socos_release_gate_restore', inherited_role.rolname);
   END LOOP;
 END
 \$memberships\$;
 
+ALTER ROLE socos_release_gate_read WITH LOGIN PASSWORD '$read_password' NOSUPERUSER NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
 ALTER ROLE socos_release_gate_admin WITH LOGIN PASSWORD '$admin_password' NOSUPERUSER NOINHERIT CREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
 ALTER ROLE socos_release_gate_restore WITH LOGIN PASSWORD '$restore_password' NOSUPERUSER NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
 GRANT socos_release_gate_restore TO socos_release_gate_admin;
@@ -213,7 +221,9 @@ GRANT socos_release_gate_restore TO socos_release_gate_admin;
 REVOKE CONNECT ON DATABASE socos FROM PUBLIC;
 GRANT CONNECT ON DATABASE socos TO postgres, socos_app;
 REVOKE CONNECT ON DATABASE socos FROM socos_release_gate_admin, socos_release_gate_restore;
+REVOKE ALL PRIVILEGES ON DATABASE postgres FROM socos_release_gate_read;
 REVOKE ALL PRIVILEGES ON DATABASE postgres FROM socos_release_gate_admin, socos_release_gate_restore;
+REVOKE CONNECT ON DATABASE postgres FROM PUBLIC;
 GRANT CONNECT ON DATABASE postgres TO socos_release_gate_admin, socos_release_gate_restore;
 REVOKE TEMPORARY ON DATABASE postgres FROM PUBLIC;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
@@ -226,12 +236,30 @@ then
   fail
 fi
 
+if ! docker exec -i "$DATABASE_CONTAINER" psql -X --set=ON_ERROR_STOP=1 --username=postgres --dbname=socos >/dev/null 2>&1 <<SQL
+REVOKE CREATE ON DATABASE socos FROM PUBLIC;
+REVOKE ALL PRIVILEGES ON DATABASE socos FROM socos_release_gate_read;
+GRANT CONNECT ON DATABASE socos TO socos_release_gate_read;
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+REVOKE ALL PRIVILEGES ON SCHEMA public FROM socos_release_gate_read;
+GRANT USAGE ON SCHEMA public TO socos_release_gate_read;
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON ALL TABLES IN SCHEMA public FROM PUBLIC;
+REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM socos_release_gate_read;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO socos_release_gate_read;
+REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM socos_release_gate_read;
+GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO socos_release_gate_read;
+REVOKE ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public FROM socos_release_gate_read;
+SQL
+then
+  fail
+fi
+
 env_tmp=$(mktemp "$etc_dir/socos-release-gate.env.XXXXXX")
 cat > "$env_tmp" <<ENV
 SOCOS_RELEASE_GATE_REPOSITORY=/gate/repository
 SOCOS_RELEASE_GATE_WORK_ROOT=/gate/work
 SOCOS_RELEASE_GATE_LOCK_DIR=/gate/locks/gate.lock
-SOCOS_RELEASE_GATE_DATABASE_URL=$production_url
+SOCOS_RELEASE_GATE_DATABASE_URL=postgresql://socos_release_gate_read:$read_password@$database_endpoint/socos
 SOCOS_RELEASE_GATE_ADMIN_DATABASE_URL=postgresql://socos_release_gate_admin:$admin_password@$database_endpoint/postgres
 SOCOS_RELEASE_GATE_RESTORE_DATABASE_URL=postgresql://socos_release_gate_restore:$restore_password@$database_endpoint/postgres
 SOCOS_RELEASE_GATE_CLUSTER_ID=$cluster_id

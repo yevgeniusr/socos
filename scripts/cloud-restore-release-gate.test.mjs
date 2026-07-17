@@ -160,7 +160,7 @@ test('configuration requires a cluster identity and three distinct database role
 test('database boundary proof rejects a privileged restore role', () => {
   const config = {
     clusterId: '7493810472398012345',
-    productionRole: 'prod',
+    productionRole: 'socos_release_gate_read',
     productionDatabase: 'socos',
     adminRole: 'admin',
     adminDatabase: 'postgres',
@@ -168,7 +168,7 @@ test('database boundary proof rejects a privileged restore role', () => {
     restoreBaseDatabase: 'postgres',
   };
   const proof = {
-    production: '7493810472398012345|prod|socos|t\n',
+    production: '7493810472398012345|socos_release_gate_read|socos|t\n',
     administration: '7493810472398012345|admin|postgres|f\n',
     restore: '7493810472398012345|restore|postgres|t|t\n',
     restoreProductionBlocked: true,
