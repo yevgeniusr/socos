@@ -23,13 +23,15 @@ The final Google account grant is a second unavoidable user-confirmed action.
 Pixel location, event discovery, and event briefs remain disabled so activation
 still follows dependency order.
 
-Three P1 source changes are now implemented and independently approved but are
-not deployed: a durable interaction receipt, truthful compact integration
-status/mobile cues, and a cloud-only disposable restore release gate. The
-receipt adds migration 12, so it must not be deployed until the forced-command
-runner is provisioned and produces a live restore receipt for the exact
-candidate SHA. The reviewed source candidate is
-`6db95c49e21465b5cbe35c25527086ac6e08c67b`; production remains on
+P1 source changes and the agent-safety hardening slice are implemented and
+independently reviewed but are not deployed. The candidate now includes a
+durable interaction receipt, truthful compact integration status/mobile cues,
+the cloud-only disposable restore release gate, removal of direct human-JWT CRM
+hard-delete routes, scope-aware MCP discovery/metadata, and first-class
+read-only Codex and Claude plugin packages. The receipt adds migration 12, so
+the candidate must not be deployed until the forced-command runner is
+provisioned and produces a live restore receipt for exact SHA
+`084b7addb0ccc765aa343c5412ed8f5fe5f6da0b`. Production remains on
 `1b25328de683e5b7923d4219d0401a1f93f168b2`. Repository tests are evidence for
 the implementation, not a substitute for that live proof.
 
@@ -45,7 +47,7 @@ Snapshot taken in `/Users/mac/Desktop/projects/personal/socos`.
 | Area | State |
 | --- | --- |
 | Reviewed application SHA | `1b25328de683e5b7923d4219d0401a1f93f168b2` |
-| Reviewed source candidate SHA | `6db95c49e21465b5cbe35c25527086ac6e08c67b` |
+| Reviewed source candidate SHA | `084b7addb0ccc765aa343c5412ed8f5fe5f6da0b` |
 | Pre-activation-tooling baseline SHA | `69e6ac0444a50ae92d811155493fcff559774a86` |
 | Production application SHA | `1b25328de683e5b7923d4219d0401a1f93f168b2` |
 | Current source branch | `main`; application candidate is the SHA above; later documentation-only commits may follow |
@@ -61,7 +63,8 @@ Snapshot taken in `/Users/mac/Desktop/projects/personal/socos`.
 | Event briefs | disabled |
 | Hermes | installed, gateway supervised, cron active |
 | Live Discord reply proof | pending |
-| P1 source hardening | implemented and reviewed; not deployed |
+| P1 source hardening | implemented, independently reviewed, not deployed |
+| Agent/plugin safety | implemented, independently reviewed, not deployed |
 | Cloud restore gate | 20/20 mocked/isolated tests; live runner not provisioned |
 
 This handoff itself may be a later documentation-only commit than the reviewed
@@ -71,14 +74,11 @@ before changing or deploying anything.
 Recommended restart order:
 
 1. Verify the worktree and exact local, remote, and production SHAs.
-2. Fix the direct CRM deletion-policy bypass and MCP scoped-discovery metadata
-   using tests and synthetic data; these do not require personal-data access.
-3. Package read-only Codex and Claude plugins around the authenticated MCP.
-4. Provision and prove the live cloud restore gate before deploying migration
+2. Provision and prove the live cloud restore gate before deploying migration
    12 or adding another migration.
-5. Resume Google, Pixel, events, briefs, and the controlled Discord proof only
+3. Resume Google, Pixel, events, briefs, and the controlled Discord proof only
    at their documented user-action gates.
-6. Build relationship memory and weekly social planning as separate bounded
+4. Build relationship memory and weekly social planning as separate bounded
    slices after the safety and release gates are sound.
 
 ## Product And Safety Contract
@@ -213,6 +213,16 @@ The resulting product direction is:
   behavior.
 - Provider executors are intentionally absent. Approved outbound actions return
   `ACTION_EXECUTION_UNAVAILABLE` instead of pretending to execute.
+- Direct human-JWT DELETE routes for contacts, interactions, and reminders are
+  removed. The underlying service methods remain available for future approved
+  executor work, but no direct REST hard-delete route bypasses approval.
+- MCP `tools/list` is scope-aware for the authenticated principal. Hidden tool
+  calls are rejected as tool-not-found before registry dispatch. Only
+  `socos_execute_approved_action` advertises destructive metadata.
+- The default Hermes scope profile omits `approvals:execute`.
+- Read-only Codex and Claude plugin packages are tracked at
+  `integrations/codex/plugins/socos` and `integrations/claude/socos`, with
+  repo-local marketplace manifests and environment-backed token references.
 
 ### Integrations Workspace
 
@@ -296,6 +306,15 @@ Activation/ops/wrapper tests: 31/31
 Independent activation-tooling review: APPROVE
 Independent interaction/integration review: APPROVE
 Independent cloud restore-gate review: APPROVE
+CRM delete/MCP/plugin safety Jest: 6 suites, 36/36
+Agent plugin packaging: 8/8
+Codex plugin validator: passed
+Claude plugin validator: passed
+Plugin skill quick validation: 2/2
+API typecheck: passed
+API lint: 0 errors; pre-existing warnings only
+Agent/plugin security scanner: 592 tracked files
+Independent safety/plugin review: APPROVE
 ```
 
 Current-source verification also passed API and web typechecks, API and web
@@ -439,12 +458,9 @@ schema-neutral release.
 These are source-audit findings, not claims that the corresponding features are
 already delivered.
 
-- Direct human-JWT DELETE routes for contacts, interactions, and reminders
-  currently bypass the product rule that deletions require explicit approval.
-  Contact deletion cascades relationship history. Interaction deletion also
-  decrements XP before deleting outside one transaction, so a failed delete can
-  leave XP inconsistent. Close this boundary before expanding destructive
-  workflows.
+- Approved deletion executors still do not exist. If one is introduced later,
+  make interaction deletion transactional with any XP adjustment before enabling
+  it.
 - Socos has no durable relationship-fact ledger. Contact bio, first-met data,
   dates, methods, reminders, raw interactions, and import provenance exist, but
   confidence, per-fact provenance, review state, correction lineage,
@@ -465,23 +481,12 @@ already delivered.
   than shipped workflows.
 - The modern web reads streak state but does not call the existing streak
   check-in mutation. Achievements lack a first-class modern view.
-- Codex and Claude currently use manual MCP configuration. First-class tracked
-  plugin packages do not exist. MCP tool discovery is not filtered by principal
-  scope, destructive execution tools advertise non-destructive metadata, and
-  the documented default Hermes profile grants an unnecessary
-  `approvals:execute` scope.
 - Hermes has not yet proven a post-skill-attachment brief followed by one real,
   idempotent Discord reply mutation.
 
 ## Remaining Work
 
 ### P0: Finish Personal Activation
-
-Before activation work, close the direct contact/interaction/reminder DELETE
-bypass or route those operations through the proposal/approval boundary. Make
-interaction deletion transactional if any approved deletion executor is later
-introduced. Add a regression test proving no direct CRM hard-delete route can
-bypass approval.
 
 For every remaining flag stage: take fresh backup evidence, update both
 production and preview copies, deploy the exact reviewed SHA, require health and
@@ -562,10 +567,6 @@ stage-local smoke, and restore the prior flag plus redeploy on failure.
   achievements, and a values-first accountability loop. Do not count dormant
   legacy schema models as delivered product.
 - Improve proactive introduction ranking after enough graph evidence exists.
-- Filter MCP tool discovery by scope, mark destructive execution metadata
-  accurately, remove unnecessary execute scope from the default Hermes profile,
-  and package first-class read-only Codex and Claude plugins around the
-  authenticated MCP surface using environment-backed tokens only.
 - Add provider executors only behind exact payload review, durable outbox,
   replay protection, audit, and explicit approval.
 
@@ -587,7 +588,12 @@ stage-local smoke, and restore the prior flag plus redeploy on failure.
 - `scripts/cloud-restore-release-gate.mjs`: forced cloud restore command.
 - `docs/integrations/hermes-social-loop.md`: Hermes reply loop.
 - `docs/integrations/hermes-mcp.md`: authenticated Hermes MCP client.
+- `docs/integrations/codex-mcp.md`: read-only Codex plugin and MCP setup.
+- `docs/integrations/claude-mcp.md`: read-only Claude plugin and MCP setup.
+- `scripts/validate-agent-plugin-packaging.mjs`: plugin/package validator.
 - `integrations/hermes/skills/socos-social-loop/SKILL.md`: tracked live skill.
+- `integrations/codex/plugins/socos/`: tracked read-only Codex plugin.
+- `integrations/claude/socos/`: tracked read-only Claude Code plugin.
 - `.superpowers/sdd/integrations-task-2-fix-report.md`: UI hardening evidence.
 - `.superpowers/sdd/hermes-social-loop-report.md`: Hermes implementation.
 - `.betabots/runs/20260717-073101-integrations-activation-prep/`: ignored
@@ -619,30 +625,24 @@ Trust current evidence over any stale snapshot. Do not reset, clean, stash,
 rewrite history, switch branches, or discard existing/user changes.
 
 The reviewed application-code candidate is
-6db95c49e21465b5cbe35c25527086ac6e08c67b. Current HEAD may include a later
+084b7addb0ccc765aa343c5412ed8f5fe5f6da0b. Current HEAD may include a later
 documentation-only handoff commit, so verify the diff rather than assuming the
 relationship. The candidate adds migration 12 InteractionReceipt,
-exact/compact receipt UX,
-strict Calendar scope summaries/mobile cues, and the cloud-only disposable
-restore gate. These changes are reviewed but not deployed. Before any schema
-deployment, provision the forced-command runner exactly as documented and run
+exact/compact receipt UX, strict Calendar scope summaries/mobile cues, the
+cloud-only disposable restore gate, removal of direct human-JWT
+contact/interaction/reminder hard-delete routes, scope-aware MCP discovery and
+destructive metadata, a default Hermes profile without approvals:execute, and
+tracked read-only Codex/Claude plugin packages using environment-backed tokens.
+These changes are reviewed but not deployed. Before any schema deployment,
+provision the forced-command runner exactly as documented and run
 `scripts/run-cloud-restore-release-gate.mjs` for the exact trusted origin/main
-SHA. Require its fixed success receipt. Never treat its 20/20 repository tests,
-a Coolify backup, or an older drill as live restore proof. Then deploy that exact
-SHA and verify the new receipt/UI behavior without exposing personal rows.
+SHA. Require its fixed success receipt. Never treat repository tests, a Coolify
+backup, or an older drill as live restore proof. Then deploy that exact SHA and
+verify the new receipt/UI/MCP behavior without exposing personal rows.
 
-Before new product migrations, fix two audited source boundaries with focused
-tests: direct human-JWT contact/interaction/reminder deletion currently bypasses
-the explicit approval rule, and interaction deletion is not atomic with its XP
-decrement. Also make MCP tools/list scope-aware, mark destructive execution
-metadata accurately, and remove the unnecessary approvals:execute scope from
-the default Hermes profile. Do not add a merge/delete executor in this step.
-
-The highest-value unblocked agent slice is to package separate tracked,
-read-only Codex and Claude plugins using environment-backed tokens. The current
-Codex and Claude support is manual MCP configuration, not a first-class plugin.
-Verify scoped tools/list, denied mutations, manifest validation, secret scans,
-and initialize/list/read-only MCP smokes. Never commit a token.
+Do not add a merge/delete executor in the next slice. If an approved deletion
+executor is introduced later, make interaction deletion transactional with any
+XP adjustment before enabling it. Never commit a token.
 
 The reviewed application SHA is
 1b25328de683e5b7923d4219d0401a1f93f168b2. It is deployed and healthy at
