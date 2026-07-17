@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 
 import { apiJson } from "@/lib/api-client";
 import type {
@@ -56,6 +62,8 @@ export default function PixelLocationPanel() {
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<string | null>(null);
+  const receiptRef = useRef<HTMLParagraphElement>(null);
+  const credentialReturnFocusRef = useRef<HTMLElement | null>(null);
 
   const loadPixel = useCallback(async (signal?: AbortSignal) => {
     setState({ status: "loading" });
@@ -83,6 +91,7 @@ export default function PixelLocationPanel() {
 
   async function createDevice(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    credentialReturnFocusRef.current = null;
     setBusy(true);
     setActionError(null);
     try {
@@ -115,9 +124,9 @@ export default function PixelLocationPanel() {
   }
 
   async function rotate(device: LocationDeviceResponse) {
-    setPendingAction(null);
     setBusy(true);
     setActionError(null);
+    setReceipt(null);
     try {
       const response = await apiJson<RotatePixelResponse>(
         `/api/location-devices/${encodeURIComponent(device.id)}/rotate`,
@@ -131,13 +140,14 @@ export default function PixelLocationPanel() {
       );
     } finally {
       setBusy(false);
+      setPendingAction(null);
     }
   }
 
   async function revoke(device: LocationDeviceResponse) {
-    setPendingAction(null);
     setBusy(true);
     setActionError(null);
+    setReceipt(null);
     try {
       await apiJson<void>(
         `/api/location-devices/${encodeURIComponent(device.id)}`,
@@ -153,6 +163,7 @@ export default function PixelLocationPanel() {
       );
     } finally {
       setBusy(false);
+      setPendingAction(null);
     }
   }
 
@@ -261,9 +272,11 @@ export default function PixelLocationPanel() {
                           disabled={busy}
                           aria-label={`Rotate credentials for ${device.name}`}
                           title={`Rotate credentials for ${device.name}`}
-                          onClick={() =>
-                            setPendingAction({ kind: "rotate", device })
-                          }
+                          onClick={(event) => {
+                            credentialReturnFocusRef.current =
+                              event.currentTarget;
+                            setPendingAction({ kind: "rotate", device });
+                          }}
                           className="flex size-11 items-center justify-center border border-outline-variant/60 text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
                         >
                           <span
@@ -372,7 +385,12 @@ export default function PixelLocationPanel() {
         </p>
       ) : null}
       {receipt ? (
-        <p role="status" className="mt-4 text-sm text-secondary">
+        <p
+          ref={receiptRef}
+          role="status"
+          tabIndex={-1}
+          className="mt-4 text-sm text-secondary"
+        >
           {receipt}
         </p>
       ) : null}
@@ -383,6 +401,7 @@ export default function PixelLocationPanel() {
           description="Existing credentials will stop working immediately. The replacement password is shown only once."
           confirmLabel="Rotate credentials"
           busy={busy}
+          restoreFocus={false}
           onCancel={() => setPendingAction(null)}
           onConfirm={() => void rotate(pendingAction.device)}
         />
@@ -393,6 +412,7 @@ export default function PixelLocationPanel() {
           description="Stops new location ingest. Existing location history is not deleted."
           confirmLabel="Revoke device"
           busy={busy}
+          restoreFocusRef={receiptRef}
           onCancel={() => setPendingAction(null)}
           onConfirm={() => void revoke(pendingAction.device)}
         />
@@ -402,6 +422,7 @@ export default function PixelLocationPanel() {
           endpoint={`${window.location.origin}/api/location/owntracks`}
           username={credentials.username}
           password={credentials.password}
+          restoreFocusRef={credentialReturnFocusRef}
           onClose={() => setCredentials(null)}
         />
       ) : null}

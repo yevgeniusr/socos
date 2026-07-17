@@ -1,21 +1,32 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 
 type ConfirmationDialogProps = {
   title: string;
   description: string;
   confirmLabel: string;
   busy?: boolean;
+  restoreFocus?: boolean;
+  restoreFocusRef?: RefObject<HTMLElement | null>;
   onCancel: () => void;
   onConfirm: () => void;
 };
+
+function focusTarget(
+  restoreFocusRef: RefObject<HTMLElement | null> | undefined,
+  fallback: HTMLElement | null
+) {
+  return restoreFocusRef?.current ?? fallback;
+}
 
 export default function ConfirmationDialog({
   title,
   description,
   confirmLabel,
   busy = false,
+  restoreFocus = true,
+  restoreFocusRef,
   onCancel,
   onConfirm,
 }: ConfirmationDialogProps) {
@@ -26,8 +37,16 @@ export default function ConfirmationDialog({
     const previousFocus = document.activeElement as HTMLElement | null;
     cancelRef.current?.focus();
 
-    return () => previousFocus?.focus();
-  }, []);
+    return () => {
+      if (!restoreFocus) return;
+      requestAnimationFrame(() => {
+        const target = focusTarget(restoreFocusRef, previousFocus);
+        if (target?.isConnected && !target.matches(":disabled")) {
+          target.focus();
+        }
+      });
+    };
+  }, [restoreFocus, restoreFocusRef]);
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape" && !busy) {

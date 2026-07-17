@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 
 import { apiJson } from "@/lib/api-client";
 import type {
@@ -45,6 +51,7 @@ export default function EventDiscoveryPanel() {
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<string | null>(null);
+  const receiptRef = useRef<HTMLParagraphElement>(null);
 
   const loadEvents = useCallback(async (signal?: AbortSignal) => {
     setState({ status: "loading" });
@@ -166,9 +173,9 @@ export default function EventDiscoveryPanel() {
     source: EventSourceResponse,
     status: "active" | "disabled"
   ) {
-    setPendingAction(null);
     setBusy(true);
     setActionError(null);
+    setReceipt(null);
     try {
       const updated = await apiJson<EventSourceResponse>(
         `/api/event-sources/${encodeURIComponent(source.id)}`,
@@ -198,13 +205,14 @@ export default function EventDiscoveryPanel() {
       );
     } finally {
       setBusy(false);
+      setPendingAction(null);
     }
   }
 
   async function removeSource(source: EventSourceResponse) {
-    setPendingAction(null);
     setBusy(true);
     setActionError(null);
+    setReceipt(null);
     try {
       await apiJson<void>(
         `/api/event-sources/${encodeURIComponent(source.id)}`,
@@ -226,7 +234,7 @@ export default function EventDiscoveryPanel() {
           : current
       );
       setReceipt(
-        "Event source removed. Previously discovered event context is not deleted."
+        "Event source, its discovered events, and related Daily Brief state were deleted. Unrelated personal data remains."
       );
     } catch (error) {
       setActionError(
@@ -234,6 +242,7 @@ export default function EventDiscoveryPanel() {
       );
     } finally {
       setBusy(false);
+      setPendingAction(null);
     }
   }
 
@@ -538,7 +547,12 @@ export default function EventDiscoveryPanel() {
         </p>
       ) : null}
       {receipt ? (
-        <p role="status" className="mt-4 text-sm text-secondary">
+        <p
+          ref={receiptRef}
+          role="status"
+          tabIndex={-1}
+          className="mt-4 text-sm text-secondary"
+        >
           {receipt}
         </p>
       ) : null}
@@ -549,6 +563,7 @@ export default function EventDiscoveryPanel() {
           description="Stops future polling. Previously discovered event context remains in Socos."
           confirmLabel="Disable source"
           busy={busy}
+          restoreFocusRef={receiptRef}
           onCancel={() => setPendingAction(null)}
           onConfirm={() =>
             void setSourceStatus(pendingAction.source, "disabled")
@@ -558,9 +573,10 @@ export default function EventDiscoveryPanel() {
       {pendingAction?.kind === "remove" ? (
         <ConfirmationDialog
           title="Remove event source"
-          description="Stops future polling and removes this source configuration. Previously discovered event context is not deleted."
+          description="Deletes this source, its discovered events, and related Daily Brief state. Unrelated personal data remains."
           confirmLabel="Remove source"
           busy={busy}
+          restoreFocusRef={receiptRef}
           onCancel={() => setPendingAction(null)}
           onConfirm={() => void removeSource(pendingAction.source)}
         />

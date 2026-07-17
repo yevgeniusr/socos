@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { apiJson } from "@/lib/api-client";
 import type {
@@ -30,8 +30,15 @@ export default function GoogleCalendarPanel({
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
   const [busy, setBusy] = useState(false);
+  const receiptRef = useRef<HTMLParagraphElement>(null);
+  const calendarEpochRef = useRef(0);
+  const sourceVersionsRef = useRef(new Map<string, number>());
+  const sourceQueuesRef = useRef(new Map<string, Promise<void>>());
 
   const loadCalendar = useCallback(async (signal?: AbortSignal) => {
+    const epoch = ++calendarEpochRef.current;
+    sourceVersionsRef.current.clear();
+    sourceQueuesRef.current.clear();
     setState({ status: "loading" });
     try {
       const [connection, sources] = await Promise.all([
@@ -44,9 +51,11 @@ export default function GoogleCalendarPanel({
           { signal }
         ),
       ]);
-      setState({ status: "ready", data: { connection, sources } });
+      if (calendarEpochRef.current === epoch) {
+        setState({ status: "ready", data: { connection, sources } });
+      }
     } catch (error) {
-      if (signal?.aborted) return;
+      if (signal?.aborted || calendarEpochRef.current !== epoch) return;
       setState(
         integrationFailure(error, "Google Calendar could not be loaded.")
       );
@@ -56,7 +65,10 @@ export default function GoogleCalendarPanel({
   useEffect(() => {
     const controller = new AbortController();
     void loadCalendar(controller.signal);
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      calendarEpochRef.current += 1;
+    };
   }, [loadCalendar, refreshToken]);
 
   async function connect() {
@@ -78,41 +90,87 @@ export default function GoogleCalendarPanel({
 
   async function updateSource(sourceId: string, selected: boolean) {
     if (state.status !== "ready") return;
-    const previous = state.data.sources;
+    const epoch = calendarEpochRef.current;
+    const version = (sourceVersionsRef.current.get(sourceId) ?? 0) + 1;
+    sourceVersionsRef.current.set(sourceId, version);
     setActionError(null);
-    setState({
-      status: "ready",
-      data: {
-        ...state.data,
-        sources: previous.map((source) =>
-          source.id === sourceId ? { ...source, selected } : source
-        ),
-      },
-    });
-    try {
-      await apiJson<void>(
-        `/api/integrations/google-calendar/calendars/${encodeURIComponent(sourceId)}`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({ selected }),
+    setState((current) =>
+      current.status === "ready" && current.data.connection?.status === "active"
+        ? {
+            status: "ready",
+            data: {
+              ...current.data,
+              sources: current.data.sources.map((source) =>
+                source.id === sourceId ? { ...source, selected } : source
+              ),
+            },
+          }
+        : current
+    );
+
+    const previous = sourceQueuesRef.current.get(sourceId) ?? Promise.resolve();
+    const operation = previous
+      .catch(() => undefined)
+      .then(async () => {
+        if (calendarEpochRef.current !== epoch) return;
+        try {
+          await apiJson<void>(
+            `/api/integrations/google-calendar/calendars/${encodeURIComponent(sourceId)}`,
+            {
+              method: "PATCH",
+              body: JSON.stringify({ selected }),
+            }
+          );
+          if (
+            calendarEpochRef.current === epoch &&
+            sourceVersionsRef.current.get(sourceId) === version
+          ) {
+            setReceipt("Calendar selection saved.");
+          }
+        } catch (error) {
+          if (
+            calendarEpochRef.current !== epoch ||
+            sourceVersionsRef.current.get(sourceId) !== version
+          ) {
+            return;
+          }
+          setState((current) =>
+            current.status === "ready" &&
+            current.data.connection?.status === "active"
+              ? {
+                  status: "ready",
+                  data: {
+                    ...current.data,
+                    sources: current.data.sources.map((source) =>
+                      source.id === sourceId
+                        ? { ...source, selected: !selected }
+                        : source
+                    ),
+                  },
+                }
+              : current
+          );
+          setActionError(
+            error instanceof Error
+              ? error.message
+              : "Calendar selection failed."
+          );
         }
-      );
-      setReceipt("Calendar selection saved.");
-    } catch (error) {
-      setState({
-        status: "ready",
-        data: { ...state.data, sources: previous },
       });
-      setActionError(
-        error instanceof Error ? error.message : "Calendar selection failed."
-      );
+    sourceQueuesRef.current.set(sourceId, operation);
+    await operation;
+    if (sourceQueuesRef.current.get(sourceId) === operation) {
+      sourceQueuesRef.current.delete(sourceId);
     }
   }
 
   async function disconnect() {
-    setConfirmingDisconnect(false);
+    calendarEpochRef.current += 1;
+    sourceVersionsRef.current.clear();
+    sourceQueuesRef.current.clear();
     setBusy(true);
     setActionError(null);
+    setReceipt(null);
     try {
       await apiJson<void>("/api/integrations/google-calendar", {
         method: "DELETE",
@@ -122,7 +180,7 @@ export default function GoogleCalendarPanel({
         data: { connection: null, sources: [] },
       });
       setReceipt(
-        "Calendar sync disconnected. Retained calendar context remains in Socos."
+        "Google Calendar disconnected. Socos removed the synced Calendar connection and Calendar-derived context. Other personal context is unchanged."
       );
     } catch (error) {
       setActionError(
@@ -130,6 +188,7 @@ export default function GoogleCalendarPanel({
       );
     } finally {
       setBusy(false);
+      setConfirmingDisconnect(false);
     }
   }
 
@@ -272,16 +331,22 @@ export default function GoogleCalendarPanel({
         </p>
       ) : null}
       {receipt ? (
-        <p role="status" className="mt-4 text-sm text-secondary">
+        <p
+          ref={receiptRef}
+          role="status"
+          tabIndex={-1}
+          className="mt-4 text-sm text-secondary"
+        >
           {receipt}
         </p>
       ) : null}
       {confirmingDisconnect ? (
         <ConfirmationDialog
           title="Disconnect Google Calendar"
-          description="Stops future sync. Retained calendar context remains in Socos."
+          description="Stops sync and removes Socos' synced Calendar connection and Calendar-derived context. This is not the full personal-context erasure control."
           confirmLabel="Disconnect"
           busy={busy}
+          restoreFocusRef={receiptRef}
           onCancel={() => setConfirmingDisconnect(false)}
           onConfirm={() => void disconnect()}
         />

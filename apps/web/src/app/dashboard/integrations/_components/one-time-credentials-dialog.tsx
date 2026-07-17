@@ -1,18 +1,27 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 
 type OneTimeCredentialsDialogProps = {
   endpoint: string;
   username: string;
   password: string;
+  restoreFocusRef?: RefObject<HTMLElement | null>;
   onClose: () => void;
 };
+
+function focusTarget(
+  restoreFocusRef: RefObject<HTMLElement | null> | undefined,
+  fallback: HTMLElement | null
+) {
+  return restoreFocusRef?.current ?? fallback;
+}
 
 export default function OneTimeCredentialsDialog({
   endpoint,
   username,
   password,
+  restoreFocusRef,
   onClose,
 }: OneTimeCredentialsDialogProps) {
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -20,8 +29,15 @@ export default function OneTimeCredentialsDialog({
   useEffect(() => {
     const previousFocus = document.activeElement as HTMLElement | null;
     closeRef.current?.focus();
-    return () => previousFocus?.focus();
-  }, []);
+    return () => {
+      requestAnimationFrame(() => {
+        const target = focusTarget(restoreFocusRef, previousFocus);
+        if (target?.isConnected && !target.matches(":disabled")) {
+          target.focus();
+        }
+      });
+    };
+  }, [restoreFocusRef]);
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape") {
