@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
   chmodSync,
+  existsSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
@@ -87,6 +88,12 @@ case "$name" in
       printf '%s' 'postgresql://socos_app:synthetic-production-password@zwkk0scogckskkwss8oo48k4:5432/socos?schema=public'
     elif [[ " $* " == *' exec '* && " $* " == *'pg_control_system'* ]]; then
       printf '%s\\n' '7493810472398012345'
+    elif [[ " $* " == *' exec '* && " $* " == *'rolcanlogin'* ]]; then
+      if [[ "\${SHIM_UNEXPECTED_LOGIN:-0}" == '1' ]]; then
+        printf '%s\\n' 'f'
+      else
+        printf '%s\\n' 't'
+      fi
     elif [[ " $* " == *' exec '* && " $* " == *' psql '* ]]; then
       if [[ " $* " == *' --dbname=socos '* ]]; then
         cat >> "$SHIM_STATE/production-role-sql"
@@ -241,7 +248,8 @@ test('provisioner renders the locked account, exact resources, database boundary
   assert.match(productionSql, /GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO socos_release_gate_read/);
   assert.match(productionSql, /REVOKE EXECUTE ON ALL ROUTINES IN SCHEMA public FROM PUBLIC/);
   assert.match(productionSql, /REVOKE ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA public FROM socos_release_gate_read/);
-  assert.match(productionSql, /ALTER DEFAULT PRIVILEGES FOR ROLE socos_app IN SCHEMA public REVOKE EXECUTE ON ROUTINES FROM PUBLIC/);
+  assert.match(productionSql, /ALTER DEFAULT PRIVILEGES FOR ROLE socos_app REVOKE EXECUTE ON ROUTINES FROM PUBLIC/);
+  assert.doesNotMatch(productionSql, /ALTER DEFAULT PRIVILEGES FOR ROLE socos_app IN SCHEMA public REVOKE EXECUTE ON ROUTINES FROM PUBLIC/);
   assert.match(productionSql, /ALTER DEFAULT PRIVILEGES FOR ROLE socos_app IN SCHEMA public GRANT SELECT ON TABLES TO socos_release_gate_read/);
   assert.match(productionSql, /ALTER DEFAULT PRIVILEGES FOR ROLE socos_app IN SCHEMA public GRANT SELECT ON SEQUENCES TO socos_release_gate_read/);
   assert.doesNotMatch(`${sql}\n${productionSql}`, /ALTER ROLE socos_app|ALTER FUNCTION|REVOKE [^;]+ FROM socos_app/);
@@ -254,6 +262,10 @@ test('provisioner renders the locked account, exact resources, database boundary
   assert.match(calls, /docker .*<build> .*<socos-release-gate-runtime:node22-pnpm10\.10\.0-pg16-v2>/);
   assert.match(calls, /docker .*<run> .*pg_dump psql pg_restore createdb dropdb.*16\./s);
   assert.match(calls, /docker .*<psql> .*<--username=postgres>/);
+  assert.match(
+    calls,
+    /SELECT NOT EXISTS \(SELECT 1 FROM pg_roles WHERE rolcanlogin AND rolname NOT IN \('postgres', 'socos_app', 'socos_release_gate_read', 'socos_release_gate_admin', 'socos_release_gate_restore'\)\);/,
+  );
   const runtimeDockerfile = readFileSync(join(f.state, 'runtime.Dockerfile'), 'utf8');
   assert.match(
     runtimeDockerfile,
@@ -267,6 +279,17 @@ test('provisioner renders the locked account, exact resources, database boundary
   );
   assert.match(calls, /flock <-x>/);
   assert.doesNotMatch(calls, new RegExp(`${token}|synthetic-production-password`));
+});
+
+test('provisioner rejects a shared database container before broad PUBLIC ACL changes', () => {
+  const f = fixture();
+  const result = run(f.input, { ...f.env, SHIM_UNEXPECTED_LOGIN: '1' });
+  assert.notEqual(result.status, 0);
+  assert.equal(result.stdout, '');
+  assert.equal(result.stderr, 'provision_status=failed\n');
+  assert.equal(existsSync(join(f.state, 'role-sql')), false);
+  assert.equal(readFileSync(join(f.state, 'production-role-sql'), 'utf8'), '');
+  assert.doesNotMatch(`${result.stdout}${result.stderr}`, /rolname|unexpected|socos_app/);
 });
 
 test('package wiring and runbook cover secure provisioning, audits, rotation, stale locks, and the exact candidate', () => {
@@ -305,6 +328,8 @@ test('package wiring and runbook cover secure provisioning, audits, rotation, st
     /socos_release_gate_restore/,
     /socos_release_gate_read/,
     /pg_auth_members/,
+    /dedicated PostgreSQL container/i,
+    /unexpected `LOGIN` role/i,
     /token and role rotation/i,
     /rmdir \/var\/lock\/socos-release-gate\/gate\.lock/,
     /084b7addb0ccc765aa343c5412ed8f5fe5f6da0b.*ancestor/s,

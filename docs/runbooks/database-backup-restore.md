@@ -205,19 +205,19 @@ URL uses `socos_release_gate_read`, never the application runtime credential.
 The gate positively verifies public-schema `USAGE` and `SELECT` on every current
 public table, view, materialized view, foreign table, and sequence. It also
 verifies the read role has no database `CREATE` or `TEMPORARY`, schema `CREATE`,
-table write, sequence `USAGE`/`UPDATE`, public-routine `EXECUTE`, elevated role
-flag, or dangerous inherited membership. These checks fail closed even when a
-schema has no objects. The provisioner grants the read role `SELECT` by default
-on future public tables and sequences owned by `socos_app`, and revokes default
-`PUBLIC` execution of future app-owned public routines. It revokes production
-`PUBLIC` `TEMPORARY` and current public-routine execution while preserving any
-effective `TEMPORARY` privilege that `socos_app` had before provisioning. The
-gate separately verifies the restore role has no elevated role flags, inherited
-memberships,
-maintenance-database write
-capabilities, or production access, rejects reuse of the administration
-credential, and uses the restricted role only for the randomly named
-disposable database.
+table- or column-level write, sequence `USAGE`/`UPDATE`, public-routine
+`EXECUTE`, elevated role flag, or membership in any other role. `NOINHERIT`
+does not weaken this rule because a login can still use `SET ROLE`. These checks
+fail closed even when a schema has no objects. The provisioner grants the read
+role `SELECT` by default on future public tables and sequences owned by
+`socos_app`, and globally revokes the owner's default `PUBLIC` execution for
+future app-owned routines. It revokes production `PUBLIC` `TEMPORARY` and
+current public-routine execution while preserving any effective `TEMPORARY`
+privilege that `socos_app` had before provisioning. The gate separately verifies
+the restore role has no elevated role flags, inherited memberships,
+maintenance-database write capabilities, or production access, rejects reuse of
+the administration credential, and uses the restricted role only for the
+randomly named disposable database.
 
 For the exact candidate SHA, the runner proves one fresh positive-size Coolify
 backup, creates an independent consistent dump with `backup-postgres.sh`,
@@ -259,6 +259,16 @@ Host socos-release-gate
   StrictHostKeyChecking yes
   UserKnownHostsFile ~/.ssh/known_hosts
 ```
+
+The fixed Socos database resource must be a dedicated PostgreSQL container, not
+a shared cluster. Before provisioning, its complete `LOGIN` role inventory must
+be a subset of `postgres`, `socos_app`, `socos_release_gate_read`,
+`socos_release_gate_admin`, and `socos_release_gate_restore`. The provisioner
+checks this allowlist itself and fails without printing an unexpected `LOGIN`
+role before it creates or rotates gate roles or makes any cluster-wide
+maintenance `CONNECT`, production `TEMPORARY`, or routine `PUBLIC` revoke.
+Do not expand the allowlist to accommodate another application; move that
+application to a separate database container.
 
 On the host, `/root/socos` must be a trusted checkout whose `origin` is exactly
 `https://github.com/yevgeniusr/socos.git`. The remote command below rejects
@@ -408,6 +418,15 @@ application rows:
 ```bash
 sudo docker exec zwkk0scogckskkwss8oo48k4 psql -X --set=ON_ERROR_STOP=1 \
   --username=postgres --dbname=postgres --tuples-only --no-align <<'SQL'
+SELECT NOT EXISTS (
+  SELECT 1
+  FROM pg_roles
+  WHERE rolcanlogin
+    AND rolname NOT IN (
+      'postgres', 'socos_app', 'socos_release_gate_read',
+      'socos_release_gate_admin', 'socos_release_gate_restore'
+    )
+) AS dedicated_container_login_roles;
 SELECT rolname, rolsuper, rolinherit, rolcreatedb, rolcreaterole,
        rolreplication, rolbypassrls
 FROM pg_roles
@@ -424,16 +443,22 @@ WHERE datname IN ('postgres', 'socos') ORDER BY datname;
 SQL
 ```
 
+The first result must be `t`. Any unexpected `LOGIN` role means the dedicated
+container precondition is false; stop without rerunning provisioning or broad
+ACL statements.
+
 All three gate roles must be non-superuser, `NOINHERIT`, non-createrole,
 non-replication, and non-bypass-RLS. Only `socos_release_gate_admin` may have
 `CREATEDB`, and its only membership is `socos_release_gate_restore`. Read and
 restore must have no memberships. The read role has only production `CONNECT`,
 public-schema `USAGE`, and `SELECT` on all public tables and sequences; it has
-no maintenance connection, routine execution, table writes, sequence
-`USAGE`/`UPDATE`, database `CREATE`/`TEMPORARY`, or schema `CREATE`. Future
-app-owned public tables and sequences inherit read-role `SELECT`; future
-app-owned public routines do not inherit `PUBLIC` execution. The application
-role's effective `TEMPORARY` access is preserved if it existed. `PUBLIC` has no
+no maintenance connection, routine execution, table- or column-level writes,
+sequence `USAGE`/`UPDATE`, database `CREATE`/`TEMPORARY`, or schema `CREATE`.
+Future
+app-owned public tables and sequences inherit read-role `SELECT`; the global
+`socos_app` routine defaults prevent future app-owned routines in every schema
+from inheriting `PUBLIC` execution. The application role's effective
+`TEMPORARY` access is preserved if it existed. `PUBLIC` has no
 `TEMPORARY` on production, no execution on current public routines, neither
 `TEMPORARY` nor `CONNECT` on the maintenance database, and no `CREATE` on either
 public schema. The production proof requires positive schema `USAGE` and

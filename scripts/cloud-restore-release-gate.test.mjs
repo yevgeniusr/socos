@@ -192,12 +192,17 @@ test('production boundary query proves current read access and rejects every dur
     restoreBaseDatabase: 'postgres',
   });
   const production = queries.production;
+  assert.match(production, /NOT EXISTS \(SELECT 1 FROM pg_roles inherited WHERE inherited\.rolname <> current_user AND pg_has_role\(current_user, inherited\.rolname, 'MEMBER'\)\)/);
+  assert.doesNotMatch(production, /inherited\.rolsuper/);
   assert.match(production, /NOT has_database_privilege\(current_user,current_database\(\),'TEMPORARY'\)/);
   assert.match(production, /has_schema_privilege\(current_user,'public','USAGE'\)/);
   assert.match(production, /pg_proc p JOIN pg_namespace n ON n\.oid=p\.pronamespace/);
   assert.match(production, /has_function_privilege\(current_user,p\.oid,'EXECUTE'\)/);
   assert.match(production, /c\.relkind IN \('r','p','v','m','f'\)/);
   assert.match(production, /NOT has_table_privilege\(current_user,c\.oid,'SELECT'\)/);
+  assert.match(production, /has_any_column_privilege\(current_user,c\.oid,'INSERT'\)/);
+  assert.match(production, /has_any_column_privilege\(current_user,c\.oid,'UPDATE'\)/);
+  assert.match(production, /has_any_column_privilege\(current_user,c\.oid,'REFERENCES'\)/);
   assert.match(production, /c\.relkind='S'.*has_sequence_privilege\(current_user,c\.oid,'USAGE'\)/);
   assert.match(production, /c\.relkind='S'.*has_sequence_privilege\(current_user,c\.oid,'UPDATE'\)/);
   assert.match(production, /c\.relkind='S'.*NOT has_sequence_privilege\(current_user,c\.oid,'SELECT'\)/);

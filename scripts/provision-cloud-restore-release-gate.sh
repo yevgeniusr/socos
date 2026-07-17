@@ -175,6 +175,12 @@ unset application_url
 cluster_id=$(docker exec "$DATABASE_CONTAINER" psql -X --set=ON_ERROR_STOP=1 --tuples-only --no-align \
   --username=postgres --command='SELECT system_identifier::text FROM pg_control_system();' 2>/dev/null | tr -d '[:space:]') || fail
 [[ "$cluster_id" =~ ^[0-9]{10,24}$ ]] || fail
+login_roles_allowed=$(docker exec "$DATABASE_CONTAINER" psql -X --set=ON_ERROR_STOP=1 --tuples-only --no-align \
+  --username=postgres --dbname=postgres \
+  --command="SELECT NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolcanlogin AND rolname NOT IN ('postgres', 'socos_app', 'socos_release_gate_read', 'socos_release_gate_admin', 'socos_release_gate_restore'));" \
+  2>/dev/null | tr -d '[:space:]') || fail
+[[ "$login_roles_allowed" == 't' ]] || fail
+unset login_roles_allowed
 read_password=$(openssl rand -hex 32 2>/dev/null) || fail
 admin_password=$(openssl rand -hex 32 2>/dev/null) || fail
 restore_password=$(openssl rand -hex 32 2>/dev/null) || fail
@@ -260,7 +266,7 @@ REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM socos_release_gate_
 GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO socos_release_gate_read;
 REVOKE EXECUTE ON ALL ROUTINES IN SCHEMA public FROM PUBLIC;
 REVOKE ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA public FROM socos_release_gate_read;
-ALTER DEFAULT PRIVILEGES FOR ROLE socos_app IN SCHEMA public REVOKE EXECUTE ON ROUTINES FROM PUBLIC;
+ALTER DEFAULT PRIVILEGES FOR ROLE socos_app REVOKE EXECUTE ON ROUTINES FROM PUBLIC;
 ALTER DEFAULT PRIVILEGES FOR ROLE socos_app IN SCHEMA public GRANT SELECT ON TABLES TO socos_release_gate_read;
 ALTER DEFAULT PRIVILEGES FOR ROLE socos_app IN SCHEMA public GRANT SELECT ON SEQUENCES TO socos_release_gate_read;
 SQL
