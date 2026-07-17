@@ -86,11 +86,19 @@ function envRecords(values = valueMap()) {
   return managedKeys.flatMap((key) => [false, true].map((is_preview) => ({
     uuid: `${key}-${is_preview ? 'preview' : 'production'}`,
     key,
-    real_value: values[key],
-    value: 'masked',
+    real_value: ['true', 'false'].includes(values[key]) ? `'${values[key]}'` : values[key],
+    value: ['true', 'false'].includes(values[key]) ? values[key] : 'masked',
     is_preview,
     is_literal: true,
   })));
+}
+
+function effectiveValue(record) {
+  return record.is_literal === true
+    && typeof record.value === 'string'
+    && record.real_value === `'${record.value}'`
+    ? record.value
+    : record.real_value;
 }
 
 function input(baseUrl, operation = 'calendar-enable', values = {
@@ -126,7 +134,7 @@ async function startFake(options = {}) {
     const rawBody = Buffer.concat(chunks).toString('utf8');
     const path = new URL(request.url, 'https://127.0.0.1').pathname;
     state.requests.push(`${request.method} ${path}`);
-    if (rawBody) state.bodies.push({ path, body: JSON.parse(rawBody) });
+    if (rawBody) state.bodies.push({ path, rawBody, body: JSON.parse(rawBody) });
 
     const json = (status, body) => {
       response.writeHead(status, { 'content-type': 'application/json' });
@@ -149,18 +157,24 @@ async function startFake(options = {}) {
         : { ...state.application, ...(options.patchUuid ? { uuid: options.patchUuid } : {}) });
     } else if (path === '/api/v1/databases/database-123/backups/backup-config-123/executions' && request.method === 'GET') {
       json(200, state.backupExecutions);
-    } else if (path === '/api/v1/databases/database-123/backups/backup-config-123/executions' && request.method === 'POST') {
+    } else if (path === '/api/v1/databases/database-123/backups/backup-config-123' && request.method === 'PATCH') {
       const createdAt = options.backup === 'stale'
         ? '2020-01-01T00:00:00.000Z'
         : options.backup === 'same-second'
           ? new Date(Math.floor(Date.now() / 1_000) * 1_000).toISOString()
           : new Date(Date.now() + 1_000).toISOString();
       const status = options.backup === 'failed' ? 'failed' : options.backup === 'timeout' ? 'running' : 'success';
-      state.backupExecutions.push({ uuid: 'backup-new', status, size: '321', created_at: createdAt });
+      state.backupExecutions.push({
+        uuid: 'backup-new',
+        status,
+        size: Object.hasOwn(options, 'backupSize') ? options.backupSize : '321',
+        created_at: createdAt,
+      });
       if (options.backup === 'ambiguous') {
         state.backupExecutions.push({ uuid: 'backup-other', status: 'success', size: 222, created_at: createdAt });
       }
-      json(202, { message: 'started' });
+      response.writeHead(204);
+      response.end();
     } else if (path === '/api/v1/applications/application-123/envs' && request.method === 'GET') {
       const records = structuredClone(state.envs);
       if (options.envVerificationFailure && state.envBulkCalls === 1) {
@@ -193,11 +207,11 @@ async function startFake(options = {}) {
     } else if (path === '/api/integrations/google-calendar' && request.method === 'GET') {
       json(401, { code: 'unauthorized' });
     } else if (path === '/api/location/owntracks' && request.method === 'POST') {
-      const enabled = state.envs.find((record) => record.key === 'LOCATION_INGEST_ENABLED' && !record.is_preview).real_value === 'true';
+      const enabled = effectiveValue(state.envs.find((record) => record.key === 'LOCATION_INGEST_ENABLED' && !record.is_preview)) === 'true';
       const status = options.smokeFailure && state.deployments.length === 1 && enabled ? 500 : enabled ? 401 : 503;
       json(status, {});
     } else if (path === '/api/integrations/google-calendar/webhook' && request.method === 'POST') {
-      const enabled = state.envs.find((record) => record.key === 'CALENDAR_SYNC_ENABLED' && !record.is_preview).real_value === 'true';
+      const enabled = effectiveValue(state.envs.find((record) => record.key === 'CALENDAR_SYNC_ENABLED' && !record.is_preview)) === 'true';
       json(enabled ? 400 : 503, {});
     } else {
       json(404, { error: 'not found' });
@@ -368,6 +382,104 @@ test('aborts stale, ambiguous, failed, and timed-out backups before env mutation
       assert.equal(state.envBulkCalls, 0, backup);
     });
   }
+});
+
+test('triggers the configured backup with an empty successful PATCH and exact JSON body', async () => {
+  await withFake({}, async ({ baseUrl, state }) => {
+    const result = await runCli(input(baseUrl), baseUrl);
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(state.requests.includes('PATCH /api/v1/databases/database-123/backups/backup-config-123'));
+    assert.equal(state.requests.some((request) => request === 'POST /api/v1/databases/database-123/backups/backup-config-123/executions'), false);
+    const trigger = state.bodies.find((entry) => (
+      entry.path === '/api/v1/databases/database-123/backups/backup-config-123'
+    ));
+    assert.equal(trigger.rawBody, '{"backup_now":true}');
+    assert.deepEqual(trigger.body, { backup_now: true });
+  });
+});
+
+test('accepts canonical decimal string and positive safe-integer backup sizes', async () => {
+  for (const backupSize of ['1', '9007199254740992', 1, Number.MAX_SAFE_INTEGER]) {
+    await withFake({ backupSize }, async ({ baseUrl }) => {
+      const result = await runCli(input(baseUrl), baseUrl);
+      assert.equal(result.status, 0, `${String(backupSize)}: ${result.stderr}`);
+    });
+  }
+});
+
+test('rejects invalid backup size shapes before environment mutation', async () => {
+  const invalidSizes = [
+    ['zero number', 0],
+    ['zero string', '0'],
+    ['negative number', -1],
+    ['negative string', '-1'],
+    ['float number', 1.5],
+    ['float string', '1.5'],
+    ['unsafe integer', Number.MAX_SAFE_INTEGER + 1],
+    ['noncanonical leading zero', '01'],
+    ['noncanonical whitespace', ' 1'],
+    ['exponent notation', '1e3'],
+    ['null', null],
+    ['boolean', true],
+    ['object', { bytes: 1 }],
+  ];
+  for (const [shape, backupSize] of invalidSizes) {
+    await withFake({ backupSize }, async ({ baseUrl, state }) => {
+      const result = await runCli(input(baseUrl), baseUrl);
+      assert.notEqual(result.status, 0, shape);
+      assert.match(result.stderr, /backup_invalid/, shape);
+      assert.equal(state.envBulkCalls, 0, shape);
+    });
+  }
+});
+
+test('normalizes exact single-quoted literal wrappers for production and preview', async () => {
+  const records = envRecords(valueMap({
+    GOOGLE_CALENDAR_CLIENT_ID: 'existing-client-id',
+    GOOGLE_CALENDAR_CLIENT_SECRET: calendarSecret,
+    CALENDAR_SYNC_ENABLED: 'true',
+  }));
+  const wrapped = records.filter((record) => record.key === 'CALENDAR_SYNC_ENABLED');
+  assert.deepEqual(wrapped.map((record) => record.real_value), ["'true'", "'true'"]);
+  assert.deepEqual(wrapped.map((record) => record.value), ['true', 'true']);
+
+  await withFake({ state: { envs: records } }, async ({ baseUrl }) => {
+    const result = await runCli(input(baseUrl, 'location-enable', {}), baseUrl);
+    assert.equal(result.status, 0, result.stderr);
+  });
+});
+
+test('preserves secret real_value when value is masked', async () => {
+  const records = envRecords(valueMap({
+    GOOGLE_CALENDAR_CLIENT_ID: 'existing-client-id',
+    GOOGLE_CALENDAR_CLIENT_SECRET: calendarSecret,
+    CALENDAR_SYNC_ENABLED: 'true',
+  }));
+  for (const record of records.filter((candidate) => candidate.key === 'GOOGLE_CALENDAR_CLIENT_SECRET')) {
+    record.value = 'placeholder';
+  }
+
+  await withFake({ state: { envs: records } }, async ({ baseUrl }) => {
+    const result = await runCli(input(baseUrl, 'location-enable', {}), baseUrl);
+    assert.equal(result.status, 0, result.stderr);
+    assert.doesNotMatch(`${result.stdout}${result.stderr}`, new RegExp(calendarSecret));
+  });
+});
+
+test('rejects genuinely mismatched normalized production and preview values', async () => {
+  const records = envRecords();
+  const preview = records.find((record) => (
+    record.key === 'LOCATION_INGEST_ENABLED' && record.is_preview === true
+  ));
+  preview.real_value = "'true'";
+  preview.value = 'true';
+
+  await withFake({ state: { envs: records } }, async ({ baseUrl, state }) => {
+    const result = await runCli(input(baseUrl), baseUrl);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /environment_invalid/);
+    assert.equal(state.envBulkCalls, 0);
+  });
 });
 
 test('enforces calendar, location, discovery, and allowlist dependency order', async () => {

@@ -161,6 +161,10 @@ function createApi(baseUrl, token) {
       fail('coolify_request_failed');
     }
     if (!response.ok) fail('coolify_request_failed');
+    if (options.ignoreResponse === true) {
+      await response.body?.cancel();
+      return undefined;
+    }
     try {
       return await response.json();
     } catch {
@@ -177,7 +181,16 @@ function list(value, property) {
 }
 
 function recordValue(record) {
-  const value = typeof record.real_value === 'string' ? record.real_value : record.value;
+  const realValue = record.real_value;
+  if (typeof realValue === 'string') {
+    if (
+      record.is_literal === true
+      && typeof record.value === 'string'
+      && realValue === `'${record.value}'`
+    ) return record.value;
+    return realValue;
+  }
+  const value = record.value;
   if (typeof value !== 'string') fail('environment_invalid');
   return value;
 }
@@ -262,14 +275,25 @@ function executionId(execution) {
   return typeof id === 'string' && id !== '' ? id : undefined;
 }
 
+function validBackupSize(size) {
+  return typeof size === 'string'
+    ? /^[1-9][0-9]*$/.test(size)
+    : typeof size === 'number' && Number.isSafeInteger(size) && size > 0;
+}
+
 async function createBackup(api, input, startedAt, attempts, pollMs) {
-  const path = `/api/v1/databases/${input.databaseUuid}/backups/${input.backupUuid}/executions`;
-  const before = list(await api(path), 'executions');
+  const backupPath = `/api/v1/databases/${input.databaseUuid}/backups/${input.backupUuid}`;
+  const executionsPath = `${backupPath}/executions`;
+  const before = list(await api(executionsPath), 'executions');
   const known = new Set(before.map(executionId).filter(Boolean));
-  await api(path, { method: 'POST', body: {} });
+  await api(backupPath, {
+    method: 'PATCH',
+    body: { backup_now: true },
+    ignoreResponse: true,
+  });
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const executions = list(await api(path), 'executions');
+    const executions = list(await api(executionsPath), 'executions');
     const added = executions.filter((execution) => {
       const id = executionId(execution);
       return id && !known.has(id);
@@ -283,10 +307,7 @@ async function createBackup(api, input, startedAt, attempts, pollMs) {
       }
       if (['failed', 'cancelled', 'canceled'].includes(execution.status)) fail('backup_failed');
       if (execution.status === 'success') {
-        const size = typeof execution.size === 'string' && execution.size.trim() !== ''
-          ? Number(execution.size)
-          : execution.size;
-        if (typeof size !== 'number' || !Number.isFinite(size) || size <= 0) fail('backup_invalid');
+        if (!validBackupSize(execution.size)) fail('backup_invalid');
         return executionId(execution);
       }
     }
