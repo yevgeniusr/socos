@@ -183,9 +183,11 @@ full `origin/main` SHA resolved immediately before the operation.
 The local wrapper accepts one lowercase 40-character SHA, connects only to the
 `socos-release-gate` SSH config host with `BatchMode=yes`, and sends only that
 SHA on standard input. The remote account must have a forced command pointing
-to `/usr/local/sbin/socos-release-gate-launcher`; it must expose neither a shell
-nor a public endpoint. The wrapper accepts only the fixed redacted JSON receipt and
-rejects extra fields, paths, changed SHAs, remote stderr, or malformed output.
+to `/usr/local/sbin/socos-release-gate-dispatch`; it must expose neither a shell
+nor a public endpoint. The unprivileged dispatcher rejects any SSH original
+command before it invokes the root launcher through the single sudoers
+allowance. The wrapper accepts only the fixed redacted JSON receipt and rejects
+extra fields, paths, changed SHAs, remote stderr, or malformed output.
 
 The forced command requires root-managed configuration for its trusted Git
 mirror, private work root, single-flight lock directory, Coolify URL/token and
@@ -265,7 +267,7 @@ jq -cn --arg authorized_key "$authorized_key" --arg coolify_token "$coolify_toke
   '{authorized_key:$authorized_key,coolify_token:$coolify_token}' \
   | ssh -o BatchMode=yes -o RequestTTY=no -o StrictHostKeyChecking=yes \
       socos-coolify-root \
-      'set -e; cd /root/socos; test "$(git remote get-url origin)" = "https://github.com/yevgeniusr/socos.git"; test -z "$(git status --porcelain --untracked-files=no)"; git fetch --no-tags --prune origin +refs/heads/main:refs/remotes/origin/main; candidate=$(git rev-parse refs/remotes/origin/main); git checkout --detach refs/remotes/origin/main; test "$(git rev-parse HEAD)" = "$candidate"; test -z "$(git status --porcelain --untracked-files=no)"; exec bash scripts/provision-cloud-restore-release-gate.sh'
+      'set -e; cd /root/socos; test "$(git remote get-url origin)" = "https://github.com/yevgeniusr/socos.git"; test -z "$(git status --porcelain --untracked-files=no)"; git fetch --no-tags --prune origin +refs/heads/main:refs/remotes/origin/main >/dev/null 2>&1; candidate=$(git rev-parse refs/remotes/origin/main); git checkout --detach refs/remotes/origin/main >/dev/null 2>&1; test "$(git rev-parse HEAD)" = "$candidate"; test -z "$(git status --porcelain --untracked-files=no)"; exec bash scripts/provision-cloud-restore-release-gate.sh'
 clear_provision_secrets
 trap - EXIT
 ```
@@ -284,20 +286,39 @@ sudo id socos-release-gate
 sudo stat -c '%U:%G %a %n' \
   /var/lib/socos-release-gate/.ssh/authorized_keys \
   /etc/sudoers.d/socos-release-gate /etc/socos-release-gate.env \
+  /usr/local/sbin/socos-release-gate-dispatch \
   /usr/local/sbin/socos-release-gate-launcher
 sudo awk 'END { print NR }' /var/lib/socos-release-gate/.ssh/authorized_keys
 sudo visudo -cf /etc/sudoers.d/socos-release-gate
 sudo -l -U socos-release-gate
-sudo grep -F 'env_keep += "SSH_ORIGINAL_COMMAND"' /etc/sudoers.d/socos-release-gate
-timeout 10 ssh -o BatchMode=yes -o RequestTTY=no socos-release-gate id && exit 1 || true
-timeout 10 sftp -o BatchMode=yes socos-release-gate && exit 1 || true
-timeout 10 ssh -o BatchMode=yes -o RequestTTY=force socos-release-gate && exit 1 || true
-timeout 10 ssh -o BatchMode=yes -o ExitOnForwardFailure=yes -L 15432:127.0.0.1:5432 \
-  socos-release-gate && exit 1 || true
+
+audit_rejected() {
+  label=$1
+  shift
+  if timeout 10 "$@"; then status=0; else status=$?; fi
+  case "$status" in
+    0) printf '%s\n' "audit_status=unexpected_success audit=$label" >&2; return 1 ;;
+    124) printf '%s\n' 'audit_status=timeout' >&2; return 1 ;;
+    *) printf '%s\n' "audit_status=rejected audit=$label" ;;
+  esac
+}
+
+git fetch --no-tags --prune origin +refs/heads/main:refs/remotes/origin/main >/dev/null 2>&1
+audit_candidate=$(git rev-parse refs/remotes/origin/main)
+printf '%s\n' "$audit_candidate" | audit_rejected remote-command \
+  ssh -o BatchMode=yes -o RequestTTY=no socos-release-gate id
+audit_rejected sftp sftp -o BatchMode=yes socos-release-gate
+printf '%s\n' "$audit_candidate" | audit_rejected pty \
+  ssh -o BatchMode=yes -o RequestTTY=force socos-release-gate id
+printf '%s\n' "$audit_candidate" | audit_rejected forwarding \
+  ssh -o BatchMode=yes -o RequestTTY=no -o ExitOnForwardFailure=yes \
+    -L 15432:127.0.0.1:5432 socos-release-gate id
 ```
 
-Modes must be `600`, `440`, `600`, and `755`; the key count must be one; sudo
-must allow only the launcher; and shell, SFTP, PTY, and forwarding must fail.
+Modes must be `600`, `440`, `600`, `755`, and `755`; the key count must be one;
+sudo must allow only the launcher. Each transport audit must report rejection;
+success or timeout is an audit failure. The dispatcher rejects the remote
+command while it is still unprivileged, before sudo clears the SSH environment.
 Audit role flags, memberships, and database ACLs without selecting passwords or
 application rows:
 

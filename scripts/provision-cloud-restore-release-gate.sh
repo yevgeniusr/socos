@@ -75,6 +75,7 @@ sudoers_dir=$(root_path '/etc/sudoers.d')
 repository=$(root_path '/opt/socos-release-gate/repository')
 work_root=$(root_path '/var/lib/socos-release-gate/work')
 lock_root=$(root_path '/var/lock/socos-release-gate')
+dispatcher_path=$(root_path '/usr/local/sbin/socos-release-gate-dispatch')
 launcher_path=$(root_path '/usr/local/sbin/socos-release-gate-launcher')
 env_path=$(root_path '/etc/socos-release-gate.env')
 
@@ -89,7 +90,7 @@ quiet passwd --lock "$ACCOUNT"
 quiet install -d -m 0755 "$home"
 quiet install -d -m 0700 "$ssh_dir"
 key_tmp=$(mktemp "$ssh_dir/authorized-keys.XXXXXX")
-printf 'restrict,command="sudo -n /usr/local/sbin/socos-release-gate-launcher" %s\n' "$authorized_key" > "$key_tmp"
+printf 'restrict,command="/usr/local/sbin/socos-release-gate-dispatch" %s\n' "$authorized_key" > "$key_tmp"
 quiet chmod 0600 "$key_tmp"
 quiet mv -f -- "$key_tmp" "$authorized_keys"
 
@@ -97,7 +98,6 @@ quiet install -d -m 0755 "$etc_dir" "$sudoers_dir" "$(dirname "$launcher_path")"
 sudoers_tmp=$(mktemp "$sudoers_dir/socos-release-gate.XXXXXX")
 cat > "$sudoers_tmp" <<'SUDOERS'
 Defaults:socos-release-gate env_reset,!setenv,secure_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-Defaults:socos-release-gate env_keep += "SSH_ORIGINAL_COMMAND"
 socos-release-gate ALL=(root) NOPASSWD: /usr/local/sbin/socos-release-gate-launcher
 SUDOERS
 quiet chmod 0440 "$sudoers_tmp"
@@ -242,6 +242,31 @@ ENV
 quiet chmod 0600 "$env_tmp"
 quiet mv -f -- "$env_tmp" "$env_path"
 
+dispatcher_tmp=$(mktemp "$(dirname "$dispatcher_path")/socos-release-gate-dispatch.XXXXXX")
+dispatcher_path_value='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+dispatcher_launcher='/usr/local/sbin/socos-release-gate-launcher'
+if [[ -n "$TEST_BIN" ]]; then
+  dispatcher_path_value="$TEST_BIN:/usr/bin:/bin"
+  dispatcher_launcher="$launcher_path"
+fi
+{
+  cat <<'DISPATCH_HEAD'
+#!/bin/bash
+set -euo pipefail
+umask 077
+DISPATCH_HEAD
+  printf 'PATH=%q\n' "$dispatcher_path_value"
+  printf 'readonly LAUNCHER=%q\n' "$dispatcher_launcher"
+  cat <<'DISPATCH_BODY'
+export PATH
+[[ "$#" -eq 0 ]] || exit 1
+[[ -z "${SSH_ORIGINAL_COMMAND:-}" ]] || exit 1
+exec sudo -n "$LAUNCHER"
+DISPATCH_BODY
+} > "$dispatcher_tmp"
+quiet chmod 0755 "$dispatcher_tmp"
+quiet mv -f -- "$dispatcher_tmp" "$dispatcher_path"
+
 launcher_tmp=$(mktemp "$(dirname "$launcher_path")/socos-release-gate-launcher.XXXXXX")
 launcher_root=$ROOT_PREFIX
 launcher_path_value='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
@@ -344,7 +369,7 @@ quiet chmod 0755 "$launcher_tmp"
 quiet mv -f -- "$launcher_tmp" "$launcher_path"
 
 quiet chown -R root:root "$(root_path '/opt/socos-release-gate')" "$home" "$work_root" "$lock_root"
-quiet chown root:root "$authorized_keys" "$sudoers_dir/socos-release-gate" "$env_path" "$launcher_path"
+quiet chown root:root "$authorized_keys" "$sudoers_dir/socos-release-gate" "$env_path" "$dispatcher_path" "$launcher_path"
 
 finished=1
 printf '%s\n' 'provision_status=ready'

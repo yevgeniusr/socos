@@ -92,9 +92,13 @@ case "$name" in
     shift
     exec "$@"
     ;;
+  sudo)
+    [[ "\${1:-}" == '-n' ]] && shift
+    exec "$@"
+    ;;
 esac
 `);
-  for (const name of ['getent', 'useradd', 'usermod', 'passwd', 'visudo', 'openssl', 'git', 'docker', 'flock', 'chown', 'timeout']) {
+  for (const name of ['getent', 'useradd', 'usermod', 'passwd', 'visudo', 'openssl', 'git', 'docker', 'flock', 'chown', 'timeout', 'sudo']) {
     execFileSync('ln', ['-s', shim, join(bin, name)]);
   }
 
@@ -149,15 +153,22 @@ test('provisioner renders the locked account, exact resources, database boundary
   assert.equal(keyLines.length, 1);
   assert.equal(
     keyLines[0],
-    `restrict,command="sudo -n /usr/local/sbin/socos-release-gate-launcher" ${f.authorizedKey}`,
+    `restrict,command="/usr/local/sbin/socos-release-gate-dispatch" ${f.authorizedKey}`,
   );
   assert.equal(statSync(keyFile).mode & 0o777, 0o600);
 
   const sudoers = readFileSync(join(f.root, 'etc/sudoers.d/socos-release-gate'), 'utf8');
   assert.match(sudoers, /^Defaults:socos-release-gate env_reset,!setenv,/m);
-  assert.match(sudoers, /^Defaults:socos-release-gate env_keep \+= "SSH_ORIGINAL_COMMAND"$/m);
+  assert.doesNotMatch(sudoers, /env_keep|SSH_ORIGINAL_COMMAND/);
   assert.match(sudoers, /^socos-release-gate ALL=\(root\) NOPASSWD: \/usr\/local\/sbin\/socos-release-gate-launcher$/m);
   assert.equal(statSync(join(f.root, 'etc/sudoers.d/socos-release-gate')).mode & 0o777, 0o440);
+  const dispatcherPath = join(f.root, 'usr/local/sbin/socos-release-gate-dispatch');
+  assert.equal(statSync(dispatcherPath).mode & 0o777, 0o755);
+  const dispatcher = readFileSync(dispatcherPath, 'utf8');
+  assert.match(dispatcher, /^#!\/bin\/bash\n/);
+  assert.match(dispatcher, /\[\[ "\$#" -eq 0 \]\] \|\| exit 1/);
+  assert.ok(dispatcher.indexOf('SSH_ORIGINAL_COMMAND') < dispatcher.indexOf('exec sudo -n'));
+  assert.doesNotMatch(dispatcher, /synthetic-coolify|production-password/);
 
   const envFile = readFileSync(join(f.root, 'etc/socos-release-gate.env'), 'utf8');
   for (const expected of [
@@ -186,7 +197,7 @@ test('provisioner renders the locked account, exact resources, database boundary
   assert.match(calls, /docker .*<build> .*<socos-release-gate-runtime:node22-pnpm10\.10\.0-pg16-v2>/);
   assert.match(calls, /docker .*<run> .*pg_dump psql pg_restore createdb dropdb.*16\./s);
   assert.match(calls, /docker .*<psql> .*<--username=postgres>/);
-  assert.match(calls, /chown .*<root:root>/);
+  assert.match(calls, /^chown <root:root> .*socos-release-gate-dispatch> <.*socos-release-gate-launcher>$/m);
   assert.match(calls, /flock <-x>/);
   assert.doesNotMatch(calls, new RegExp(`${token}|synthetic-production-password`));
 });
@@ -204,8 +215,13 @@ test('package wiring and runbook cover secure provisioning, audits, rotation, st
     /git fetch --no-tags --prune origin \+refs\/heads\/main:refs\/remotes\/origin\/main/,
     /git checkout --detach refs\/remotes\/origin\/main/,
     /git status --porcelain --untracked-files=no/,
-    /timeout 10 ssh/,
-    /timeout 10 sftp/,
+    /audit_rejected remote-command/,
+    /audit_rejected sftp sftp/,
+    /audit_rejected\(\)/,
+    /124\) printf '%s\\n' 'audit_status=timeout'/,
+    /printf '%s\\n' "\$audit_candidate" \| audit_rejected remote-command/,
+    /git fetch --no-tags --prune origin \+refs\/heads\/main:refs\/remotes\/origin\/main >\/dev\/null 2>&1/,
+    /git checkout --detach refs\/remotes\/origin\/main >\/dev\/null 2>&1/,
     /sudo -l -U socos-release-gate/,
     /socos_release_gate_admin/,
     /socos_release_gate_restore/,
@@ -215,6 +231,7 @@ test('package wiring and runbook cover secure provisioning, audits, rotation, st
     /084b7addb0ccc765aa343c5412ed8f5fe5f6da0b.*ancestor/s,
   ]) assert.match(runbook, expected);
   assert.doesNotMatch(runbook, /exact trusted `origin\/main` is currently\s*`[0-9a-f]{40}`/);
+  assert.doesNotMatch(runbook, /&& exit 1 \|\| true/);
 });
 
 test('provisioner is idempotent and its launcher rejects command/input abuse before exact-ref execution', () => {
@@ -227,21 +244,34 @@ test('provisioner is idempotent and its launcher rejects command/input abuse bef
   assert.equal((provisionCalls.match(/docker <build>/g) ?? []).length, 1);
 
   const launcher = join(f.root, 'usr/local/sbin/socos-release-gate-launcher');
+  const dispatcher = join(f.root, 'usr/local/sbin/socos-release-gate-dispatch');
   assert.equal(statSync(launcher).mode & 0o777, 0o755);
   const before = readFileSync(f.log, 'utf8');
-  for (const [input, extraEnv] of [
-    [`${trustedSha}\nextra\n`, {}],
-    [`${trustedSha}\n`, { SSH_ORIGINAL_COMMAND: 'sh' }],
-    [`${'a'.repeat(40)}\n`, {}],
+  for (const [command, input, extraEnv] of [
+    [launcher, `${trustedSha}\nextra\n`, {}],
+    [dispatcher, `${trustedSha}\n`, { SSH_ORIGINAL_COMMAND: 'sh' }],
+    [launcher, `${'a'.repeat(40)}\n`, {}],
   ]) {
-    const result = spawnSync(launcher, { encoding: 'utf8', input, env: { ...f.env, ...extraEnv } });
+    const result = spawnSync(command, { encoding: 'utf8', input, env: { ...f.env, ...extraEnv } });
     assert.notEqual(result.status, 0);
     assert.doesNotMatch(`${result.stdout}${result.stderr}`, /synthetic-coolify|production-password/);
+    if (command === dispatcher) {
+      assert.equal(result.stdout, '');
+      assert.equal(result.stderr, '');
+    }
   }
+  const dispatcherWithArgs = spawnSync(dispatcher, ['unexpected'], {
+    encoding: 'utf8',
+    input: `${trustedSha}\n`,
+    env: f.env,
+  });
+  assert.notEqual(dispatcherWithArgs.status, 0);
+  assert.equal(dispatcherWithArgs.stdout, '');
+  assert.equal(dispatcherWithArgs.stderr, '');
   const after = readFileSync(f.log, 'utf8');
   assert.equal((after.slice(before.length).match(/scripts\/cloud-restore-release-gate\.mjs/g) ?? []).length, 0);
 
-  const success = spawnSync(launcher, { encoding: 'utf8', input: `${trustedSha}\n`, env: f.env });
+  const success = spawnSync(dispatcher, { encoding: 'utf8', input: `${trustedSha}\n`, env: f.env });
   assert.equal(success.status, 0, success.stderr);
   const launcherCalls = readFileSync(f.log, 'utf8').slice(after.length);
   assert.match(launcherCalls, /git .*<rev-parse> <refs\/remotes\/origin\/main>/);
@@ -254,6 +284,7 @@ test('provisioner is idempotent and its launcher rejects command/input abuse bef
   assert.match(launcherCalls, /docker .*<run> <-i> .*<scripts\/cloud-restore-release-gate\.mjs>/);
   assert.match(launcherCalls, /git .*<worktree> <add> <--detach>/);
   assert.match(launcherCalls, /git .*<worktree> <remove> <--force>/);
+  assert.match(launcherCalls, /sudo <-n> <.*socos-release-gate-launcher>/);
 });
 
 test('dirty trusted checkout fails closed and runner worktree cleanup runs after install failure', () => {
