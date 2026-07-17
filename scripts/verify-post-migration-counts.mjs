@@ -53,15 +53,34 @@ const eventDiscoveryTables = [
 ];
 const humanIdempotencyTables = ['HumanIdempotencyRecord'];
 const interactionReceiptTables = ['InteractionReceipt'];
+
+function emptyTableRollout(migrationCount, label, tableNames) {
+  return {
+    migrationCount,
+    label,
+    tables: tableNames.map((name) => ({ name, introducedRowCount: 0 })),
+  };
+}
+
 const introducedTableRollouts = [
-  { migrationCount: 7, label: 'agent-interface tables', tables: agentInterfaceTables },
-  { migrationCount: 8, label: 'calendar-location tables', tables: calendarLocationTables },
-  { migrationCount: 9, label: 'event-discovery tables', tables: eventDiscoveryTables },
-  { migrationCount: 11, label: 'human-idempotency tables', tables: humanIdempotencyTables },
-  { migrationCount: 12, label: 'interaction-receipt tables', tables: interactionReceiptTables },
+  emptyTableRollout(7, 'agent-interface tables', agentInterfaceTables),
+  emptyTableRollout(8, 'calendar-location tables', calendarLocationTables),
+  emptyTableRollout(9, 'event-discovery tables', eventDiscoveryTables),
+  emptyTableRollout(11, 'human-idempotency tables', humanIdempotencyTables),
+  emptyTableRollout(12, 'interaction-receipt tables', interactionReceiptTables),
+  {
+    migrationCount: 13,
+    label: 'event-catalog tables',
+    tables: [
+      { name: 'EventCatalogListing', introducedRowCount: 6 },
+      { name: 'EventCatalogFollow', introducedRowCount: 0 },
+    ],
+  },
 ];
 const allowedNewTables = new Set([
-  ...introducedTableRollouts.flatMap((rollout) => rollout.tables),
+  ...introducedTableRollouts
+    .filter((rollout) => rollout.migrationCount <= expectedMigrationCount)
+    .flatMap((rollout) => rollout.tables.map((table) => table.name)),
 ]);
 
 if (
@@ -122,7 +141,7 @@ if (
 for (const rollout of introducedTableRollouts) {
   if (
     beforeMigrationCount >= rollout.migrationCount &&
-    rollout.tables.some((table) => !before.has(table))
+    rollout.tables.some((table) => !before.has(table.name))
   ) {
     console.error(
       `${beforeMigrationCount}-migration metadata must include all ${rollout.label}.`,
@@ -174,14 +193,18 @@ for (const [table, count] of before) {
 }
 let introducedEmptyTables = 0;
 const expectedIntroducedTables = introducedTableRollouts
-  .filter((rollout) => beforeMigrationCount < rollout.migrationCount)
+  .filter(
+    (rollout) =>
+      beforeMigrationCount < rollout.migrationCount &&
+      rollout.migrationCount <= expectedMigrationCount,
+  )
   .flatMap((rollout) => rollout.tables);
 for (const table of expectedIntroducedTables) {
-  if (before.has(table)) {
-    valid &&= after.get(table) === before.get(table);
+  if (before.has(table.name)) {
+    valid &&= after.get(table.name) === before.get(table.name);
   } else {
-    valid &&= after.get(table) === 0;
-    introducedEmptyTables++;
+    valid &&= after.get(table.name) === table.introducedRowCount;
+    if (table.introducedRowCount === 0) introducedEmptyTables++;
   }
 }
 valid &&= after.get('_prisma_migrations') === expectedMigrationCount;

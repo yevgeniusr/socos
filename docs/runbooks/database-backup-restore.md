@@ -209,10 +209,14 @@ preexisting public table count to remain identical. It derives the expected
 migration count from checked-in migration directories, supports every baseline
 from the six-migration pre-agent state through current, requires tables already
 introduced at that baseline to be present with matching counts, and requires
-calendar, location, event discovery, and event-brief rollout tables newly
-introduced during the drill to be present at zero rows. Drop the disposable
-database before declaring the drill successful. If any command fails, stop the
-deployment and retain only redacted schema metadata logs.
+newly introduced tables to match their registered rollout counts. Those counts
+are zero for the calendar, location, event discovery, human-idempotency,
+interaction-receipt, and `EventCatalogFollow` tables, while migration 13 requires
+six seeded `EventCatalogListing` rows and a zero-row `EventCatalogFollow` table.
+The `new_empty_tables` receipt field counts only registered zero-row additions.
+Drop the disposable database before declaring the drill successful. If any
+command fails, stop the deployment and retain only redacted schema metadata
+logs.
 
 ## Cloud-Only Release Restore Gate
 
