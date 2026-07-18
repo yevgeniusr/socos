@@ -35,6 +35,11 @@ export const PERSONAL_DATA_ENVELOPES = [
   ),
   envelope(
     "GoogleCalendarConnection",
+    "providerAccountId",
+    "google-calendar-provider-account-id"
+  ),
+  envelope(
+    "GoogleCalendarConnection",
     "calendarListSyncToken",
     "google-calendar-list-sync-token"
   ),

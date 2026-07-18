@@ -82,14 +82,20 @@ model GoogleOAuthAttempt {
 
 model GoogleCalendarConnection {
   id                              String           @id @default(cuid())
-  ownerId                         String           @unique
+  ownerId                         String
   owner                           User             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  providerAccountIdMac            String?
+  providerAccountIdCiphertext     Bytes?
+  providerAccountIdIv             Bytes?
+  providerAccountIdTag            Bytes?
+  providerAccountIdKeyVersion     Int?
   refreshTokenCiphertext          Bytes
   refreshTokenIv                  Bytes
   refreshTokenTag                 Bytes
   refreshTokenKeyVersion          Int
   grantedScopes                   String[]         @default([])
   status                          String           @default("active")
+  oauthGeneration                 Int              @default(0)
   calendarListSyncTokenCiphertext Bytes?
   calendarListSyncTokenIv         Bytes?
   calendarListSyncTokenTag        Bytes?
@@ -105,6 +111,7 @@ model GoogleCalendarConnection {
   watches                         CalendarWatch[]
 
   @@unique([id, ownerId])
+  @@unique([ownerId, providerAccountIdMac])
   @@index([status, calendarListPendingAt, calendarListLeaseUntil])
 }
 
@@ -183,6 +190,7 @@ model CalendarEvent {
   externalEventIdIv          Bytes
   externalEventIdTag         Bytes
   externalEventIdKeyVersion  Int
+  canonicalMac               String?
   status                     String         @default("confirmed")
   startAt                    DateTime?
   endAt                      DateTime?
@@ -208,6 +216,7 @@ model CalendarEvent {
   @@unique([sourceId, externalEventIdMac])
   @@unique([id, ownerId])
   @@index([ownerId, startAt, endAt, status])
+  @@index([ownerId, canonicalMac])
   @@index([sourceId, status])
 }
 
@@ -625,6 +634,7 @@ model BriefItem {
   kind         String
   sourceType   String
   sourceId     String?
+  sourceCanonicalMac String?
   rank         Int
   score        Float
   title        String
@@ -645,6 +655,7 @@ model BriefItem {
   @@unique([id, batchId, ownerId])
   @@unique([batchId, kind, rank])
   @@index([ownerId, contactId])
+  @@index([ownerId, sourceType, sourceCanonicalMac])
   @@index([ownerId, status, snoozedUntil])
 }
 

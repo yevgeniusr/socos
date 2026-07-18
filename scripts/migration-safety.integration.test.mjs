@@ -56,6 +56,10 @@ const eventCatalogExpansionMigrationPath = resolve(
   root,
   "services/api/prisma/migrations/20260718180000_event_catalog_expansion/migration.sql",
 );
+const googleCalendarMultiAccountMigrationPath = resolve(
+  root,
+  "services/api/prisma/migrations/20260718210000_google_calendar_multi_account/migration.sql",
+);
 const expectedBriefTables = [
   "BriefBatch",
   "BriefItem",
@@ -1001,6 +1005,104 @@ test("calendar and location schema declares the exact encrypted persistence boun
   );
 });
 
+test("google calendar multi-account migration persists account and occurrence identity safely", () => {
+  const schema = readFileSync(
+    resolve(root, "services/api/prisma/schema.prisma"),
+    "utf8",
+  );
+  const presenter = readFileSync(
+    resolve(root, "services/api/src/modules/briefs/briefs.presenter.ts"),
+    "utf8",
+  );
+  assert.equal(
+    existsSync(googleCalendarMultiAccountMigrationPath),
+    true,
+    "google calendar multi-account migration file is missing",
+  );
+  const migration = existsSync(googleCalendarMultiAccountMigrationPath)
+    ? readFileSync(googleCalendarMultiAccountMigrationPath, "utf8")
+    : "";
+  const connectionModel =
+    schema.match(/model GoogleCalendarConnection \{[\s\S]*?\n\}/)?.[0] ?? "";
+  const calendarEventModel =
+    schema.match(/model CalendarEvent \{[\s\S]*?\n\}/)?.[0] ?? "";
+  const briefItemModel =
+    schema.match(/model BriefItem \{[\s\S]*?\n\}/)?.[0] ?? "";
+  const presenterBody = presenter.slice(
+    presenter.indexOf("export function presentBrief"),
+  );
+
+  assert.notEqual(presenter.indexOf("export function presentBrief"), -1);
+  assert.match(migration, /^BEGIN;\n[\s\S]*\nCOMMIT;\n?$/);
+  assert.doesNotMatch(connectionModel, /^\s+ownerId\s+String\s+@unique/m);
+  assert.match(connectionModel, /^\s+providerAccountIdMac\s+String\?/m);
+  for (const [field, type] of [
+    ["providerAccountIdCiphertext", "Bytes?"],
+    ["providerAccountIdIv", "Bytes?"],
+    ["providerAccountIdTag", "Bytes?"],
+    ["providerAccountIdKeyVersion", "Int?"],
+  ]) {
+    assert.match(
+      connectionModel,
+      new RegExp(`^\\s+${field}\\s+${type.replace("?", "\\?")}`, "m"),
+    );
+  }
+  assert.match(connectionModel, /^\s+oauthGeneration\s+Int\s+@default\(0\)/m);
+  assert.match(
+    connectionModel,
+    /@@unique\(\[ownerId, providerAccountIdMac\]\)/,
+  );
+  assert.match(calendarEventModel, /^\s+canonicalMac\s+String\?/m);
+  assert.match(calendarEventModel, /@@index\(\[ownerId, canonicalMac\]\)/);
+  assert.doesNotMatch(
+    calendarEventModel,
+    /@@unique\(\[[^\]]*canonicalMac[^\]]*\]\)/,
+  );
+  assert.match(briefItemModel, /^\s+sourceCanonicalMac\s+String\?/m);
+  assert.match(
+    briefItemModel,
+    /@@index\(\[ownerId, sourceType, sourceCanonicalMac\]\)/,
+  );
+  assert.doesNotMatch(presenterBody, /sourceCanonicalMac/);
+
+  assert.match(
+    migration,
+    /DROP INDEX "GoogleCalendarConnection_ownerId_key"/,
+  );
+  assert.match(
+    migration,
+    /ORDER BY\s+"connectionId",\s+"isPrimary" DESC,\s+"createdAt",\s+"id"/,
+  );
+  assert.match(
+    migration,
+    /SET "providerAccountIdMac" = source_identity\."externalIdMac"/,
+  );
+  assert.match(
+    migration,
+    /CONSTRAINT "GoogleCalendarConnection_providerAccountIdEnvelope_check" CHECK \([\s\S]*num_nonnulls\("providerAccountIdCiphertext", "providerAccountIdIv", "providerAccountIdTag", "providerAccountIdKeyVersion"\) IN \(0, 4\)/,
+  );
+  assert.match(
+    migration,
+    /CONSTRAINT "GoogleCalendarConnection_providerAccountIdMac_check" CHECK \("providerAccountIdMac" IS NULL OR "providerAccountIdMac" ~ '\^\[0-9a-f\]\{64\}\$'\)/,
+  );
+  assert.match(
+    migration,
+    /CREATE UNIQUE INDEX "GoogleCalendarConnection_ownerId_providerAccountIdMac_key"\s+ON "GoogleCalendarConnection"\("ownerId", "providerAccountIdMac"\)/,
+  );
+  assert.match(
+    migration,
+    /CREATE INDEX "CalendarEvent_ownerId_canonicalMac_idx"\s+ON "CalendarEvent"\("ownerId", "canonicalMac"\)/,
+  );
+  assert.doesNotMatch(
+    migration,
+    /CREATE UNIQUE INDEX "CalendarEvent_[^"]*canonicalMac/,
+  );
+  assert.match(
+    migration,
+    /CREATE INDEX "BriefItem_ownerId_sourceType_sourceCanonicalMac_idx"\s+ON "BriefItem"\("ownerId", "sourceType", "sourceCanonicalMac"\)/,
+  );
+});
+
 test("event discovery schema declares the exact public and encrypted persistence boundary", () => {
   const schema = readFileSync(
     resolve(root, "services/api/prisma/schema.prisma"),
@@ -1798,6 +1900,225 @@ if (!databaseUrl) {
     assert.match(
       trigger.rows[0].definition,
       /BEFORE (?:UPDATE OR DELETE|DELETE OR UPDATE)/,
+    );
+  }
+
+  async function assertGoogleCalendarMultiAccountSchema(client) {
+    const columns = await client.query(
+      `SELECT table_name, column_name, data_type, is_nullable, column_default
+         FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND (table_name, column_name) IN (
+            ('GoogleCalendarConnection', 'providerAccountIdMac'),
+            ('GoogleCalendarConnection', 'providerAccountIdCiphertext'),
+            ('GoogleCalendarConnection', 'providerAccountIdIv'),
+            ('GoogleCalendarConnection', 'providerAccountIdTag'),
+            ('GoogleCalendarConnection', 'providerAccountIdKeyVersion'),
+            ('GoogleCalendarConnection', 'oauthGeneration'),
+            ('CalendarEvent', 'canonicalMac'),
+            ('BriefItem', 'sourceCanonicalMac')
+          )
+        ORDER BY table_name, column_name`,
+    );
+    assert.deepEqual(columns.rows, [
+      {
+        table_name: "BriefItem",
+        column_name: "sourceCanonicalMac",
+        data_type: "text",
+        is_nullable: "YES",
+        column_default: null,
+      },
+      {
+        table_name: "CalendarEvent",
+        column_name: "canonicalMac",
+        data_type: "text",
+        is_nullable: "YES",
+        column_default: null,
+      },
+      {
+        table_name: "GoogleCalendarConnection",
+        column_name: "oauthGeneration",
+        data_type: "integer",
+        is_nullable: "NO",
+        column_default: "0",
+      },
+      ...[
+        "providerAccountIdCiphertext",
+        "providerAccountIdIv",
+        "providerAccountIdKeyVersion",
+        "providerAccountIdMac",
+        "providerAccountIdTag",
+      ].map((column_name) => ({
+        table_name: "GoogleCalendarConnection",
+        column_name,
+        data_type:
+          column_name === "providerAccountIdKeyVersion"
+            ? "integer"
+            : column_name === "providerAccountIdMac"
+              ? "text"
+              : "bytea",
+        is_nullable: "YES",
+        column_default: null,
+      })),
+    ]);
+
+    const indexes = await client.query(
+      `SELECT indexname, indexdef
+         FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND indexname = ANY($1::text[])
+        ORDER BY indexname`,
+      [
+        [
+          "GoogleCalendarConnection_ownerId_key",
+          "GoogleCalendarConnection_ownerId_providerAccountIdMac_key",
+          "CalendarEvent_ownerId_canonicalMac_idx",
+          "BriefItem_ownerId_sourceType_sourceCanonicalMac_idx",
+        ],
+      ],
+    );
+    assert.deepEqual(
+      indexes.rows.map(({ indexname }) => indexname),
+      [
+        "BriefItem_ownerId_sourceType_sourceCanonicalMac_idx",
+        "CalendarEvent_ownerId_canonicalMac_idx",
+        "GoogleCalendarConnection_ownerId_providerAccountIdMac_key",
+      ],
+    );
+    for (const { indexname, indexdef } of indexes.rows) {
+      if (
+        indexname ===
+        "GoogleCalendarConnection_ownerId_providerAccountIdMac_key"
+      ) {
+        assert.match(indexdef, /^CREATE UNIQUE INDEX /);
+      } else {
+        assert.match(indexdef, /^CREATE INDEX /);
+        assert.doesNotMatch(indexdef, /^CREATE UNIQUE INDEX /);
+      }
+    }
+
+    const checks = await client.query(
+      `SELECT conname
+         FROM pg_constraint
+        WHERE conname = ANY($1::text[])
+        ORDER BY conname`,
+      [
+        [
+          "BriefItem_sourceCanonicalMac_check",
+          "CalendarEvent_canonicalMac_check",
+          "GoogleCalendarConnection_oauthGeneration_check",
+          "GoogleCalendarConnection_providerAccountIdEnvelope_check",
+          "GoogleCalendarConnection_providerAccountIdMac_check",
+        ],
+      ],
+    );
+    assert.deepEqual(
+      checks.rows.map(({ conname }) => conname),
+      [
+        "BriefItem_sourceCanonicalMac_check",
+        "CalendarEvent_canonicalMac_check",
+        "GoogleCalendarConnection_oauthGeneration_check",
+        "GoogleCalendarConnection_providerAccountIdEnvelope_check",
+        "GoogleCalendarConnection_providerAccountIdMac_check",
+      ],
+    );
+  }
+
+  async function seedLegacyGoogleCalendarIdentityRows(client) {
+    const iv = "decode(repeat('00', 12), 'hex')";
+    const tag = "decode(repeat('00', 16), 'hex')";
+    const ciphertext = "decode('01', 'hex')";
+    await client.query(
+      `INSERT INTO "User" ("id", "email", "updatedAt") VALUES
+         ('calendar-primary-owner', 'calendar-primary@example.invalid', CURRENT_TIMESTAMP),
+         ('calendar-fallback-owner', 'calendar-fallback@example.invalid', CURRENT_TIMESTAMP),
+         ('calendar-source-less-owner', 'calendar-source-less@example.invalid', CURRENT_TIMESTAMP);
+       INSERT INTO "GoogleCalendarConnection" (
+         "id", "ownerId", "refreshTokenCiphertext", "refreshTokenIv",
+         "refreshTokenTag", "refreshTokenKeyVersion", "updatedAt"
+       ) VALUES
+         ('connection-primary', 'calendar-primary-owner', ${ciphertext}, ${iv}, ${tag}, 1, CURRENT_TIMESTAMP),
+         ('connection-fallback', 'calendar-fallback-owner', ${ciphertext}, ${iv}, ${tag}, 1, CURRENT_TIMESTAMP),
+         ('connection-source-less', 'calendar-source-less-owner', ${ciphertext}, ${iv}, ${tag}, 1, CURRENT_TIMESTAMP);
+       INSERT INTO "CalendarSource" (
+         "id", "connectionId", "ownerId", "externalIdMac", "externalIdCiphertext",
+         "externalIdIv", "externalIdTag", "externalIdKeyVersion", "nameCiphertext",
+         "nameIv", "nameTag", "nameKeyVersion", "isPrimary", "createdAt", "updatedAt"
+       ) VALUES
+         ('primary-fallback-source', 'connection-primary', 'calendar-primary-owner', repeat('1', 64), ${ciphertext}, ${iv}, ${tag}, 1, ${ciphertext}, ${iv}, ${tag}, 1, false, TIMESTAMP '2026-01-01', CURRENT_TIMESTAMP),
+         ('primary-selected-source', 'connection-primary', 'calendar-primary-owner', repeat('2', 64), ${ciphertext}, ${iv}, ${tag}, 1, ${ciphertext}, ${iv}, ${tag}, 1, true, TIMESTAMP '2026-01-02', CURRENT_TIMESTAMP),
+         ('fallback-first-source', 'connection-fallback', 'calendar-fallback-owner', repeat('3', 64), ${ciphertext}, ${iv}, ${tag}, 1, ${ciphertext}, ${iv}, ${tag}, 1, false, TIMESTAMP '2026-01-01', CURRENT_TIMESTAMP),
+         ('fallback-later-source', 'connection-fallback', 'calendar-fallback-owner', repeat('4', 64), ${ciphertext}, ${iv}, ${tag}, 1, ${ciphertext}, ${iv}, ${tag}, 1, false, TIMESTAMP '2026-01-02', CURRENT_TIMESTAMP);`,
+    );
+  }
+
+  async function assertGoogleCalendarMultiAccountBehavior(client) {
+    const identity = await client.query(
+      `SELECT "id", "providerAccountIdMac", "oauthGeneration"
+         FROM "GoogleCalendarConnection"
+        WHERE "id" LIKE 'connection-%'
+        ORDER BY "id"`,
+    );
+    assert.deepEqual(identity.rows, [
+      {
+        id: "connection-fallback",
+        providerAccountIdMac: "3".repeat(64),
+        oauthGeneration: 0,
+      },
+      {
+        id: "connection-primary",
+        providerAccountIdMac: "2".repeat(64),
+        oauthGeneration: 0,
+      },
+      {
+        id: "connection-source-less",
+        providerAccountIdMac: null,
+        oauthGeneration: 0,
+      },
+    ]);
+
+    await assert.rejects(
+      client.query(
+        `UPDATE "GoogleCalendarConnection"
+            SET "providerAccountIdCiphertext" = decode('01', 'hex')
+          WHERE "id" = 'connection-primary'`,
+      ),
+      /GoogleCalendarConnection_providerAccountIdEnvelope_check/,
+    );
+    await client.query(
+      `UPDATE "GoogleCalendarConnection"
+          SET "providerAccountIdCiphertext" = decode('01', 'hex'),
+              "providerAccountIdIv" = decode(repeat('00', 12), 'hex'),
+              "providerAccountIdTag" = decode(repeat('00', 16), 'hex'),
+              "providerAccountIdKeyVersion" = 1
+        WHERE "id" = 'connection-primary'`,
+    );
+
+    const iv = "decode(repeat('00', 12), 'hex')";
+    const tag = "decode(repeat('00', 16), 'hex')";
+    const ciphertext = "decode('01', 'hex')";
+    await client.query(
+      `INSERT INTO "GoogleCalendarConnection" (
+         "id", "ownerId", "refreshTokenCiphertext", "refreshTokenIv",
+         "refreshTokenTag", "refreshTokenKeyVersion", "providerAccountIdMac",
+         "updatedAt"
+       ) VALUES (
+         'connection-primary-second', 'calendar-primary-owner', ${ciphertext}, ${iv},
+         ${tag}, 1, repeat('5', 64), CURRENT_TIMESTAMP
+       )`,
+    );
+    await assert.rejects(
+      client.query(
+        `INSERT INTO "GoogleCalendarConnection" (
+           "id", "ownerId", "refreshTokenCiphertext", "refreshTokenIv",
+           "refreshTokenTag", "refreshTokenKeyVersion", "providerAccountIdMac",
+           "updatedAt"
+         ) VALUES (
+           'connection-primary-duplicate', 'calendar-primary-owner', ${ciphertext}, ${iv},
+           ${tag}, 1, repeat('5', 64), CURRENT_TIMESTAMP
+         )`,
+      ),
+      /GoogleCalendarConnection_ownerId_providerAccountIdMac_key/,
     );
   }
 
@@ -2963,6 +3284,13 @@ if (!databaseUrl) {
         );
       }
 
+      await seedLegacyGoogleCalendarIdentityRows(client);
+      await client.query(
+        readFileSync(googleCalendarMultiAccountMigrationPath, "utf8"),
+      );
+      await assertGoogleCalendarMultiAccountSchema(client);
+      await assertGoogleCalendarMultiAccountBehavior(client);
+
       await assertOwnerConsistency(client);
       await assertAgentOwnerConsistency(client);
       await assertCalendarLocationBehavior(client);
@@ -2998,7 +3326,7 @@ if (!databaseUrl) {
     assert.equal(output.trim(), "schema_status=match statements=0");
     await withClient(assertDailyBriefSchema);
     await withClient(assertAgentInterfaceSchema);
-    await withClient(assertCalendarLocationSchema);
+    await withClient(assertGoogleCalendarMultiAccountSchema);
     await withClient(assertCalendarLocationBehavior);
     await withClient(assertEventDiscoverySchema);
     await withClient(assertEventDiscoveryBehavior);
@@ -3016,7 +3344,7 @@ if (!databaseUrl) {
       },
     );
     await withClient(assertAgentInterfaceSchema);
-    await withClient(assertCalendarLocationSchema);
+    await withClient(assertGoogleCalendarMultiAccountSchema);
     await withClient(assertEventDiscoverySchema);
     await withClient(assertEventBriefSnapshotSchema);
     await withClient(assertHumanIdempotencySchema);

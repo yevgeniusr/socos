@@ -32,7 +32,7 @@
 **Interfaces:**
 - Produces: optional encrypted `providerAccountId`, `providerAccountIdMac`, `oauthGeneration`, optional `CalendarEvent.canonicalMac`, and internal optional `BriefItem.sourceCanonicalMac`.
 
-- [ ] **Step 1: Write failing schema, envelope-registry, rekey, and migration-safety tests**
+- [x] **Step 1: Write failing schema, envelope-registry, rekey, and migration-safety tests**
 
 Assert that the owner-only connection unique index is absent; the owner/provider
 compound unique exists; account envelopes are all-null or all-present; existing
@@ -41,21 +41,21 @@ canonical MAC is indexed but not unique. The internal brief canonical MAC is
 indexed for owner/source-type feedback lookup and is never returned by the
 presenter.
 
-- [ ] **Step 2: Run the focused tests and confirm the expected failures**
+- [x] **Step 2: Run the focused tests and confirm the expected failures**
 
 Run `pnpm --filter @socos/api test -- --runInBand src/cli/rekey-personal-data.spec.ts` and `node --test scripts/migration-safety.integration.test.mjs`.
 
-- [ ] **Step 3: Add the forward migration and schema fields**
+- [x] **Step 3: Add the forward migration and schema fields**
 
 Backfill `providerAccountIdMac` from the connection's primary source MAC, falling
 back to its first source. Leave only legacy rows with no source nullable. Add
 the connection compound unique and occurrence index without a uniqueness rule.
 
-- [ ] **Step 4: Register the account envelope and make focused tests pass**
+- [x] **Step 4: Register the account envelope and make focused tests pass**
 
 Use purpose `google-calendar-provider-account-id` and connection ID AAD.
 
-- [ ] **Step 5: Validate Prisma and commit**
+- [x] **Step 5: Validate Prisma and commit**
 
 Run `pnpm --filter @socos/api exec prisma validate`, `pnpm --filter @socos/api exec prisma generate`, focused tests, then commit `feat(calendar): persist multi-account identity`.
 

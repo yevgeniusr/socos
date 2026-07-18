@@ -154,6 +154,11 @@ describe("personal data rekey command", () => {
       ],
       [
         "GoogleCalendarConnection",
+        "providerAccountId",
+        "google-calendar-provider-account-id",
+      ],
+      [
+        "GoogleCalendarConnection",
         "calendarListSyncToken",
         "google-calendar-list-sync-token",
       ],
@@ -313,11 +318,11 @@ describe("personal data rekey command", () => {
       (line) => lines.push(line)
     );
 
-    expect(result).toEqual({ scanned: 18, rekeyed: 0, contended: 0 });
+    expect(result).toEqual({ scanned: 19, rekeyed: 0, contended: 0 });
     expect(reencrypt).not.toHaveBeenCalled();
     expect(store.pages).toEqual([]);
     expect(store.updates).toBe(0);
-    expect(lines).toHaveLength(19);
+    expect(lines).toHaveLength(20);
     expect(lines[0]).toBe(
       "registry=personal-data model=GoogleOAuthAttempt envelope=pkce scanned=1 rekeyed=0 contended=0"
     );
@@ -337,7 +342,7 @@ describe("personal data rekey command", () => {
       cipher
     );
 
-    expect(result).toEqual({ scanned: 18, rekeyed: 18, contended: 0 });
+    expect(result).toEqual({ scanned: 19, rekeyed: 19, contended: 0 });
     PERSONAL_DATA_ENVELOPES.forEach((envelope, index) => {
       const row = store.rows.get(envelopeKey(envelope))?.[0];
       expect(row?.keyVersion).toBe(2);
@@ -532,11 +537,15 @@ describe("personal data rekey command", () => {
   it("resumes an event envelope after interruption using only remaining source-version rows", async () => {
     const store = new MemoryRekeyStore();
     const cipher = new PersonalDataCipherService(config());
-    store.seed(
-      15,
-      ["a", "b", "c"].map((id) => encryptedRow(cipher, 15, id))
+    const envelopeIndex = PERSONAL_DATA_ENVELOPES.findIndex(
+      (candidate) => envelopeKey(candidate) === "EventPreference.interestTags"
     );
-    store.interruptTransaction = 17;
+    expect(envelopeIndex).toBeGreaterThanOrEqual(0);
+    store.seed(
+      envelopeIndex,
+      ["a", "b", "c"].map((id) => encryptedRow(cipher, envelopeIndex, id))
+    );
+    store.interruptTransaction = envelopeIndex + 2;
 
     await expect(
       runPersonalDataRekey(
