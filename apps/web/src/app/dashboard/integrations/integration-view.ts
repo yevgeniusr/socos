@@ -110,6 +110,6 @@ export function calendarAccessSummary(
     accessLabel: exactReadOnly ? "Read only" : "Scope needs review",
     sourceLabel: sources.length
       ? `${sources.filter((source) => source.selected).length} of ${sources.length} calendars included`
-      : "No calendars available",
+      : "Discovering calendars",
   };
 }

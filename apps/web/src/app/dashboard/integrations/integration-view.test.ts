@@ -137,6 +137,19 @@ describe("hasExactReadOnlyCalendarScopes", () => {
 });
 
 describe("calendarAccessSummary", () => {
+  it("reports discovery while an active connection has no calendar sources", () => {
+    const state: CalendarState = {
+      status: "ready",
+      data: { connection: activeConnection, sources: [] },
+    };
+
+    expect(calendarAccessSummary(state)).toEqual({
+      state: "active",
+      accessLabel: "Read only",
+      sourceLabel: "Discovering calendars",
+    });
+  });
+
   it("reports exact read-only access and selected source counts", () => {
     const state: CalendarState = {
       status: "ready",

@@ -22,6 +22,9 @@ type CalendarPanelData = {
   sources: CalendarSourcesResponse;
 };
 
+const CALENDAR_SOURCE_DISCOVERY_INTERVAL_MS = 500;
+const CALENDAR_SOURCE_DISCOVERY_RETRY_LIMIT = 5;
+
 export default function GoogleCalendarPanel({
   refreshToken,
   onSummaryChange,
@@ -86,6 +89,73 @@ export default function GoogleCalendarPanel({
       calendarEpochRef.current += 1;
     };
   }, [loadCalendar, refreshToken]);
+
+  useEffect(() => {
+    if (
+      state.status !== "ready" ||
+      state.data.connection?.status !== "active" ||
+      state.data.sources.length > 0
+    ) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const epoch = calendarEpochRef.current;
+    let attempts = 0;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+
+    const scheduleRefresh = () => {
+      if (
+        controller.signal.aborted ||
+        attempts >= CALENDAR_SOURCE_DISCOVERY_RETRY_LIMIT
+      ) {
+        return;
+      }
+      timeout = setTimeout(() => {
+        void refreshSources();
+      }, CALENDAR_SOURCE_DISCOVERY_INTERVAL_MS);
+    };
+
+    const refreshSources = async () => {
+      attempts += 1;
+      try {
+        const sources = await apiJson<CalendarSourcesResponse>(
+          "/api/integrations/google-calendar/sources",
+          { signal: controller.signal }
+        );
+        if (controller.signal.aborted || calendarEpochRef.current !== epoch) {
+          return;
+        }
+        if (!sources.length) {
+          scheduleRefresh();
+          return;
+        }
+        sourceConfirmedRef.current = new Map(
+          sources.map((source) => [source.id, source.selected])
+        );
+        setState((current) =>
+          current.status === "ready" &&
+          current.data.connection?.status === "active" &&
+          current.data.sources.length === 0
+            ? {
+                status: "ready",
+                data: { ...current.data, sources },
+              }
+            : current
+        );
+      } catch {
+        if (!controller.signal.aborted && calendarEpochRef.current === epoch) {
+          scheduleRefresh();
+        }
+      }
+    };
+
+    scheduleRefresh();
+    return () => {
+      controller.abort();
+      if (timeout) clearTimeout(timeout);
+    };
+  }, [state]);
 
   async function connect() {
     setBusy(true);

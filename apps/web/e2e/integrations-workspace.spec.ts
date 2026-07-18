@@ -111,6 +111,7 @@ const eventPreference = {
 type SyntheticOptions = {
   disabled?: boolean;
   calendarFailures?: number;
+  emptyCalendarSourceResponses?: number;
   calendarPatchFailures?: number;
   emptyPixel?: boolean;
   emptyEvents?: boolean;
@@ -157,6 +158,8 @@ async function installSyntheticApi(page: Page, options: SyntheticOptions = {}) {
   await seedAuthentication(page);
   const state = {
     calendarFailuresRemaining: options.calendarFailures ?? 0,
+    emptyCalendarSourceResponsesRemaining:
+      options.emptyCalendarSourceResponses ?? 0,
     calendarConnection: {
       ...calendarConnection,
       grantedScopes: options.calendarScopes ?? calendarConnection.grantedScopes,
@@ -262,6 +265,10 @@ async function installSyntheticApi(page: Page, options: SyntheticOptions = {}) {
       url.pathname === "/api/integrations/google-calendar/sources" &&
       method === "GET"
     ) {
+      if (state.emptyCalendarSourceResponsesRemaining > 0) {
+        state.emptyCalendarSourceResponsesRemaining -= 1;
+        return json(route, []);
+      }
       return json(route, calendarSources);
     }
     if (
@@ -407,6 +414,27 @@ async function installSyntheticApi(page: Page, options: SyntheticOptions = {}) {
 }
 
 test.describe("authenticated Integrations workspace", () => {
+  test("discovers Calendar sources after an initially empty response", async ({
+    page,
+  }) => {
+    // React development mode performs two initial loads. Keep both empty so
+    // source appearance still proves the component scheduled a refresh.
+    await installSyntheticApi(page, { emptyCalendarSourceResponses: 2 });
+    await page.goto("/dashboard/integrations");
+
+    const calendarAccess = page.getByRole("status", {
+      name: "Calendar access",
+    });
+    await expect(calendarAccess).toContainText("Discovering calendars");
+    await expect(
+      page.getByRole("checkbox", { name: "Use Synthetic primary calendar" })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("checkbox", { name: "Use Synthetic shared calendar" })
+    ).toBeVisible();
+    await expect(calendarAccess).toContainText("1 of 2 calendars included");
+  });
+
   test("maps exact disabled gates without generic errors", async ({ page }) => {
     await installSyntheticApi(page, { disabled: true });
     await page.goto("/dashboard/integrations");
