@@ -10,6 +10,7 @@ import type {
   LoadableIntegration,
 } from "@/lib/integration-contracts";
 import {
+  CALENDAR_SOURCE_DISCOVERY_SCHEDULE,
   calendarAccessSummary,
   integrationFailure,
   type CalendarAccessSummary,
@@ -21,9 +22,6 @@ type CalendarPanelData = {
   connection: CalendarConnectionResponse;
   sources: CalendarSourcesResponse;
 };
-
-const CALENDAR_SOURCE_DISCOVERY_INTERVAL_MS = 500;
-const CALENDAR_SOURCE_DISCOVERY_RETRY_LIMIT = 5;
 
 export default function GoogleCalendarPanel({
   refreshToken,
@@ -107,13 +105,13 @@ export default function GoogleCalendarPanel({
     const scheduleRefresh = () => {
       if (
         controller.signal.aborted ||
-        attempts >= CALENDAR_SOURCE_DISCOVERY_RETRY_LIMIT
+        attempts >= CALENDAR_SOURCE_DISCOVERY_SCHEDULE.retryLimit
       ) {
         return;
       }
       timeout = setTimeout(() => {
         void refreshSources();
-      }, CALENDAR_SOURCE_DISCOVERY_INTERVAL_MS);
+      }, CALENDAR_SOURCE_DISCOVERY_SCHEDULE.intervalMs);
     };
 
     const refreshSources = async () => {
@@ -287,6 +285,7 @@ export default function GoogleCalendarPanel({
       setActionError(
         error instanceof Error ? error.message : "Calendar disconnect failed."
       );
+      await loadCalendar();
     } finally {
       setBusy(false);
       setConfirmingDisconnect(false);

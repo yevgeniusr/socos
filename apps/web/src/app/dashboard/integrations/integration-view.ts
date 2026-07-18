@@ -10,6 +10,11 @@ const REQUIRED_READ_ONLY_CALENDAR_SCOPES = [
   "https://www.googleapis.com/auth/calendar.events.readonly",
 ] as const;
 
+export const CALENDAR_SOURCE_DISCOVERY_SCHEDULE = {
+  intervalMs: 3_000,
+  retryLimit: 25,
+} as const;
+
 type CalendarPanelState = LoadableIntegration<{
   connection: CalendarConnectionResponse;
   sources: CalendarSourcesResponse;

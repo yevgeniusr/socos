@@ -7,6 +7,7 @@ import type {
   LoadableIntegration,
 } from "@/lib/integration-contracts";
 import {
+  CALENDAR_SOURCE_DISCOVERY_SCHEDULE,
   calendarAccessSummary,
   hasExactReadOnlyCalendarScopes,
   integrationFailure,
@@ -223,5 +224,20 @@ describe("calendarAccessSummary", () => {
     ],
   ])("reports a truthful non-active state", (state, expected) => {
     expect(calendarAccessSummary(state)).toEqual(expected);
+  });
+});
+
+describe("Calendar source discovery schedule", () => {
+  it("covers backend reconciliation while remaining bounded", () => {
+    expect(CALENDAR_SOURCE_DISCOVERY_SCHEDULE.intervalMs).toBeGreaterThanOrEqual(
+      1_000
+    );
+    expect(CALENDAR_SOURCE_DISCOVERY_SCHEDULE.retryLimit).toBeLessThanOrEqual(
+      30
+    );
+    expect(
+      CALENDAR_SOURCE_DISCOVERY_SCHEDULE.intervalMs *
+        CALENDAR_SOURCE_DISCOVERY_SCHEDULE.retryLimit
+    ).toBeGreaterThanOrEqual(75_000);
   });
 });

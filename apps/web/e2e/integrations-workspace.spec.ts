@@ -112,6 +112,8 @@ type SyntheticOptions = {
   disabled?: boolean;
   calendarFailures?: number;
   emptyCalendarSourceResponses?: number;
+  calendarDisconnectFailures?: number;
+  holdCalendarSourcesUntilFailedDisconnect?: boolean;
   calendarPatchFailures?: number;
   emptyPixel?: boolean;
   emptyEvents?: boolean;
@@ -173,6 +175,9 @@ async function installSyntheticApi(page: Page, options: SyntheticOptions = {}) {
     calendarPatchFailuresRemaining: options.calendarPatchFailures ?? 0,
     releaseCalendarPatchFailure: undefined as (() => void) | undefined,
     calendarDisconnects: 0,
+    calendarDisconnectFailuresRemaining:
+      options.calendarDisconnectFailures ?? 0,
+    calendarDisconnectFailed: false,
     locationCreatePayloads: [] as unknown[],
     locationRotations: 0,
     releaseLocationRotation: undefined as (() => void) | undefined,
@@ -265,6 +270,12 @@ async function installSyntheticApi(page: Page, options: SyntheticOptions = {}) {
       url.pathname === "/api/integrations/google-calendar/sources" &&
       method === "GET"
     ) {
+      if (
+        options.holdCalendarSourcesUntilFailedDisconnect &&
+        !state.calendarDisconnectFailed
+      ) {
+        return json(route, []);
+      }
       if (state.emptyCalendarSourceResponsesRemaining > 0) {
         state.emptyCalendarSourceResponsesRemaining -= 1;
         return json(route, []);
@@ -310,6 +321,11 @@ async function installSyntheticApi(page: Page, options: SyntheticOptions = {}) {
       method === "DELETE"
     ) {
       state.calendarDisconnects += 1;
+      if (state.calendarDisconnectFailuresRemaining > 0) {
+        state.calendarDisconnectFailuresRemaining -= 1;
+        state.calendarDisconnectFailed = true;
+        return json(route, { message: "Synthetic disconnect failure" }, 500);
+      }
       return noContent(route);
     }
 
@@ -431,6 +447,41 @@ test.describe("authenticated Integrations workspace", () => {
     ).toBeVisible();
     await expect(
       page.getByRole("checkbox", { name: "Use Synthetic shared calendar" })
+    ).toBeVisible();
+    await expect(calendarAccess).toContainText("1 of 2 calendars included");
+  });
+
+  test("resumes Calendar discovery after a failed disconnect", async ({
+    page,
+  }) => {
+    await installSyntheticApi(page, {
+      calendarDisconnectFailures: 1,
+      holdCalendarSourcesUntilFailedDisconnect: true,
+    });
+    await page.goto("/dashboard/integrations");
+
+    const calendar = page.getByRole("region", { name: "Google Calendar" });
+    const calendarAccess = page.getByRole("status", {
+      name: "Calendar access",
+    });
+    await expect(calendarAccess).toContainText("Discovering calendars");
+    await calendar
+      .getByRole("button", { name: "Disconnect Google Calendar" })
+      .click();
+    await page
+      .getByRole("dialog", { name: "Disconnect Google Calendar" })
+      .getByRole("button", { name: "Disconnect" })
+      .click();
+
+    await expect(
+      calendar
+        .getByRole("alert")
+        .filter({ hasText: "Synthetic disconnect failure" })
+    ).toBeVisible();
+    await expect(
+      calendar.getByRole("checkbox", {
+        name: "Use Synthetic primary calendar",
+      })
     ).toBeVisible();
     await expect(calendarAccess).toContainText("1 of 2 calendars included");
   });
