@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
@@ -8,6 +8,40 @@ const root = path.resolve(import.meta.dirname, "..");
 async function text(relativePath) {
   return readFile(path.join(root, relativePath), "utf8");
 }
+
+test("explicit migration identifiers fit PostgreSQL's 63-byte limit", async () => {
+  const migrationsRoot = path.join(root, "services/api/prisma/migrations");
+  const entries = await readdir(migrationsRoot, {
+    recursive: true,
+    withFileTypes: true,
+  });
+  const migrationFiles = entries
+    .filter((entry) => entry.isFile() && entry.name === "migration.sql")
+    .map((entry) => path.join(entry.parentPath, entry.name))
+    .sort();
+
+  for (const migrationFile of migrationFiles) {
+    const migration = await readFile(migrationFile, "utf8");
+    for (const match of migration.matchAll(/"((?:""|[^"])*)"/g)) {
+      const identifier = match[1].replaceAll('""', '"');
+      assert.ok(
+        Buffer.byteLength(identifier, "utf8") <= 63,
+        `${path.relative(root, migrationFile)} contains an overlong PostgreSQL identifier: ${identifier}`,
+      );
+    }
+  }
+});
+
+test("contact-enrichment migration uses Prisma's expected candidate index name", async () => {
+  const migration = await text(
+    "services/api/prisma/migrations/20260718200000_contact_enrichment/migration.sql",
+  );
+
+  assert.match(
+    migration,
+    /CREATE INDEX "ContactEnrichmentCandidate_ownerId_contactId_status_created_idx"\s+ON "ContactEnrichmentCandidate"\("ownerId", "contactId", "status", "createdAt"\);/,
+  );
+});
 
 test("migration creates an owner-scoped constrained candidate ledger and partial birthdays", async () => {
   const migration = await text(

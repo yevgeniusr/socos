@@ -71,7 +71,7 @@ CREATE TABLE "ContactEnrichmentCandidate" (
 
 CREATE UNIQUE INDEX "ContactEnrichmentCandidate_ownerId_contactId_contentHash_key"
   ON "ContactEnrichmentCandidate"("ownerId", "contactId", "contentHash");
-CREATE INDEX "ContactEnrichmentCandidate_ownerId_contactId_status_createdAt_idx"
+CREATE INDEX "ContactEnrichmentCandidate_ownerId_contactId_status_created_idx"
   ON "ContactEnrichmentCandidate"("ownerId", "contactId", "status", "createdAt");
 CREATE INDEX "ContactEnrichmentCandidate_ownerId_status_createdAt_idx"
   ON "ContactEnrichmentCandidate"("ownerId", "status", "createdAt");
