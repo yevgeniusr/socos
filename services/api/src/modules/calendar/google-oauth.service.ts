@@ -108,10 +108,6 @@ export class GoogleOAuthService {
 
   async createAuthorizationUrl(ownerId: string): Promise<string> {
     const provider = this.providerConfiguration();
-    const expected = await this.prisma.googleCalendarConnection.findUnique({
-      where: { ownerId },
-      select: { id: true, updatedAt: true, status: true },
-    });
     const attemptId = this.idGenerator();
     const state = `${attemptId}.${randomBytes(32).toString("base64url")}`;
     const codeVerifier = randomBytes(32).toString("base64url");
@@ -119,18 +115,11 @@ export class GoogleOAuthService {
       .update(codeVerifier, "ascii")
       .digest("base64url");
     const stateMac = this.index.mac(STATE_PURPOSE, ownerId, state);
-    const expectedConnection = expected
-      ? {
-          id: expected.id,
-          updatedAt: expected.updatedAt.toISOString(),
-          status: expected.status,
-        }
-      : null;
     const encrypted = this.cipher.encrypt<PkceSnapshot>(
       PKCE_PURPOSE,
       ownerId,
       attemptId,
-      { codeVerifier, expectedConnection }
+      { codeVerifier, expectedConnection: null }
     );
 
     await this.prisma.googleOAuthAttempt.create({

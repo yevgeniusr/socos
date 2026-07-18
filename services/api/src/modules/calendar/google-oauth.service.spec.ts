@@ -105,7 +105,7 @@ describe("GoogleOAuthService", () => {
     jest.useRealTimers();
   });
 
-  it("creates an exact minimum-scope offline PKCE authorization attempt", async () => {
+  it("creates an account-add attempt without inferring an existing reconnect target", async () => {
     const { service, prisma, cipher, index, client, clientFactory } = harness();
     prisma.googleCalendarConnection.findUnique.mockResolvedValue({
       id: CONNECTION_ID,
@@ -116,6 +116,7 @@ describe("GoogleOAuthService", () => {
 
     await service.createAuthorizationUrl(OWNER_ID);
 
+    expect(prisma.googleCalendarConnection.findUnique).not.toHaveBeenCalled();
     expect(GOOGLE_CALENDAR_SCOPES).toEqual([
       "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
       "https://www.googleapis.com/auth/calendar.events.readonly",
@@ -138,11 +139,7 @@ describe("GoogleOAuthService", () => {
       new RegExp(`^${ATTEMPT_ID}\\.[A-Za-z0-9_-]{43}$`)
     );
     const encryptedSnapshot = cipher.encrypt.mock.calls[0][3];
-    expect(encryptedSnapshot.expectedConnection).toEqual({
-      id: CONNECTION_ID,
-      updatedAt: "2026-07-16T11:00:00.000Z",
-      status: "active",
-    });
+    expect(encryptedSnapshot.expectedConnection).toBeNull();
     expect(authorization.code_challenge).toBe(
       createHash("sha256")
         .update(encryptedSnapshot.codeVerifier)

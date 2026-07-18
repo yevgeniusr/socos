@@ -93,8 +93,9 @@ export class CalendarConnectionService {
 
   summary(ownerId: string) {
     this.config.requireEnabled("calendarSync");
-    return this.prisma.googleCalendarConnection.findUnique({
+    return this.prisma.googleCalendarConnection.findMany({
       where: { ownerId },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: {
         id: true,
         status: true,

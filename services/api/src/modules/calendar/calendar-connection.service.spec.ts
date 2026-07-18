@@ -15,6 +15,7 @@ import type { CalendarWatchService } from "./calendar-watch.service.js";
 const OWNER_ID = "owner-synthetic";
 const OTHER_OWNER_ID = "owner-other";
 const CONNECTION_ID = `c${"b".repeat(24)}`;
+const SECOND_CONNECTION_ID = `c${"c".repeat(24)}`;
 const ATTEMPT_ID = `c${"a".repeat(24)}`;
 const EXPECTED_UPDATED_AT = new Date("2026-07-16T11:00:00.000Z");
 const REFRESH_ENVELOPE = {
@@ -28,6 +29,7 @@ function harness() {
   const prisma = {
     googleCalendarConnection: {
       findUnique: jest.fn(),
+      findMany: jest.fn(),
       create: jest.fn(),
       updateMany: jest.fn(),
       deleteMany: jest.fn(),
@@ -285,22 +287,34 @@ describe("CalendarConnectionService", () => {
     expect(prisma.googleCalendarConnection.updateMany).not.toHaveBeenCalled();
   });
 
-  it("returns only a safe owner-scoped connection summary", async () => {
+  it("returns every safe owner-scoped connection summary in stable order", async () => {
     const { service, prisma } = harness();
-    prisma.googleCalendarConnection.findUnique.mockResolvedValue({
-      id: CONNECTION_ID,
-      status: "active",
-      grantedScopes: GOOGLE_CALENDAR_SCOPES,
-      lastSyncedAt: null,
-      errorCode: null,
-      createdAt: new Date("2026-07-16T10:00:00.000Z"),
-      updatedAt: EXPECTED_UPDATED_AT,
-    });
+    prisma.googleCalendarConnection.findMany.mockResolvedValue([
+      {
+        id: CONNECTION_ID,
+        status: "active",
+        grantedScopes: GOOGLE_CALENDAR_SCOPES,
+        lastSyncedAt: null,
+        errorCode: null,
+        createdAt: new Date("2026-07-16T10:00:00.000Z"),
+        updatedAt: EXPECTED_UPDATED_AT,
+      },
+      {
+        id: SECOND_CONNECTION_ID,
+        status: "needs_reauth",
+        grantedScopes: GOOGLE_CALENDAR_SCOPES,
+        lastSyncedAt: new Date("2026-07-16T10:30:00.000Z"),
+        errorCode: "google_invalid_grant",
+        createdAt: new Date("2026-07-16T10:05:00.000Z"),
+        updatedAt: new Date("2026-07-16T11:05:00.000Z"),
+      },
+    ]);
 
     const summary = await service.summary(OWNER_ID);
 
-    expect(prisma.googleCalendarConnection.findUnique).toHaveBeenCalledWith({
+    expect(prisma.googleCalendarConnection.findMany).toHaveBeenCalledWith({
       where: { ownerId: OWNER_ID },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: {
         id: true,
         status: true,
@@ -311,7 +325,11 @@ describe("CalendarConnectionService", () => {
         updatedAt: true,
       },
     });
-    expect(summary).not.toHaveProperty("refreshTokenCiphertext");
+    expect(summary.map(({ id }) => id)).toEqual([
+      CONNECTION_ID,
+      SECOND_CONNECTION_ID,
+    ]);
+    expect(JSON.stringify(summary)).not.toContain("refreshTokenCiphertext");
   });
 
   it("disconnects, stops prepared watches, and deletes only after no watch remains", async () => {

@@ -295,35 +295,42 @@ export class CalendarWatchService {
     ownerId: string,
     now = new Date()
   ): Promise<PreparedWatchStop[]> {
-    const connection = await this.prisma.googleCalendarConnection.findUnique({
+    const connections = await this.prisma.googleCalendarConnection.findMany({
       where: { ownerId },
-    });
-    if (!connection) return [];
-    const refreshToken = this.decryptRefreshToken(connection);
-    const watches = await this.prisma.calendarWatch.findMany({
-      where: {
-        ownerId,
-        connectionId: connection.id,
-        status: "active",
-        expiresAt: { gt: now },
-      },
       orderBy: { id: "asc" },
     });
-    return watches.map((watch) => ({
-      id: watch.id,
-      ownerId,
-      connectionId: connection.id,
-      channelId: watch.channelId,
-      resourceId: this.cipher.decrypt<string>(
-        WATCH_RESOURCE_PURPOSE,
-        ownerId,
-        watch.id,
-        envelope(watch, "resourceId")
-      ),
-      expiresAt: watch.expiresAt,
-      accessToken: null,
-      refreshToken,
-    }));
+    const prepared: PreparedWatchStop[] = [];
+    for (const connection of connections) {
+      const watches = await this.prisma.calendarWatch.findMany({
+        where: {
+          ownerId,
+          connectionId: connection.id,
+          status: "active",
+          expiresAt: { gt: now },
+        },
+        orderBy: { id: "asc" },
+      });
+      if (watches.length === 0) continue;
+      const refreshToken = this.decryptRefreshToken(connection);
+      prepared.push(
+        ...watches.map((watch) => ({
+          id: watch.id,
+          ownerId,
+          connectionId: connection.id,
+          channelId: watch.channelId,
+          resourceId: this.cipher.decrypt<string>(
+            WATCH_RESOURCE_PURPOSE,
+            ownerId,
+            watch.id,
+            envelope(watch, "resourceId")
+          ),
+          expiresAt: watch.expiresAt,
+          accessToken: null,
+          refreshToken,
+        }))
+      );
+    }
+    return prepared;
   }
 
   async transitionPreparedStops(

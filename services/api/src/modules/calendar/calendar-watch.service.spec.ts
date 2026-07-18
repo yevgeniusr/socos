@@ -391,44 +391,105 @@ describe("CalendarWatchService", () => {
     expect(tx.calendarSource.updateMany).toHaveBeenCalledTimes(3);
   });
 
-  it("prepares owner stops without mutating watch state or authorizing provider access", async () => {
+  it("prepares every owner connection watch with its matching account token", async () => {
     const { service, prisma, provider, cipher } = harness();
-    prisma.googleCalendarConnection.findUnique.mockResolvedValue({
-      id: "connection",
-      ownerId: "owner",
-      refreshTokenCiphertext: Buffer.from("r"),
-      refreshTokenIv: envelope.iv,
-      refreshTokenTag: envelope.tag,
-      refreshTokenKeyVersion: 1,
-    });
-    prisma.calendarWatch.findMany.mockResolvedValue([
+    prisma.googleCalendarConnection.findMany.mockResolvedValue([
       {
-        id: "active-watch",
-        channelId: "active-channel",
-        status: "active",
-        expiresAt: new Date("2026-07-17T12:00:00Z"),
-        resourceIdCiphertext: Buffer.from("resource"),
-        resourceIdIv: envelope.iv,
-        resourceIdTag: envelope.tag,
-        resourceIdKeyVersion: 1,
+        id: "connection-a",
+        ownerId: "owner",
+        refreshTokenCiphertext: Buffer.from("refresh-a"),
+        refreshTokenIv: envelope.iv,
+        refreshTokenTag: envelope.tag,
+        refreshTokenKeyVersion: 1,
+      },
+      {
+        id: "connection-b",
+        ownerId: "owner",
+        refreshTokenCiphertext: Buffer.from("refresh-b"),
+        refreshTokenIv: envelope.iv,
+        refreshTokenTag: envelope.tag,
+        refreshTokenKeyVersion: 1,
       },
     ]);
-    cipher.decrypt
-      .mockReturnValueOnce("refresh-token")
-      .mockReturnValueOnce("resource-id");
+    prisma.calendarWatch.findMany
+      .mockResolvedValueOnce([
+        {
+          id: "watch-a",
+          connectionId: "connection-a",
+          channelId: "channel-a",
+          status: "active",
+          expiresAt: new Date("2026-07-17T12:00:00Z"),
+          resourceIdCiphertext: Buffer.from("resource-a"),
+          resourceIdIv: envelope.iv,
+          resourceIdTag: envelope.tag,
+          resourceIdKeyVersion: 1,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: "watch-b",
+          connectionId: "connection-b",
+          channelId: "channel-b",
+          status: "active",
+          expiresAt: new Date("2026-07-17T12:30:00Z"),
+          resourceIdCiphertext: Buffer.from("resource-b"),
+          resourceIdIv: envelope.iv,
+          resourceIdTag: envelope.tag,
+          resourceIdKeyVersion: 1,
+        },
+      ]);
+    cipher.decrypt.mockImplementation(
+      (_purpose: string, _ownerId: string, aad: string) => `${aad}-plaintext`
+    );
 
     const prepared = await service.prepareOwnerStops("owner", NOW);
 
+    expect(prisma.googleCalendarConnection.findMany).toHaveBeenCalledWith({
+      where: { ownerId: "owner" },
+      orderBy: { id: "asc" },
+    });
+    expect(prisma.calendarWatch.findMany).toHaveBeenNthCalledWith(1, {
+      where: {
+        ownerId: "owner",
+        connectionId: "connection-a",
+        status: "active",
+        expiresAt: { gt: NOW },
+      },
+      orderBy: { id: "asc" },
+    });
+    expect(prisma.calendarWatch.findMany).toHaveBeenNthCalledWith(2, {
+      where: {
+        ownerId: "owner",
+        connectionId: "connection-b",
+        status: "active",
+        expiresAt: { gt: NOW },
+      },
+      orderBy: { id: "asc" },
+    });
     expect(prisma.calendarWatch.updateMany).not.toHaveBeenCalled();
     expect(provider.authorize).not.toHaveBeenCalled();
     expect(provider.stopChannel).not.toHaveBeenCalled();
     expect(prepared).toEqual([
-      expect.objectContaining({
-        id: "active-watch",
-        resourceId: "resource-id",
+      {
+        id: "watch-a",
+        ownerId: "owner",
+        connectionId: "connection-a",
+        channelId: "channel-a",
+        resourceId: "watch-a-plaintext",
+        expiresAt: new Date("2026-07-17T12:00:00Z"),
         accessToken: null,
-        refreshToken: "refresh-token",
-      }),
+        refreshToken: "connection-a-plaintext",
+      },
+      {
+        id: "watch-b",
+        ownerId: "owner",
+        connectionId: "connection-b",
+        channelId: "channel-b",
+        resourceId: "watch-b-plaintext",
+        expiresAt: new Date("2026-07-17T12:30:00Z"),
+        accessToken: null,
+        refreshToken: "connection-b-plaintext",
+      },
     ]);
   });
 
