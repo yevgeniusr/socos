@@ -114,7 +114,7 @@ Update the handoff, run `git diff --check`, commit the documentation-only receip
 
 Run Calendar integration UI tests, activation tests, API type checking, security regression, and repository diff checks.
 
-- [ ] **Step 2: Independent review**
+- [x] **Step 2: Independent review**
 
 Review OAuth ownership, timer cleanup, feature dependency order, feed allowlisting, cloud-only persistence, and production/application SHA separation.
 
