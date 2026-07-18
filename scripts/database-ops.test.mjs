@@ -15,6 +15,11 @@ import { join, resolve } from 'node:path';
 import test from 'node:test';
 
 const root = resolve(import.meta.dirname, '..');
+const migrationsRoot = resolve(root, 'services/api/prisma/migrations');
+const currentMigrationNames = readdirSync(migrationsRoot)
+  .filter((name) => existsSync(resolve(migrationsRoot, name, 'migration.sql')))
+  .sort();
+const currentMigrationCount = currentMigrationNames.length;
 const backupPgEnvironment = {
   PGHOST: 'example.invalid',
   PGPORT: '5432',
@@ -589,7 +594,11 @@ test('post-migration verifier supports an eleven-migration upgrade with receipts
 const migrationTwelveMetadata =
   'table_name\trow_count\nActionOutbox\t1\nActionProposal\t2\nAgentClient\t3\nAgentCredential\t3\nAgentIdempotencyRecord\t4\nApprovalGrant\t1\nCalendarEvent\t0\nCalendarSource\t0\nCalendarWatch\t0\nCityStay\t0\nContact\t106\nDerivedVisit\t0\nDiscoveredEvent\t0\nEventPreference\t0\nEventSource\t0\nGoogleCalendarConnection\t0\nGoogleOAuthAttempt\t0\nHumanIdempotencyRecord\t3\nInteractionReceipt\t4\nLocationAlias\t0\nLocationDevice\t0\nLocationSample\t0\nMutationAuditEvent\t8\nPersonalDataDeletionAudit\t0\n_prisma_migrations\t12\n';
 
-function runEventCatalogCountVerification(afterCatalogRows, candidateRows = 0) {
+function runEventCatalogCountVerification(
+  afterCatalogRows,
+  candidateRows = 0,
+  includeCandidateTable = true,
+) {
   const dir = mkdtempSync(join(tmpdir(), 'socos-event-catalog-count-test-'));
   const bin = join(dir, 'bin');
   const before = join(dir, 'before.tsv');
@@ -601,7 +610,7 @@ function runEventCatalogCountVerification(afterCatalogRows, candidateRows = 0) {
     `printf '${migrationTwelveMetadata
       .replace(
         '_prisma_migrations\t12\n',
-        `${afterCatalogRows}ContactEnrichmentCandidate\t${candidateRows}\n_prisma_migrations\t15\n`,
+        `${afterCatalogRows}${includeCandidateTable ? `ContactEnrichmentCandidate\t${candidateRows}\n` : ''}_prisma_migrations\t${currentMigrationCount}\n`,
       )
       .replaceAll('\n', '\\n')}'`,
   );
@@ -614,7 +623,11 @@ function runEventCatalogCountVerification(afterCatalogRows, candidateRows = 0) {
   });
 }
 
-test('post-migration verifier accepts all 49 seeded catalog listings and no follows', () => {
+test('post-migration verifier accepts the combined 16-migration baseline', () => {
+  assert.equal(currentMigrationCount, 16);
+  assert.equal(currentMigrationNames[14], '20260718200000_contact_enrichment');
+  assert.equal(currentMigrationNames[15], '20260718210000_google_calendar_multi_account');
+
   const result = runEventCatalogCountVerification(
     'EventCatalogFollow\t0\nEventCatalogListing\t49\n',
   );
@@ -622,7 +635,7 @@ test('post-migration verifier accepts all 49 seeded catalog listings and no foll
   assert.equal(result.status, 0, result.stderr);
   assert.equal(
     result.stdout.trim(),
-    'migration_counts_status=preserved existing_tables=24 new_empty_tables=2 migrations=15',
+    'migration_counts_status=preserved existing_tables=24 new_empty_tables=2 migrations=16',
   );
 });
 
@@ -661,6 +674,17 @@ test('post-migration verifier rejects contact enrichment candidates introduced w
   assert.match(result.stderr, /Post-migration aggregate verification failed/);
 });
 
+test('post-migration verifier rejects a missing contact enrichment rollout table', () => {
+  const result = runEventCatalogCountVerification(
+    'EventCatalogFollow\t0\nEventCatalogListing\t49\n',
+    0,
+    false,
+  );
+
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /Post-migration aggregate verification failed/);
+});
+
 test('post-migration verifier preserves existing event catalog counts at the current baseline', () => {
   const dir = mkdtempSync(join(tmpdir(), 'socos-current-event-catalog-count-test-'));
   const bin = join(dir, 'bin');
@@ -676,7 +700,7 @@ test('post-migration verifier preserves existing event catalog counts at the cur
     .replace('EventCatalogListing\t9', 'EventCatalogListing\t52')
     .replace(
       '_prisma_migrations\t13',
-      'ContactEnrichmentCandidate\t0\n_prisma_migrations\t15',
+      `ContactEnrichmentCandidate\t0\n_prisma_migrations\t${currentMigrationCount}`,
     );
   executable(bin, 'psql', `printf '${afterMetadata.replaceAll('\n', '\\n')}'`);
 
@@ -691,7 +715,7 @@ test('post-migration verifier preserves existing event catalog counts at the cur
   assert.equal(result.status, 0, result.stderr);
   assert.equal(
     result.stdout.trim(),
-    'migration_counts_status=preserved existing_tables=26 new_empty_tables=1 migrations=15',
+    'migration_counts_status=preserved existing_tables=26 new_empty_tables=1 migrations=16',
   );
 });
 
@@ -817,7 +841,7 @@ test('post-migration verifier requires contact enrichment candidates at the curr
   const before = join(dir, 'before.tsv');
   const metadata = migrationTwelveMetadata.replace(
     '_prisma_migrations\t12\n',
-    'EventCatalogFollow\t0\nEventCatalogListing\t49\n_prisma_migrations\t15\n',
+    `EventCatalogFollow\t0\nEventCatalogListing\t49\n_prisma_migrations\t${currentMigrationCount}\n`,
   );
   writeFileSync(before, metadata);
 
@@ -904,7 +928,10 @@ test('post-migration verifier rejects unexpected post-migration tables', () => {
     bin,
     'psql',
     `printf '${metadata
-      .replace('_prisma_migrations\t15', 'UnexpectedPersonalTable\t0\n_prisma_migrations\t15')
+      .replace(
+        '_prisma_migrations\t15',
+        `UnexpectedPersonalTable\t0\n_prisma_migrations\t${currentMigrationCount}`,
+      )
       .replaceAll('\n', '\\n')}'`,
   );
 

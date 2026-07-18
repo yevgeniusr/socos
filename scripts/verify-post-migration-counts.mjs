@@ -21,9 +21,26 @@ const pgEnvironment = Object.fromEntries(
 const migrationsRoot = resolve(
   process.env.SOCOS_MIGRATIONS_ROOT ?? 'services/api/prisma/migrations',
 );
-const expectedMigrationCount = readdirSync(migrationsRoot)
+const migrationNames = readdirSync(migrationsRoot)
   .filter((name) => existsSync(resolve(migrationsRoot, name, 'migration.sql')))
-  .length;
+  .sort();
+const expectedMigrationCount = migrationNames.length;
+const migrationCountByName = new Map(
+  migrationNames.map((name, index) => [name, index + 1]),
+);
+const contactEnrichmentMigrationCount = migrationCountByName.get(
+  '20260718200000_contact_enrichment',
+);
+const googleCalendarMultiAccountMigrationCount = migrationCountByName.get(
+  '20260718210000_google_calendar_multi_account',
+);
+if (
+  contactEnrichmentMigrationCount !== 15
+  || googleCalendarMultiAccountMigrationCount !== 16
+) {
+  console.error('Required migration rollout order is invalid.');
+  process.exit(65);
+}
 const agentInterfaceTables = [
   'ActionOutbox',
   'ActionProposal',
@@ -77,7 +94,11 @@ const introducedTableRollouts = [
       { name: 'EventCatalogFollow', introducedRowCount: 0 },
     ],
   },
-  emptyTableRollout(15, 'contact-enrichment tables', contactEnrichmentTables),
+  emptyTableRollout(
+    contactEnrichmentMigrationCount,
+    'contact-enrichment tables',
+    contactEnrichmentTables,
+  ),
 ];
 const rowCountRollouts = [
   {
