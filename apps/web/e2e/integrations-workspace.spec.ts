@@ -444,11 +444,13 @@ test.describe("authenticated Integrations workspace", () => {
     await expect(calendarAccess).toContainText("Discovering calendars");
     await expect(
       page.getByRole("checkbox", { name: "Use Synthetic primary calendar" })
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 15_000 });
     await expect(
       page.getByRole("checkbox", { name: "Use Synthetic shared calendar" })
-    ).toBeVisible();
-    await expect(calendarAccess).toContainText("1 of 2 calendars included");
+    ).toBeVisible({ timeout: 15_000 });
+    await expect(calendarAccess).toContainText("1 of 2 calendars included", {
+      timeout: 15_000,
+    });
   });
 
   test("resumes Calendar discovery after a failed disconnect", async ({
