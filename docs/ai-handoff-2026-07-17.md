@@ -31,9 +31,9 @@ read-only Codex and Claude plugin packages. The receipt adds migration 12, so
 the dedicated forced-command runner was provisioned with isolated rotating
 read/admin/restore roles and audited before deployment. The latest exact
 wrapper-level restore gate passed for
-`c17228405da9cf8d8ef3982e9c1ad78066aaba31`, and Coolify deployment
-`ua8hrkxs1ft32oyy0u7ma190` finished at that same SHA.
-Production is healthy with 13 applied migrations, 50 public tables, 106
+`8dc742e5e729a2a6137ccaa30af634c38f84e1c0`, and Coolify deployment
+`fobw461x9kmwqrsdc0sd7avj` finished at that same SHA.
+Production is healthy with 14 applied migrations, 50 public tables, 106
 non-demo contacts, 7 isolated demos, and the migration-12 receipt table.
 
 The tracked Hermes `socos-social-loop` skill is installed and attached to the
@@ -47,11 +47,11 @@ Snapshot taken in `/Users/mac/Desktop/projects/personal/socos`.
 
 | Area | State |
 | --- | --- |
-| Reviewed application SHA | `c17228405da9cf8d8ef3982e9c1ad78066aaba31` |
-| Latest reviewed source commit before this handoff | `c17228405da9cf8d8ef3982e9c1ad78066aaba31` |
+| Reviewed application SHA | `8dc742e5e729a2a6137ccaa30af634c38f84e1c0` |
+| Latest reviewed source commit before this handoff | `8dc742e5e729a2a6137ccaa30af634c38f84e1c0` |
 | Reviewed application-code ancestor | `084b7addb0ccc765aa343c5412ed8f5fe5f6da0b` |
 | Pre-activation-tooling baseline SHA | `69e6ac0444a50ae92d811155493fcff559774a86` |
-| Production application SHA | `c17228405da9cf8d8ef3982e9c1ad78066aaba31` |
+| Production application SHA | `8dc742e5e729a2a6137ccaa30af634c38f84e1c0` |
 | Current source branch | `main`; this handoff may be a later documentation-only commit; resolve any future candidate action-time |
 | Production status | `running:healthy` |
 | Production URL | `https://socos.rachkovan.com` |
@@ -61,7 +61,7 @@ Snapshot taken in `/Users/mac/Desktop/projects/personal/socos`.
 | Google OAuth material | verified in Keychain; plaintext client JSON deleted |
 | Owner access | recovered; HTTPS login and guarded route verified |
 | Pixel location | disabled |
-| Event catalog | deployed with 6 global listings and source-free owner follows |
+| Event catalog | deployed with 49 global listings, search/tags, and source-free owner follows |
 | Event ingestion | disabled |
 | Event briefs | disabled |
 | Hermes | installed, gateway supervised, cron active |
@@ -211,6 +211,11 @@ The resulting product direction is:
   rights, date certainty, freshness, and a responsive detail drawer.
 - Migration 13 adds six deterministic public listings: UAE public holidays, UN
   observances, two Hebcal calendars, GITEX Global, and AI Everything Global.
+- Migration 14 adds 43 rights-aware sources for open government holidays,
+  religious calendars, developer conferences, UAE culture and venues, sports,
+  and agreement-required discovery APIs. Production now has 49 listings and
+  zero owner follows. Mutable feeds remain tentative until occurrence-level
+  verification; no external scraping or ingestion was enabled.
 - Owner-scoped follow, pause, and resume are idempotent. A follow can exist
   before a certified source; deleting a later linked source is restricted so it
   cannot erase the saved preference.
@@ -264,9 +269,9 @@ The resulting product direction is:
   rotating isolated PostgreSQL roles, private work/lock paths, and exact cleanup
   proofs are live. Preserve this boundary and rerun provisioning after any
   interrupted credential rotation.
-- Migration 13, the reviewed P1 source, and the Event Catalog marketplace are
+- Migration 14, the reviewed P1 source, and the expanded Event Catalog marketplace are
   deployed. The current exact gated production SHA is
-  `c17228405da9cf8d8ef3982e9c1ad78066aaba31`.
+  `8dc742e5e729a2a6137ccaa30af634c38f84e1c0`.
 - Every later schema candidate still requires its own exact-SHA live receipt,
   exact deployment, and aggregate smoke; the current receipt is not reusable.
 
@@ -439,21 +444,20 @@ release gate: PASS
 Application UUID: swwcg80gkw4k0k4oco8w8wgw
 Database UUID: zwkk0scogckskkwss8oo48k4
 Backup configuration UUID: b85nxfljaz0xpo9xqa57lfr4
-Reviewed/deployed SHA: c17228405da9cf8d8ef3982e9c1ad78066aaba31
-Current deployment: ua8hrkxs1ft32oyy0u7ma190
-Live restore-gate backup: b10np7jcsl20l9j2sbp2zh74
-Live restore-gate backup size: 178830 bytes
-Live restore-gate dump SHA-256: 48d49a511feda9daa00c4db8f97e7fa489f9686535bfbfb419abbbb4a07cef12
-Live restore-gate aggregate tables: 48
+Reviewed/deployed SHA: 8dc742e5e729a2a6137ccaa30af634c38f84e1c0
+Current deployment: fobw461x9kmwqrsdc0sd7avj
+Live restore-gate backup: ahjdk7p3t7uimkcm7wnay4ur
+Live restore-gate backup size: 191164 bytes
+Live restore-gate dump SHA-256: 4983d9aeffa4fec3560f720b9afc2a98a77fa03ae7b4eb78401c37843af46cf3
+Live restore-gate aggregate tables: 50
 Live restore-gate result: passed; schema statements 0; counts preserved; cleanup verified
-Post-deploy migrations: 13
+Post-deploy migrations: 14
 Post-deploy public tables: 50
-Event catalog listings/follows: 6/0
+Event catalog listings/follows: 49/0
 Disabled-first deployment: jstocddvahtq2ptk159krd6e
-Calendar activation deployment: ua8hrkxs1ft32oyy0u7ma190
-Calendar activation backup: d1kx9cmwkzi44ywd85ne83jp
+Calendar activation deployment: fobw461x9kmwqrsdc0sd7avj
+Calendar activation backup: b335qyv4o9zdlse4kocx7hf2
 Calendar activation backup status: success
-Calendar activation backup size: 173186 bytes
 Owner-recovery backup: z7fzdte9nlv0b5v06bepzon8
 Owner-recovery backup status: success
 Rollback SHA: b0e88ccc535ba79d71a5586f341e0d3ac6be8ac1
@@ -503,13 +507,12 @@ for the exact SHA above; later schema candidates require a new receipt.
   `https://socos.rachkovan.com/api/integrations/google-calendar/callback`.
 - Socos requests exactly `calendar.calendarlist.readonly` and
   `calendar.events.readonly`, with no identity, profile, or write scope.
-- The first live callback failed because Google returned documented `scope`,
-  `authuser`, and `prompt` metadata while Socos accepted exactly two query keys.
-  Production evidence showed the attempt was never consumed. The fail-closed
-  parser now accepts only documented scalar metadata, discards it before state
-  validation, and still rejects unknown, duplicate, owner, and redirect input.
-  Calendar tests pass 96/96 and independent review approved the fix.
-- A fresh retry window was opened again after deployment `ua8hrkxs1ft32oyy0u7ma190`,
+- The callback failure was reproduced as valid scalar Google metadata such as
+  `iss` being rejected before state consumption. The parser now extracts only
+  state plus code/error, ignores other scalar metadata, and still rejects
+  duplicate arrays, nested values, missing outcomes, and code+error. The fix is
+  deployed and independently reviewed.
+- A fresh retry window was opened after deployment `fobw461x9kmwqrsdc0sd7avj`,
   but no callback arrived during the monitoring window. The real Google account
   is not yet connected; no partial connection row or consumed attempt is claimed.
 
@@ -671,12 +674,12 @@ Trust current evidence over any stale snapshot. Do not reset, clean, stash,
 rewrite history, switch branches, or discard existing/user changes.
 
 Production is deployed and healthy at exact reviewed SHA
-c17228405da9cf8d8ef3982e9c1ad78066aaba31 through Coolify deployment
-ua8hrkxs1ft32oyy0u7ma190. The dedicated forced-command runner returned an exit-0
+8dc742e5e729a2a6137ccaa30af634c38f84e1c0 through Coolify deployment
+fobw461x9kmwqrsdc0sd7avj. The dedicated forced-command runner returned an exit-0
 live restore receipt for that exact SHA: fresh backup
-b10np7jcsl20l9j2sbp2zh74, 48 pre-migration aggregate tables, zero schema drift, preserved
-migration counts, and verified cleanup. The activation then created backup
-d1kx9cmwkzi44ywd85ne83jp. Independent read-only verification confirmed the
+ahjdk7p3t7uimkcm7wnay4ur, 50 pre-migration aggregate tables, zero schema drift,
+preserved migration counts, and verified cleanup. The activation then created
+backup b335qyv4o9zdlse4kocx7hf2. Independent read-only verification confirmed the
 healthy exact deployment, equal environment pairs, Calendar credentials matching
 Keychain, Calendar enabled, and location/discovery/brief disabled. Public smokes
 are health 200, Calendar guard 401, disabled OwnTracks 503, and enabled Calendar
@@ -697,7 +700,7 @@ context, not the current release. Trust the exact current gate/deployment facts
 above and re-read Coolify before any later mutation.
 
 All 106 real Monica contacts plus 7 isolated demos are cloud-only. The global
-Event Catalog has 6 listings and 0 owner follows. Calendar code is currently
+Event Catalog has 49 listings and 0 owner follows. Calendar code is currently
 enabled; location, event ingestion, and event briefs are false in both profiles.
 Owner access was recovered through an independently reviewed,
 guarded cloud-only rotation after successful backup
@@ -710,9 +713,9 @@ its ID and secret were verified in memory, stored in Keychain, activated in both
 Coolify profiles, and independently matched without printing values. The
 plaintext downloaded client JSON was deleted. No agent accepted Google's User
 Data Policy. Calendar production configuration is enabled, but the real Google
-account is not connected. Sign in to the Integrations workspace and stop
-immediately before the Google account permission grant for separate action-time
-confirmation. After that grant, select calendars and verify only aggregate
+account is not connected. An agent may create a fresh single-use attempt and
+open the validated Google authorization page, but Yev must complete the account
+permission grant. After that grant, select calendars and verify only aggregate
 connection/source/watch/sync state plus the visible UI.
 
 Use the checked-in staged activation wrapper for every feature transition. The
