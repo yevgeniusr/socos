@@ -13,8 +13,7 @@ describe('EnrichmentAgent ownership', () => {
     jest.clearAllMocks();
   });
 
-  it('does not update a contact owned by another user', async () => {
-    prisma.contact.updateMany.mockResolvedValue({ count: 0 });
+  it('refuses legacy direct application so evidence cannot be bypassed', async () => {
     const agent = new EnrichmentAgent(prisma as unknown as PrismaService);
 
     const result = await agent.applyEnrichment(
@@ -22,17 +21,11 @@ describe('EnrichmentAgent ownership', () => {
       { company: 'Private Company' },
     );
 
-    expect(prisma.contact.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: 'foreign-contact',
-        ownerId: 'authenticated-user',
-      },
-      data: { company: 'Private Company' },
-    });
+    expect(prisma.contact.updateMany).not.toHaveBeenCalled();
     expect(prisma.contact.update).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       success: false,
-      error: 'Contact not found',
+      error: 'Direct enrichment application is disabled; submit an evidence-backed candidate instead',
     });
   });
 });

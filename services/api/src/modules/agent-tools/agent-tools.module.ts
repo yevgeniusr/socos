@@ -9,6 +9,7 @@ import { NotificationsModule } from "../notifications/notifications.module.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { RemindersModule } from "../reminders/reminders.module.js";
 import { RemindersService } from "../reminders/reminders.service.js";
+import { ContactEnrichmentService } from "../contact-enrichment/contact-enrichment.service.js";
 import { AgentReadService } from "./agent-read.service.js";
 import {
   AGENT_FEEDBACK_COMMANDS,
@@ -31,6 +32,7 @@ import { AgentToolRegistryService } from "./tool-registry.service.js";
     BriefFeedbackService,
     GamificationService,
     InteractionsService,
+    ContactEnrichmentService,
     AgentReadService,
     AgentToolHandlers,
     AgentToolRegistryService,

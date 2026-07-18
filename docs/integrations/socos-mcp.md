@@ -21,9 +21,9 @@ Use these initial profiles:
 
 | Client | Scopes |
 | --- | --- |
-| Hermes | `contacts:read`, `relationships:read`, `dates:read`, `reminders:read`, `briefs:read`, `interactions:write`, `reminders:write`, `feedback:write`, `quests:complete`, `proposals:write` |
-| Codex | `contacts:read`, `relationships:read`, `dates:read`, `reminders:read`, `briefs:read` |
-| Claude | `contacts:read`, `relationships:read`, `dates:read`, `reminders:read`, `briefs:read` |
+| Hermes | `contacts:read`, `relationships:read`, `dates:read`, `reminders:read`, `briefs:read`, `enrichment:read`, `interactions:write`, `reminders:write`, `feedback:write`, `quests:complete`, `proposals:write`, `enrichment:candidates:write`, `enrichment:accept` |
+| Codex | `contacts:read`, `relationships:read`, `dates:read`, `reminders:read`, `briefs:read`, `enrichment:read` |
+| Claude | `contacts:read`, `relationships:read`, `dates:read`, `reminders:read`, `briefs:read`, `enrichment:read` |
 
 Read tools do not mutate data. Interaction, reminder, feedback, and quest tools are
 automatic but require a stable per-intent `idempotencyKey`. Message, introduction,
@@ -37,6 +37,15 @@ omits `approvals:execute`; use a separate, narrowly operated client if approved
 execution is enabled in a future deployment. Direct calls remain scope-checked even
 when a caller already knows a hidden tool name. Approved execution is advertised as
 destructive to MCP clients; all other current tools are non-destructive.
+
+Enrichment uses four dedicated tools and never overloads an outbound-action
+approval type. `socos_contacts_missing_enrichment` and
+`socos_enrichment_candidates_list` require `enrichment:read`.
+`socos_enrichment_candidate_submit` requires `enrichment:candidates:write` and
+stores evidence only. `socos_enrichment_candidate_accept` requires
+`enrichment:accept`, refuses populated fields, and accepts only confidence `>= 0.90`
+from non-public sources. Public-web evidence remains pending for authenticated human
+review. See [Safe Contact Enrichment](../contact-enrichment.md).
 
 Rotate a credential immediately after suspected disclosure. Rotation invalidates
 the previous credential. Revoking a client invalidates all its credentials.

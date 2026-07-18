@@ -19,5 +19,14 @@ interaction or creating a reminder is allowed automatically. Outbound messages,
 introductions, invitations, merges, and deletions must stop after
 `socos_propose_action` until a human approves the proposal in Socos.
 
+For explicitly requested enrichment work, Hermes may page through
+`socos_contacts_missing_enrichment`, inspect candidates with
+`socos_enrichment_candidates_list`, and submit provenance-backed rows with
+`socos_enrichment_candidate_submit`. It may call
+`socos_enrichment_candidate_accept` only for confidence `>= 0.90` non-public
+evidence and must treat conflicts as a stop condition. Public-web evidence always
+stays pending; conversational approval is not enough to bypass that boundary. These
+tools do not send anything externally and do not require `approvals:execute`.
+
 Keep scheduled output aggregate-only. Never include raw credentials, authorization
 headers, full contact exports, or precise location samples in cron output.

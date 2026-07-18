@@ -91,7 +91,20 @@ test("both personal CRM skills permit automatic reads but forbid risky execution
     assert.match(skill, /never execute[^\n]*merge/i, skillPath);
     assert.match(skill, /never execute[^\n]*delet/i, skillPath);
     assert.match(skill, /approval is not execution/i, skillPath);
+    assert.match(skill, /enrichment candidates/i, skillPath);
   }
+});
+
+test("Hermes enrichment guidance preserves evidence and public-review boundaries", async () => {
+  const skill = await readText(
+    "integrations/hermes/skills/socos-social-loop/SKILL.md",
+  );
+
+  assert.match(skill, /socos_contacts_missing_enrichment/);
+  assert.match(skill, /socos_enrichment_candidate_submit/);
+  assert.match(skill, /socos_enrichment_candidate_accept/);
+  assert.match(skill, /public.{0,30}pending for human review/is);
+  assert.match(skill, /never requires `approvals:execute`/i);
 });
 
 test("strict validators reject malformed manifest metadata and unknown fields", async () => {

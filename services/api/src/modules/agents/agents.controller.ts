@@ -130,7 +130,7 @@ export class AgentsController {
 
   @Post('enrich/:contactId/apply')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Apply enrichment data to contact' })
+  @ApiOperation({ summary: 'Legacy direct enrichment apply (disabled)' })
   async applyEnrichment(
     @Request() req: AuthenticatedRequest,
     @Param('contactId') contactId: string,

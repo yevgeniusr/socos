@@ -4,11 +4,14 @@ export const AGENT_SCOPES = Object.freeze([
   'dates:read',
   'reminders:read',
   'briefs:read',
+  'enrichment:read',
   'interactions:write',
   'reminders:write',
   'feedback:write',
   'quests:complete',
   'proposals:write',
+  'enrichment:candidates:write',
+  'enrichment:accept',
   'approvals:execute',
 ] as const);
 

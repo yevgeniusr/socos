@@ -47,6 +47,8 @@ function contactDetailSelect(ownerId: string) {
     company: true,
     jobTitle: true,
     birthday: true,
+    birthdayMonth: true,
+    birthdayDay: true,
     anniversary: true,
     relationshipScore: true,
     importance: true,
@@ -199,6 +201,8 @@ export class ContactsService {
         company: dto.company,
         jobTitle: dto.jobTitle,
         birthday: dto.birthday ? new Date(dto.birthday) : undefined,
+        birthdayMonth: dto.birthday ? new Date(dto.birthday).getUTCMonth() + 1 : undefined,
+        birthdayDay: dto.birthday ? new Date(dto.birthday).getUTCDate() : undefined,
         anniversary: dto.anniversary ? new Date(dto.anniversary) : undefined,
         labels: dto.labels || [],
         tags: dto.tags || [],
@@ -295,6 +299,8 @@ export class ContactsService {
 
     if (birthday !== undefined) {
       updateData.birthday = birthday === null ? null : new Date(birthday);
+      updateData.birthdayMonth = birthday === null ? null : new Date(birthday).getUTCMonth() + 1;
+      updateData.birthdayDay = birthday === null ? null : new Date(birthday).getUTCDate();
     }
     if (anniversary !== undefined) {
       updateData.anniversary = anniversary === null ? null : new Date(anniversary);

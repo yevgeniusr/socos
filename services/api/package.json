@@ -21,6 +21,7 @@
     "start:debug": "nest start --debug --watch",
     "start:prod": "node --no-warnings=ExperimentalWarning --loader ts-node/esm ./dist/main.js",
     "personal-data:rekey": "node dist/cli/rekey-personal-data.js",
+    "contacts:enrichment:collect": "node dist/cli/contact-enrichment-collector.js",
     "lint": "ESLINT_USE_FLAT_CONFIG=false eslint \"src/**/*.ts\" --parser-options project:./tsconfig.eslint.json",
     "test": "jest --passWithNoTests",
     "test:watch": "jest --watch",

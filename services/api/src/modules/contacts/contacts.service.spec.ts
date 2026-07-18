@@ -543,6 +543,8 @@ describe('ContactsService personal profiles', () => {
           where: { id: 'synthetic-contact' },
           data: {
             birthday: null,
+            birthdayMonth: null,
+            birthdayDay: null,
             anniversary: new Date('2020-06-10T00:00:00.000Z'),
             firstMetDate: null,
             firstMetContext: 'Synthetic conference',

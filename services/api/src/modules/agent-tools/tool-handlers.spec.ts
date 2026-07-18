@@ -9,7 +9,13 @@ const principal: AgentPrincipal = {
   clientId: "client-synthetic",
   credentialId: "credential-synthetic",
   clientName: "Hermes Synthetic",
-  scopes: ["interactions:write", "reminders:write", "feedback:write"],
+  scopes: [
+    "interactions:write",
+    "reminders:write",
+    "feedback:write",
+    "enrichment:candidates:write",
+    "enrichment:accept",
+  ],
 };
 
 function harness() {
@@ -19,6 +25,8 @@ function harness() {
     relationshipHealth: jest.fn(),
     importantDates: jest.fn(),
     remindersList: jest.fn(),
+    contactsMissingEnrichment: jest.fn(),
+    enrichmentCandidatesList: jest.fn(),
   };
   const interactions = { createForAgent: jest.fn() };
   const reminders = { createForAgent: jest.fn(), create: jest.fn() };
@@ -28,6 +36,10 @@ function harness() {
   };
   const proposals = { createProposal: jest.fn() };
   const executions = { execute: jest.fn() };
+  const enrichment = {
+    submitCandidate: jest.fn(),
+    acceptCandidate: jest.fn(),
+  };
   return {
     handlers: new AgentToolHandlers(
       reads as never,
@@ -35,7 +47,8 @@ function harness() {
       reminders,
       feedback,
       proposals as never,
-      executions as never
+      executions as never,
+      enrichment as never
     ),
     reads,
     interactions,
@@ -43,10 +56,88 @@ function harness() {
     feedback,
     proposals,
     executions,
+    enrichment,
   };
 }
 
 describe("AgentToolHandlers", () => {
+  it("submits and accepts candidates through the idempotency transaction", async () => {
+    const { handlers, enrichment } = harness();
+    const transaction = { id: "tx" } as never;
+    const row = {
+      id: "candidate-synthetic",
+      contactId: "contact-synthetic",
+      fieldName: "company",
+      proposedValue: "Synthetic Labs",
+      sourceKind: "second_brain",
+      sourceLocator: "people/synthetic-person.md",
+      sourceReference: null,
+      sourceRetrievedAt: new Date("2026-07-18T10:00:00.000Z"),
+      confidence: 0.98,
+      matchRationale: "Exact full-name and labeled field.",
+      status: "pending",
+      contentHash: "a".repeat(64),
+      decidedAt: null,
+      appliedAt: null,
+      createdAt: new Date("2026-07-18T10:00:00.000Z"),
+      updatedAt: new Date("2026-07-18T10:00:00.000Z"),
+    };
+    enrichment.submitCandidate.mockResolvedValue({
+      candidate: row,
+      deduplicated: false,
+    });
+    enrichment.acceptCandidate.mockResolvedValue({
+      candidateId: row.id,
+      contactId: row.contactId,
+      fieldName: row.fieldName,
+      status: "accepted",
+      applied: true,
+      appliedAt: "2026-07-18T10:05:00.000Z",
+    });
+
+    await expect(
+      handlers.submitEnrichmentCandidate(
+        principal,
+        {
+          idempotencyKey: "candidate:intent-001",
+          contactId: row.contactId,
+          fieldName: "company",
+          proposedValue: "Synthetic Labs",
+          sourceKind: "second_brain",
+          sourceLocator: row.sourceLocator,
+          sourceRetrievedAt: "2026-07-18T10:00:00.000Z",
+          confidence: 0.98,
+          matchRationale: row.matchRationale,
+        },
+        transaction
+      )
+    ).resolves.toMatchObject({
+      deduplicated: false,
+      candidate: {
+        id: row.id,
+        sourceRetrievedAt: "2026-07-18T10:00:00.000Z",
+      },
+    });
+    await handlers.acceptEnrichmentCandidate(
+      principal,
+      {
+        idempotencyKey: "candidate:accept-001",
+        candidateId: row.id,
+      },
+      transaction
+    );
+
+    expect(enrichment.submitCandidate).toHaveBeenCalledWith(
+      principal.ownerId,
+      expect.not.objectContaining({ idempotencyKey: expect.anything() }),
+      transaction
+    );
+    expect(enrichment.acceptCandidate).toHaveBeenCalledWith(
+      principal.ownerId,
+      row.id,
+      transaction
+    );
+  });
   it("uses the transaction-aware interaction seam and least-privilege presenter", async () => {
     const { handlers, interactions } = harness();
     const transaction = { id: "tx" } as never;

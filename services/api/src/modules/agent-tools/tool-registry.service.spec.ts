@@ -15,6 +15,7 @@ const principal: AgentPrincipal = {
   clientName: "Hermes Synthetic",
   scopes: [
     "briefs:read",
+    "enrichment:read",
     "contacts:read",
     "relationships:read",
     "dates:read",
@@ -24,6 +25,8 @@ const principal: AgentPrincipal = {
     "feedback:write",
     "quests:complete",
     "proposals:write",
+    "enrichment:candidates:write",
+    "enrichment:accept",
     "approvals:execute",
   ],
 };
@@ -36,6 +39,10 @@ function harness() {
     relationshipHealth: jest.fn(),
     importantDates: jest.fn(),
     remindersList: jest.fn(),
+    contactsMissingEnrichment: jest.fn(),
+    enrichmentCandidatesList: jest.fn(),
+    submitEnrichmentCandidate: jest.fn(),
+    acceptEnrichmentCandidate: jest.fn(),
     logInteraction: jest
       .fn()
       .mockResolvedValue({ interactionId: "interaction-synthetic" }),
@@ -63,7 +70,7 @@ function harness() {
 }
 
 describe("AgentToolRegistryService", () => {
-  it("lists exactly the eleven tools in stable explicit order", () => {
+  it("lists exactly the fifteen tools in stable explicit order", () => {
     const { registry } = harness();
 
     expect(registry.list()).toEqual([
@@ -78,6 +85,18 @@ describe("AgentToolRegistryService", () => {
       metadata("socos_important_dates", "dates:read", "read", false),
       metadata("socos_reminders_list", "reminders:read", "read", false),
       metadata(
+        "socos_contacts_missing_enrichment",
+        "enrichment:read",
+        "read",
+        false
+      ),
+      metadata(
+        "socos_enrichment_candidates_list",
+        "enrichment:read",
+        "read",
+        false
+      ),
+      metadata(
         "socos_log_interaction",
         "interactions:write",
         "automatic",
@@ -86,6 +105,18 @@ describe("AgentToolRegistryService", () => {
       metadata("socos_create_reminder", "reminders:write", "automatic", true),
       metadata("socos_brief_feedback", "feedback:write", "automatic", true),
       metadata("socos_complete_quest", "quests:complete", "automatic", true),
+      metadata(
+        "socos_enrichment_candidate_submit",
+        "enrichment:candidates:write",
+        "automatic",
+        true
+      ),
+      metadata(
+        "socos_enrichment_candidate_accept",
+        "enrichment:accept",
+        "automatic",
+        true
+      ),
       metadata(
         "socos_propose_action",
         "proposals:write",
@@ -110,7 +141,7 @@ describe("AgentToolRegistryService", () => {
     const definitions = registry.definitions();
     const search = registry.getDefinition("socos_contacts_search");
 
-    expect(definitions).toHaveLength(11);
+    expect(definitions).toHaveLength(15);
     expect(Object.isFrozen(definitions)).toBe(true);
     expect(search?.metadata.name).toBe("socos_contacts_search");
     expect(search?.inputSchema.safeParse({ query: "Synthetic" }).success).toBe(
@@ -135,7 +166,67 @@ describe("AgentToolRegistryService", () => {
     expect(definitions.map(({ metadata }) => metadata.name)).toEqual([
       "socos_brief_today",
     ]);
-    expect(registry.definitions()).toHaveLength(11);
+    expect(registry.definitions()).toHaveLength(15);
+  });
+
+  it("publishes strict bounded enrichment schemas with idempotent writes", () => {
+    const { registry } = harness();
+    const missing = registry.getDefinition(
+      "socos_contacts_missing_enrichment"
+    )!;
+    const submit = registry.getDefinition("socos_enrichment_candidate_submit")!;
+    const accept = registry.getDefinition("socos_enrichment_candidate_accept")!;
+
+    expect(missing.inputSchema.safeParse({}).success).toBe(true);
+    expect(missing.inputSchema.safeParse({ limit: 101 }).success).toBe(false);
+    expect(submit.metadata.requiresIdempotencyKey).toBe(true);
+    expect(accept.metadata.requiresIdempotencyKey).toBe(true);
+    expect(
+      submit.inputSchema.safeParse({
+        idempotencyKey: "candidate:intent-001",
+        contactId: "contact-synthetic",
+        fieldName: "company",
+        proposedValue: "Synthetic Labs",
+        sourceKind: "second_brain",
+        sourceLocator: "people/synthetic-person.md",
+        sourceRetrievedAt: "2026-07-18T10:00:00.000Z",
+        confidence: 0.98,
+        matchRationale: "Exact full-name match and labeled field.",
+      }).success
+    ).toBe(true);
+    expect(
+      accept.inputSchema.safeParse({
+        idempotencyKey: "candidate:accept-001",
+        candidateId: "candidate-synthetic",
+        ownerId: "caller-controlled",
+      }).success
+    ).toBe(false);
+  });
+
+  it("filters enrichment discovery by each narrow server-owned scope", () => {
+    const { registry } = harness();
+
+    expect(
+      registry
+        .definitions({ ...principal, scopes: ["enrichment:read"] })
+        .map(({ metadata }) => metadata.name)
+    ).toEqual([
+      "socos_contacts_missing_enrichment",
+      "socos_enrichment_candidates_list",
+    ]);
+    expect(
+      registry
+        .definitions({
+          ...principal,
+          scopes: ["enrichment:candidates:write"],
+        })
+        .map(({ metadata }) => metadata.name)
+    ).toEqual(["socos_enrichment_candidate_submit"]);
+    expect(
+      registry
+        .definitions({ ...principal, scopes: ["enrichment:accept"] })
+        .map(({ metadata }) => metadata.name)
+    ).toEqual(["socos_enrichment_candidate_accept"]);
   });
 
   it("requires a repeat interval exactly for recurring reminders", () => {

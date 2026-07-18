@@ -37,11 +37,14 @@ const principals: Record<string, AgentPrincipal> = {
       "dates:read",
       "reminders:read",
       "briefs:read",
+      "enrichment:read",
       "interactions:write",
       "reminders:write",
       "feedback:write",
       "quests:complete",
       "proposals:write",
+      "enrichment:candidates:write",
+      "enrichment:accept",
       "approvals:execute",
     ],
   },
@@ -53,10 +56,34 @@ const definitions = [
   definition("socos_relationship_health", "relationships:read", "read", false),
   definition("socos_important_dates", "dates:read", "read", false),
   definition("socos_reminders_list", "reminders:read", "read", false),
+  definition(
+    "socos_contacts_missing_enrichment",
+    "enrichment:read",
+    "read",
+    false
+  ),
+  definition(
+    "socos_enrichment_candidates_list",
+    "enrichment:read",
+    "read",
+    false
+  ),
   definition("socos_log_interaction", "interactions:write", "automatic", true),
   definition("socos_create_reminder", "reminders:write", "automatic", true),
   definition("socos_brief_feedback", "feedback:write", "automatic", true),
   definition("socos_complete_quest", "quests:complete", "automatic", true),
+  definition(
+    "socos_enrichment_candidate_submit",
+    "enrichment:candidates:write",
+    "automatic",
+    true
+  ),
+  definition(
+    "socos_enrichment_candidate_accept",
+    "enrichment:accept",
+    "automatic",
+    true
+  ),
   definition(
     "socos_propose_action",
     "proposals:write",
@@ -227,7 +254,7 @@ describe("MCP Streamable HTTP protocol", () => {
     const allList = await step("all list", all.protocol.listTools());
     await all.protocol.close();
 
-    expect(allList.tools).toHaveLength(11);
+    expect(allList.tools).toHaveLength(15);
     expect(
       allList.tools
         .filter(({ annotations }) => annotations?.destructiveHint === true)

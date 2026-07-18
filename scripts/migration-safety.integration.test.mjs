@@ -56,6 +56,10 @@ const eventCatalogExpansionMigrationPath = resolve(
   root,
   "services/api/prisma/migrations/20260718180000_event_catalog_expansion/migration.sql",
 );
+const contactEnrichmentMigrationPath = resolve(
+  root,
+  "services/api/prisma/migrations/20260718200000_contact_enrichment/migration.sql",
+);
 const googleCalendarMultiAccountMigrationPath = resolve(
   root,
   "services/api/prisma/migrations/20260718210000_google_calendar_multi_account/migration.sql",
@@ -1302,6 +1306,87 @@ if (!databaseUrl) {
       [table, column],
     );
     return result.rows[0].present;
+  }
+
+  async function assertContactEnrichmentSchema(client) {
+    assert.equal(await tableExists(client, "ContactEnrichmentCandidate"), true);
+    assert.equal(await columnExists(client, "Contact", "birthdayMonth"), true);
+    assert.equal(await columnExists(client, "Contact", "birthdayDay"), true);
+
+    const constraints = await client.query(
+      `SELECT conname FROM pg_constraint
+       WHERE conname IN (
+         'Contact_birthday_parts_check',
+         'ContactEnrichmentCandidate_fieldName_check',
+         'ContactEnrichmentCandidate_sourceKind_check',
+         'ContactEnrichmentCandidate_status_check',
+         'ContactEnrichmentCandidate_confidence_check',
+         'ContactEnrichmentCandidate_contactId_ownerId_fkey'
+       )`,
+    );
+    assert.deepEqual(constraints.rows.map(({ conname }) => conname).sort(), [
+      "ContactEnrichmentCandidate_confidence_check",
+      "ContactEnrichmentCandidate_contactId_ownerId_fkey",
+      "ContactEnrichmentCandidate_fieldName_check",
+      "ContactEnrichmentCandidate_sourceKind_check",
+      "ContactEnrichmentCandidate_status_check",
+      "Contact_birthday_parts_check",
+    ]);
+  }
+
+  async function assertContactEnrichmentBehavior(client) {
+    await client.query(
+      `INSERT INTO "ContactEnrichmentCandidate" (
+         "id", "ownerId", "contactId", "fieldName", "proposedValue",
+         "sourceKind", "sourceLocator", "sourceRetrievedAt", "confidence",
+         "matchRationale", "contentHash", "updatedAt"
+       ) VALUES (
+         'candidate-owned', 'upgraded-user', 'upgraded-contact', 'company',
+         '"Synthetic Labs"'::jsonb, 'second_brain', 'people/synthetic.md',
+         CURRENT_TIMESTAMP, 0.98, 'Exact synthetic labeled field', repeat('a', 64),
+         CURRENT_TIMESTAMP
+       )`,
+    );
+    await assert.rejects(
+      client.query(
+        `INSERT INTO "ContactEnrichmentCandidate" (
+           "id", "ownerId", "contactId", "fieldName", "proposedValue",
+           "sourceKind", "sourceLocator", "sourceRetrievedAt", "confidence",
+           "matchRationale", "contentHash", "updatedAt"
+         ) VALUES (
+           'candidate-duplicate', 'upgraded-user', 'upgraded-contact', 'company',
+           '"Synthetic Labs"'::jsonb, 'second_brain', 'people/synthetic.md',
+           CURRENT_TIMESTAMP, 0.98, 'Exact synthetic labeled field', repeat('a', 64),
+           CURRENT_TIMESTAMP
+         )`,
+      ),
+      /unique constraint/,
+    );
+    await assert.rejects(
+      client.query(
+        `INSERT INTO "ContactEnrichmentCandidate" (
+           "id", "ownerId", "contactId", "fieldName", "proposedValue",
+           "sourceKind", "sourceLocator", "sourceRetrievedAt", "confidence",
+           "matchRationale", "contentHash", "updatedAt"
+         ) VALUES (
+           'candidate-cross-owner', 'foreign-owner', 'upgraded-contact', 'company',
+           '"Foreign"'::jsonb, 'second_brain', 'people/foreign.md', CURRENT_TIMESTAMP,
+           0.98, 'Synthetic cross-owner attempt', repeat('b', 64), CURRENT_TIMESTAMP
+         )`,
+      ),
+      /foreign key constraint/,
+    );
+    await assert.rejects(
+      client.query(
+        `UPDATE "Contact" SET "birthdayMonth" = 2, "birthdayDay" = NULL
+         WHERE "id" = 'upgraded-contact'`,
+      ),
+      /check constraint/,
+    );
+    await client.query(
+      `UPDATE "Contact" SET "birthdayMonth" = 2, "birthdayDay" = 29
+       WHERE "id" = 'upgraded-contact'`,
+    );
   }
 
   async function tableExists(client, table) {
@@ -3242,6 +3327,8 @@ if (!databaseUrl) {
       await client.query(readFileSync(eventCatalogMigrationPath, "utf8"));
       await client.query(readFileSync(eventCatalogExpansionMigrationPath, "utf8"));
       await assertEventCatalogSchema(client);
+      await client.query(readFileSync(contactEnrichmentMigrationPath, "utf8"));
+      await assertContactEnrichmentSchema(client);
 
       const after = await client.query(
         `SELECT
@@ -3293,6 +3380,7 @@ if (!databaseUrl) {
 
       await assertOwnerConsistency(client);
       await assertAgentOwnerConsistency(client);
+      await assertContactEnrichmentBehavior(client);
       await assertCalendarLocationBehavior(client);
       await assertEventDiscoveryBehavior(client);
     });
@@ -3333,6 +3421,7 @@ if (!databaseUrl) {
     await withClient(assertEventBriefSnapshotSchema);
     await withClient(assertHumanIdempotencySchema);
     await withClient(assertEventCatalogSchema);
+    await withClient(assertContactEnrichmentSchema);
 
     execFileSync(
       "pnpm",

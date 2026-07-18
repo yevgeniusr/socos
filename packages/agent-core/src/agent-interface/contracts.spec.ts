@@ -24,11 +24,14 @@ describe('agent interface constants', () => {
       'dates:read',
       'reminders:read',
       'briefs:read',
+      'enrichment:read',
       'interactions:write',
       'reminders:write',
       'feedback:write',
       'quests:complete',
       'proposals:write',
+      'enrichment:candidates:write',
+      'enrichment:accept',
       'approvals:execute',
     ]);
     expect(Object.isFrozen(AGENT_SCOPES)).toBe(true);

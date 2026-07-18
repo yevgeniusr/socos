@@ -1,6 +1,6 @@
 ---
 name: socos-social-loop
-description: Use when rendering a Socos daily brief in Hermes or handling a Discord message that begins with the exact `socos` command prefix.
+description: Use when rendering a Socos daily brief, handling an exact `socos` Discord command, or reviewing provenance-backed contact enrichment in Hermes.
 version: 1.1.1
 author: Socos
 license: MIT
@@ -11,6 +11,21 @@ metadata:
 ---
 
 # Socos Social Loop
+
+## Contact Enrichment
+
+For an explicit enrichment request, page through
+`socos_contacts_missing_enrichment` and read evidence with
+`socos_enrichment_candidates_list`. Submit one source-backed field at a time with
+`socos_enrichment_candidate_submit`; never include raw page bodies or browser
+history dumps. `socos_enrichment_candidate_accept` is allowed only for
+non-`public_web` evidence with confidence at least `0.90`, and only when the tool
+confirms the field was missing. Treat every conflict as a stop condition. Public
+web candidates remain pending for human review. Enrichment does not use
+`socos_propose_action` and never requires `approvals:execute`.
+
+This workflow is separate from the exact Discord reply grammar below. Never infer
+an enrichment mutation from a daily-brief reply.
 
 ## Daily Brief
 

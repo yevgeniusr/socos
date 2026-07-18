@@ -112,7 +112,10 @@ SOCOS ships with agents that do the tedious work so you can do the human work.
 > *"Sarah's birthday is tomorrow. Want to set a reminder to call?"*
 
 **Enrichment Agent**
-> Auto-fills missing contact details from LinkedIn, Twitter, and public sources — keeps your contacts fresh without manual data entry.
+> Builds provenance-backed field candidates from explicitly supplied sources.
+> Missing fields can be filled safely; populated fields and ambiguous identities
+> are never silently overwritten or guessed. See
+> [the enrichment operator guide](docs/contact-enrichment.md).
 
 **Summary Agent**
 > Paste meeting notes → get a structured interaction log automatically.

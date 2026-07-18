@@ -107,7 +107,16 @@ export class ImportantDatesService {
         where: {
           ownerId,
           isDemo: false,
-          OR: [{ birthday: { not: null } }, { anniversary: { not: null } }],
+          OR: [
+            { birthday: { not: null } },
+            {
+              AND: [
+                { birthdayMonth: { not: null } },
+                { birthdayDay: { not: null } },
+              ],
+            },
+            { anniversary: { not: null } },
+          ],
         },
         select: {
           id: true,
@@ -116,6 +125,8 @@ export class ImportantDatesService {
           firstName: true,
           lastName: true,
           birthday: true,
+          birthdayMonth: true,
+          birthdayDay: true,
           anniversary: true,
         },
       }),
@@ -192,8 +203,14 @@ export class ImportantDatesService {
 
       for (const sourceType of ["birthday", "anniversary"] as const) {
         const sourceDate = contact[sourceType];
-        if (!sourceDate) continue;
-        const { month, day } = monthAndDay(sourceDate);
+        if (!sourceDate && sourceType !== "birthday") continue;
+        const parts = sourceDate
+          ? monthAndDay(sourceDate)
+          : contact.birthdayMonth && contact.birthdayDay
+            ? { month: contact.birthdayMonth, day: contact.birthdayDay }
+            : null;
+        if (!parts) continue;
+        const { month, day } = parts;
         const occurrence = daysFromLocalDate(now, timeZone, month, day);
         if (!inHorizon(occurrence.daysAway, horizonDays)) continue;
 

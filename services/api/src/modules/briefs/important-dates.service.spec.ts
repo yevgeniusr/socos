@@ -13,6 +13,8 @@ function contact(overrides: Record<string, unknown>) {
     firstName: "Synthetic",
     lastName: "Contact",
     birthday: null,
+    birthdayMonth: null,
+    birthdayDay: null,
     anniversary: null,
     ...overrides,
   };
@@ -37,6 +39,12 @@ describe("ImportantDatesService", () => {
             id: "contact-horizon",
             firstName: "Horizon",
             birthday: new Date("1991-01-03T00:00:00Z"),
+          }),
+          contact({
+            id: "contact-partial-birthday",
+            firstName: "Yearless",
+            birthdayMonth: 12,
+            birthdayDay: 23,
           }),
           contact({
             id: "contact-demo",
@@ -213,6 +221,12 @@ describe("ImportantDatesService", () => {
         sourceId: "contact-birthday",
         dateKey: "2026-12-22",
         daysAway: 2,
+      },
+      {
+        sourceType: "birthday",
+        sourceId: "contact-partial-birthday",
+        dateKey: "2026-12-23",
+        daysAway: 3,
       },
       {
         sourceType: "birthday",

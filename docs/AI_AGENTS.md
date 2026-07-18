@@ -16,7 +16,7 @@ The SOCOS AI Agent system is a multi-agent architecture where each agent has a s
 |-------|---------------|-------------|
 | **Relationship Agent** | Tracks contacts needing attention based on interaction frequency and relationship score | `getRecommendations()`, `refreshScores()` |
 | **Reminder Agent** | Handles birthday, anniversary, follow-up, and stale contact reminders | `getUpcomingReminders()`, `syncCelebrationReminders()` |
-| **Enrichment Agent** | Auto-fills contact info from public sources (framework for Clearbit/LinkedIn) | `enrichContact()`, `enrichContacts()` |
+| **Enrichment Agent** | Reports completeness; evidence-backed changes use the scoped MCP candidate ledger | `socos_contacts_missing_enrichment`, `socos_enrichment_candidate_submit` |
 | **Summary Agent** | Generates AI summaries of interactions and contact history | `summarizeInteraction()`, `summarizeContactHistory()` |
 | **Suggestion Agent** | Recommends people to meet based on interests and patterns | `getSuggestions()`, `suggestIntroductions()` |
 
@@ -60,7 +60,7 @@ POST /api/agents/reminders/sync-celebrations    # Sync celebrations to reminders
 ```
 POST /api/agents/enrich/:contactId              # Enrich single contact
 POST /api/agents/enrich/batch                    # Batch enrich contacts
-POST /api/agents/enrich/:contactId/apply         # Apply enrichment data to contact
+POST /api/agents/enrich/:contactId/apply         # Disabled legacy direct-write route
 ```
 
 ### Summary Agent
@@ -94,13 +94,11 @@ OPENAI_API_KEY="sk-..."
 # Anthropic API (optional - for longer context)
 ANTHROPIC_API_KEY="sk-ant-..."
 
-# Clearbit for enrichment (optional)
-CLEARBIT_API_KEY="..."
 ```
 
 ## Future Enhancements
 
-1. **Real LLM Integration**: Connect to OpenAI/Anthropic for actual AI-powered summaries and enrichment
+1. **Human candidate review UI**: Review and decide pending public-web enrichment evidence
 2. **Agent Memory**: Each agent could have a memory of past actions to improve recommendations
 3. **Scheduled Agents**: Run agents on a cron schedule (e.g., reminder agent daily)
 4. **Multi-Agent Coordination**: Agents could communicate (e.g., enrichment agent → summary agent)

@@ -36,6 +36,13 @@ import type {
 } from "../reminders/reminders.service.js";
 import { ReminderType, RepeatInterval } from "../reminders/reminders.dto.js";
 import { AgentReadService } from "./agent-read.service.js";
+import { ContactEnrichmentService } from "../contact-enrichment/contact-enrichment.service.js";
+import {
+  ENRICHMENT_FIELDS,
+  ENRICHMENT_SOURCE_KINDS,
+  ENRICHMENT_STATUSES,
+  type SubmitEnrichmentCandidateInput,
+} from "../contact-enrichment/contact-enrichment.types.js";
 
 const entityId = z.string().min(1).max(128);
 const idempotencyKey = z.string().regex(/^[A-Za-z0-9._:-]{8,128}$/);
@@ -51,6 +58,40 @@ const importantDatesInputSchema = z.strictObject({
 });
 const remindersListInputSchema = z.strictObject({
   limit: z.number().int().min(1).max(20).default(20),
+});
+const enrichmentPageShape = {
+  offset: z.number().int().min(0).max(1_000_000).default(0),
+  limit: z.number().int().min(1).max(100).default(20),
+};
+const contactsMissingEnrichmentInputSchema =
+  z.strictObject(enrichmentPageShape);
+const enrichmentCandidatesListInputSchema = z.strictObject({
+  contactId: entityId,
+  status: z.enum(ENRICHMENT_STATUSES).optional(),
+  ...enrichmentPageShape,
+});
+const proposedValueSchema = z.union([
+  z.string().max(5_000),
+  z.record(
+    z.string().min(1).max(30),
+    z.union([z.string().max(2_048), z.number().int()])
+  ),
+]);
+const submitEnrichmentCandidateInputSchema = z.strictObject({
+  idempotencyKey,
+  contactId: entityId,
+  fieldName: z.enum(ENRICHMENT_FIELDS),
+  proposedValue: proposedValueSchema,
+  sourceKind: z.enum(ENRICHMENT_SOURCE_KINDS),
+  sourceLocator: z.string().trim().min(1).max(2_048),
+  sourceReference: z.string().trim().min(1).max(500).optional(),
+  sourceRetrievedAt: isoTimestamp,
+  confidence: z.number().min(0).max(1),
+  matchRationale: z.string().trim().min(1).max(1_000),
+});
+const acceptEnrichmentCandidateInputSchema = z.strictObject({
+  idempotencyKey,
+  candidateId: entityId,
 });
 const logInteractionInputSchema = z.strictObject({
   idempotencyKey,
@@ -146,6 +187,16 @@ type ImportantDatesInput = z.infer<typeof importantDatesInputSchema>;
 type RemindersListInput = z.infer<typeof remindersListInputSchema>;
 type LogInteractionInput = z.infer<typeof logInteractionInputSchema>;
 type CreateReminderInput = z.infer<typeof createReminderInputSchema>;
+type EnrichmentPageInput = z.infer<typeof contactsMissingEnrichmentInputSchema>;
+type EnrichmentCandidatesListInput = z.infer<
+  typeof enrichmentCandidatesListInputSchema
+>;
+type SubmitCandidateToolInput = z.infer<
+  typeof submitEnrichmentCandidateInputSchema
+>;
+type AcceptCandidateToolInput = z.infer<
+  typeof acceptEnrichmentCandidateInputSchema
+>;
 
 @Injectable()
 export class AgentToolHandlers {
@@ -158,7 +209,8 @@ export class AgentToolHandlers {
     @Inject(AGENT_FEEDBACK_COMMANDS)
     private readonly feedback: AgentFeedbackCommands,
     private readonly proposals: ActionProposalService,
-    private readonly executions: ApprovedActionExecutionService
+    private readonly executions: ApprovedActionExecutionService,
+    private readonly enrichment: ContactEnrichmentService
   ) {}
 
   briefToday(principal: AgentPrincipal) {
@@ -194,6 +246,28 @@ export class AgentToolHandlers {
 
   remindersList(principal: AgentPrincipal, input: RemindersListInput) {
     return this.reads.remindersList(principal.ownerId, input.limit);
+  }
+
+  contactsMissingEnrichment(
+    principal: AgentPrincipal,
+    input: EnrichmentPageInput
+  ) {
+    return this.enrichment.listIncomplete(principal.ownerId, input);
+  }
+
+  async enrichmentCandidatesList(
+    principal: AgentPrincipal,
+    input: EnrichmentCandidatesListInput
+  ) {
+    const result = await this.enrichment.listCandidates(
+      principal.ownerId,
+      input.contactId,
+      input
+    );
+    return {
+      ...result,
+      candidates: result.candidates.map(presentCandidate),
+    };
   }
 
   async logInteraction(
@@ -284,6 +358,35 @@ export class AgentToolHandlers {
     };
   }
 
+  async submitEnrichmentCandidate(
+    principal: AgentPrincipal,
+    input: SubmitCandidateToolInput,
+    transaction: Prisma.TransactionClient
+  ) {
+    const { idempotencyKey: _key, ...candidateInput } = input;
+    const result = await this.enrichment.submitCandidate(
+      principal.ownerId,
+      candidateInput as SubmitEnrichmentCandidateInput,
+      transaction
+    );
+    return {
+      candidate: presentCandidate(result.candidate),
+      deduplicated: result.deduplicated,
+    };
+  }
+
+  acceptEnrichmentCandidate(
+    principal: AgentPrincipal,
+    input: AcceptCandidateToolInput,
+    transaction: Prisma.TransactionClient
+  ) {
+    return this.enrichment.acceptCandidate(
+      principal.ownerId,
+      input.candidateId,
+      transaction
+    );
+  }
+
   async proposeAction(
     principal: AgentPrincipal,
     input: AgentActionProposalInput,
@@ -336,6 +439,44 @@ function domainIdempotencyKey(
   ])}`;
 }
 
+function presentCandidate(candidate: {
+  id: string;
+  contactId: string;
+  fieldName: string;
+  proposedValue: Prisma.JsonValue;
+  sourceKind: string;
+  sourceLocator: string;
+  sourceReference: string | null;
+  sourceRetrievedAt: Date;
+  confidence: number;
+  matchRationale: string;
+  status: string;
+  contentHash: string;
+  decidedAt: Date | null;
+  appliedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: candidate.id,
+    contactId: candidate.contactId,
+    fieldName: candidate.fieldName,
+    proposedValue: candidate.proposedValue,
+    sourceKind: candidate.sourceKind,
+    sourceLocator: candidate.sourceLocator,
+    sourceReference: candidate.sourceReference ?? null,
+    sourceRetrievedAt: candidate.sourceRetrievedAt.toISOString(),
+    confidence: candidate.confidence,
+    matchRationale: candidate.matchRationale,
+    status: candidate.status,
+    contentHash: candidate.contentHash,
+    decidedAt: candidate.decidedAt?.toISOString() ?? null,
+    appliedAt: candidate.appliedAt?.toISOString() ?? null,
+    createdAt: candidate.createdAt.toISOString(),
+    updatedAt: candidate.updatedAt.toISOString(),
+  };
+}
+
 export function createExplicitAgentTools(
   handlers: AgentToolHandlers
 ): readonly ExplicitAgentTool[] {
@@ -386,6 +527,24 @@ export function createExplicitAgentTools(
       handlers.remindersList.bind(handlers)
     ),
     tool(
+      "socos_contacts_missing_enrichment",
+      "List owner contacts with missing enrichment fields using bounded pagination.",
+      "enrichment:read",
+      "read",
+      false,
+      contactsMissingEnrichmentInputSchema,
+      handlers.contactsMissingEnrichment.bind(handlers)
+    ),
+    tool(
+      "socos_enrichment_candidates_list",
+      "List provenance-backed enrichment candidates for one owner contact.",
+      "enrichment:read",
+      "read",
+      false,
+      enrichmentCandidatesListInputSchema,
+      handlers.enrichmentCandidatesList.bind(handlers)
+    ),
+    tool(
       "socos_log_interaction",
       "Record a contact interaction.",
       "interactions:write",
@@ -420,6 +579,24 @@ export function createExplicitAgentTools(
       true,
       agentQuestCompletionInputSchema,
       handlers.completeQuest.bind(handlers)
+    ),
+    tool(
+      "socos_enrichment_candidate_submit",
+      "Submit one evidence-backed contact field candidate without changing the contact.",
+      "enrichment:candidates:write",
+      "automatic",
+      true,
+      submitEnrichmentCandidateInputSchema,
+      handlers.submitEnrichmentCandidate.bind(handlers)
+    ),
+    tool(
+      "socos_enrichment_candidate_accept",
+      "Apply a high-confidence non-public candidate only when the contact field is empty.",
+      "enrichment:accept",
+      "automatic",
+      true,
+      acceptEnrichmentCandidateInputSchema,
+      handlers.acceptEnrichmentCandidate.bind(handlers)
     ),
     tool(
       "socos_propose_action",

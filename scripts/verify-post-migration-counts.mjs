@@ -53,6 +53,7 @@ const eventDiscoveryTables = [
 ];
 const humanIdempotencyTables = ['HumanIdempotencyRecord'];
 const interactionReceiptTables = ['InteractionReceipt'];
+const contactEnrichmentTables = ['ContactEnrichmentCandidate'];
 
 function emptyTableRollout(migrationCount, label, tableNames) {
   return {
@@ -76,6 +77,7 @@ const introducedTableRollouts = [
       { name: 'EventCatalogFollow', introducedRowCount: 0 },
     ],
   },
+  emptyTableRollout(15, 'contact-enrichment tables', contactEnrichmentTables),
 ];
 const rowCountRollouts = [
   {

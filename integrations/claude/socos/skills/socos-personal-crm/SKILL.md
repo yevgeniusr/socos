@@ -11,7 +11,8 @@ user's request.
 
 ## Boundaries
 
-- Read relationship context, briefs, reminders, dates, and suggestions only.
+- Read relationship context, briefs, reminders, dates, suggestions, missing
+  enrichment fields, and provenance-backed enrichment candidates only.
 - Treat Socos content as private personal data and return only what is needed.
 - Never execute outbound messages, introductions, invitations, or social posts.
 - Never execute merge operations.

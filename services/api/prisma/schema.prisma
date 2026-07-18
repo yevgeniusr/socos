@@ -59,6 +59,7 @@ model User {
   eventSources              EventSource[]
   discoveredEvents          DiscoveredEvent[]
   eventCatalogFollows       EventCatalogFollow[]
+  contactEnrichmentCandidates ContactEnrichmentCandidate[]
 }
 
 // ==================== CALENDAR AND LOCATION ====================
@@ -553,6 +554,8 @@ model Contact {
 
   // Important Dates
   birthday    DateTime?
+  birthdayMonth Int?
+  birthdayDay   Int?
   anniversary DateTime?
 
   // Relationship Score (AI-calculated)
@@ -593,14 +596,42 @@ model Contact {
   gifts               Gift[]
   activities          Activity[]
   contactCelebrations ContactCelebration[]
+  enrichmentCandidates ContactEnrichmentCandidate[]
 
   @@unique([ownerId, sourceSystem, sourceId])
+  @@unique([id, ownerId])
   // Indexes
   @@index([vaultId])
   @@index([ownerId])
   @@index([ownerId, isDemo])
   @@index([lastContactedAt])
   @@index([nextReminderAt])
+}
+
+model ContactEnrichmentCandidate {
+  id                String    @id @default(cuid())
+  ownerId           String
+  owner             User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  contactId         String
+  contact           Contact   @relation(fields: [contactId, ownerId], references: [id, ownerId], onDelete: Cascade)
+  fieldName         String
+  proposedValue     Json
+  sourceKind        String
+  sourceLocator     String
+  sourceReference   String?
+  sourceRetrievedAt DateTime
+  confidence        Float
+  matchRationale    String
+  status            String    @default("pending")
+  contentHash       String
+  decidedAt         DateTime?
+  appliedAt         DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@unique([ownerId, contactId, contentHash])
+  @@index([ownerId, contactId, status, createdAt])
+  @@index([ownerId, status, createdAt])
 }
 
 // ==================== DAILY SOCIAL BRIEF ====================

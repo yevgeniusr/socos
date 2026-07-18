@@ -1,13 +1,11 @@
 /**
  * Enrichment Agent
  *
- * Auto-fills contact info from public sources.
- * In production, this would integrate with:
- * - LinkedIn API (for work info)
- * - Clearbit / FullContact (for enrichment data)
- * - Twitter/X API (for social links and bio)
+ * Legacy completeness reporter.
  *
- * Currently provides structured enrichment framework.
+ * Evidence collection, candidate persistence, and missing-only application live
+ * in ContactEnrichmentService and the scoped MCP tools. This class deliberately
+ * has no external enrichment integration or direct-apply path.
  */
 
 import { Injectable } from '@nestjs/common';
@@ -19,9 +17,7 @@ export class EnrichmentAgent {
   constructor(private prisma: PrismaService) {}
 
   /**
-   * Enrich a single contact with additional data
-   * In production, this would call external APIs.
-   * Currently provides framework for enrichment.
+   * Report enrichment completeness for a single contact.
    */
   async enrichContact(
     ctx: AgentContext,
@@ -53,43 +49,10 @@ export class EnrichmentAgent {
       const sources: string[] = [];
       let confidence = 0;
 
-      // In production, this would call enrichment APIs.
-      // For now, we provide a framework that can be extended:
-      //
-      // 1. LinkedIn / FullContact / Clearbit for:
-      //    - Company, job title
-      //    - Profile photo
-      //    - Work email/phone
-      //
-      // 2. Twitter/X for:
-      //    - Bio
-      //    - Social links
-      //
-      // 3. People search engines for:
-      //    - Additional contact info
-      //    - Profile photo
-      //
-      // Confidence score: 0-1 based on data quality
-      // Sources: list of sources that provided data
-
       // Calculate confidence based on how complete the contact is
       const fields = [contact.bio, contact.company, contact.jobTitle, contact.photo, contact.socialLinks];
       const filledFields = fields.filter(f => f && (!Array.isArray(f) || f.length > 0));
       confidence = filledFields.length / fields.length;
-
-      // This is a placeholder - in production, uncomment and use real API calls:
-      //
-      // const linkedinData = await this.enrichFromLinkedIn(contact);
-      // if (linkedinData) {
-      //   Object.assign(enriched, linkedinData);
-      //   sources.push('linkedin');
-      // }
-      //
-      // const clearbitData = await this.enrichFromClearbit(contact);
-      // if (clearbitData) {
-      //   Object.assign(enriched, clearbitData);
-      //   sources.push('clearbit');
-      // }
 
       // Check if we already have good data
       if (confidence >= 0.8) {
@@ -196,55 +159,13 @@ export class EnrichmentAgent {
       };
     }
 
-    try {
-      const updateData: any = {};
-      if (data.photo) updateData.photo = data.photo;
-      if (data.bio) updateData.bio = data.bio;
-      if (data.company) updateData.company = data.company;
-      if (data.jobTitle) updateData.jobTitle = data.jobTitle;
-      if (data.socialLinks) updateData.socialLinks = JSON.stringify(data.socialLinks);
-
-      const update = await this.prisma.contact.updateMany({
-        where: { id: ctx.contactId, ownerId: ctx.userId },
-        data: updateData,
-      });
-
-      if (update.count === 0) {
-        return {
-          success: false,
-          agent: 'enrichment' as any,
-          error: 'Contact not found',
-          executedAt: new Date(),
-        };
-      }
-
-      return {
-        success: true,
-        agent: 'enrichment' as any,
-        data: { updated: true },
-        executedAt: new Date(),
-      };
-    } catch (error) {
-      return {
-        success: false,
-        agent: 'enrichment' as any,
-        error: error instanceof Error ? error.message : 'Unknown error',
-        executedAt: new Date(),
-      };
-    }
+    void data;
+    return {
+      success: false,
+      agent: 'enrichment' as any,
+      error:
+        'Direct enrichment application is disabled; submit an evidence-backed candidate instead',
+      executedAt: new Date(),
+    };
   }
-
-  // Placeholder methods for real API integrations:
-  //
-  // private async enrichFromLinkedIn(contact: Contact): Promise<Partial<EnrichmentResult['enriched']>> {
-  //   // Requires: LinkedIn API key
-  //   // Endpoint: https://api.linkedin.com/v2/people/(id)
-  //   throw new Error('Not implemented - requires LinkedIn API credentials');
-  // }
-  //
-  // private async enrichFromClearbit(contact: Contact): Promise<Partial<EnrichmentResult['enriched']>> {
-  //   // Requires: Clearbit API key
-  //   // Endpoint: https://person.clearbit.com/v2/combined/find
-  //   throw new Error('Not implemented - requires Clearbit API credentials');
-  // }
 }
