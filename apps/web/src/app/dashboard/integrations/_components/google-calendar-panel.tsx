@@ -5,13 +5,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiJson } from "@/lib/api-client";
 import type {
   CalendarConnectResponse,
-  CalendarConnectionResponse,
+  CalendarConnectionsResponse,
   CalendarSourcesResponse,
   LoadableIntegration,
 } from "@/lib/integration-contracts";
 import {
   CALENDAR_SOURCE_DISCOVERY_SCHEDULE,
   calendarAccessSummary,
+  calendarConnectionOverview,
   integrationFailure,
   type CalendarAccessSummary,
 } from "../integration-view";
@@ -19,9 +20,13 @@ import ConfirmationDialog from "./confirmation-dialog";
 import IntegrationSection from "./integration-section";
 
 type CalendarPanelData = {
-  connection: CalendarConnectionResponse;
+  connections: CalendarConnectionsResponse;
   sources: CalendarSourcesResponse;
 };
+
+function hasActiveConnection(connections: CalendarConnectionsResponse) {
+  return connections.some((connection) => connection.status === "active");
+}
 
 export default function GoogleCalendarPanel({
   refreshToken,
@@ -55,8 +60,8 @@ export default function GoogleCalendarPanel({
     sourceConfirmedRef.current.clear();
     setState({ status: "loading" });
     try {
-      const [connection, sources] = await Promise.all([
-        apiJson<CalendarConnectionResponse>(
+      const [connections, sources] = await Promise.all([
+        apiJson<CalendarConnectionsResponse>(
           "/api/integrations/google-calendar",
           { signal }
         ),
@@ -69,7 +74,7 @@ export default function GoogleCalendarPanel({
         sourceConfirmedRef.current = new Map(
           sources.map((source) => [source.id, source.selected])
         );
-        setState({ status: "ready", data: { connection, sources } });
+        setState({ status: "ready", data: { connections, sources } });
       }
     } catch (error) {
       if (signal?.aborted || calendarEpochRef.current !== epoch) return;
@@ -91,7 +96,7 @@ export default function GoogleCalendarPanel({
   useEffect(() => {
     if (
       state.status !== "ready" ||
-      state.data.connection?.status !== "active" ||
+      !hasActiveConnection(state.data.connections) ||
       state.data.sources.length > 0
     ) {
       return;
@@ -133,7 +138,7 @@ export default function GoogleCalendarPanel({
         );
         setState((current) =>
           current.status === "ready" &&
-          current.data.connection?.status === "active" &&
+          hasActiveConnection(current.data.connections) &&
           current.data.sources.length === 0
             ? {
                 status: "ready",
@@ -185,7 +190,8 @@ export default function GoogleCalendarPanel({
     setActionError(null);
     setReceipt(null);
     setState((current) =>
-      current.status === "ready" && current.data.connection?.status === "active"
+      current.status === "ready" &&
+      hasActiveConnection(current.data.connections)
         ? {
             status: "ready",
             data: {
@@ -229,7 +235,7 @@ export default function GoogleCalendarPanel({
           }
           setState((current) =>
             current.status === "ready" &&
-            current.data.connection?.status === "active"
+            hasActiveConnection(current.data.connections)
               ? {
                   status: "ready",
                   data: {
@@ -276,10 +282,10 @@ export default function GoogleCalendarPanel({
       });
       setState({
         status: "ready",
-        data: { connection: null, sources: [] },
+        data: { connections: [], sources: [] },
       });
       setReceipt(
-        "Google Calendar sync stopped. Socos started cleanup of Calendar-derived context and the synced connection; provider watch cleanup may remain pending. Other personal context is unchanged."
+        `Google Calendar sync stopped. Socos started cleanup of Calendar-derived context and the synced ${connectionOverview.disconnectableCount === 1 ? "connection" : "connections"}; provider watch cleanup may remain pending. Other personal context is unchanged.`
       );
     } catch (error) {
       setActionError(
@@ -292,17 +298,9 @@ export default function GoogleCalendarPanel({
     }
   }
 
-  const connection = state.status === "ready" ? state.data.connection : null;
-  const connectionActive = connection?.status === "active";
-  const connectionLabel = !connection
-    ? "Not connected"
-    : connection.status === "active"
-      ? "Connected"
-      : connection.status === "needs_reauth"
-        ? "Reconnect required"
-        : connection.status === "disconnected"
-          ? "Disconnected"
-          : `Connection ${connection.status.replaceAll("_", " ")}`;
+  const connections = state.status === "ready" ? state.data.connections : [];
+  const connectionOverview = calendarConnectionOverview(connections);
+  const connectionActive = connectionOverview.activeCount > 0;
   const status =
     state.status === "loading"
       ? "Loading"
@@ -310,7 +308,7 @@ export default function GoogleCalendarPanel({
         ? "Not enabled"
         : state.status === "error"
           ? "Needs attention"
-          : connectionLabel;
+          : connectionOverview.statusLabel;
 
   return (
     <IntegrationSection
@@ -346,18 +344,20 @@ export default function GoogleCalendarPanel({
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-sm font-bold text-on-surface">
-                {connectionActive
-                  ? "Calendar connection is active."
-                  : connectionLabel}
+                {connectionOverview.detailLabel}
               </p>
               <p className="mt-1 text-xs text-on-surface-variant">
-                {connection?.lastSyncedAt
-                  ? `Last synced ${new Date(connection.lastSyncedAt).toLocaleString()}`
+                {connectionOverview.lastSyncedAt
+                  ? `Last synced ${new Date(connectionOverview.lastSyncedAt).toLocaleString()}`
                   : "No sync has completed yet."}
               </p>
-              {connection?.errorCode ? (
+              {connectionOverview.errorCodes.length ? (
                 <p className="mt-1 break-words text-xs text-error">
-                  Connection issue: {connection.errorCode}
+                  Connection{" "}
+                  {connectionOverview.errorCodes.length === 1
+                    ? "issue"
+                    : "issues"}
+                  : {connectionOverview.errorCodes.join(", ")}
                 </p>
               ) : null}
             </div>
@@ -368,13 +368,9 @@ export default function GoogleCalendarPanel({
                 onClick={() => void connect()}
                 className="min-h-11 bg-primary px-4 text-sm font-extrabold text-on-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-secondary disabled:opacity-50"
               >
-                {busy
-                  ? "Opening Google..."
-                  : connection
-                    ? "Reconnect Google Calendar"
-                    : "Connect Google Calendar"}
+                {busy ? "Opening Google..." : connectionOverview.connectLabel}
               </button>
-              {connectionActive ? (
+              {connectionOverview.disconnectableCount > 0 ? (
                 <button
                   type="button"
                   disabled={busy}
@@ -443,8 +439,12 @@ export default function GoogleCalendarPanel({
       {confirmingDisconnect ? (
         <ConfirmationDialog
           title="Disconnect Google Calendar"
-          description="Stops new Calendar sync and starts cleanup of the synced Calendar connection and Calendar-derived context. Provider watch cleanup is best-effort, so cleanup may remain pending. This is not the full personal-context erasure control."
-          confirmLabel="Disconnect"
+          description={`Stops new Calendar sync and starts cleanup of ${connectionOverview.disconnectableCount === 1 ? "the synced Calendar connection" : "all synced Calendar connections"} and Calendar-derived context. Provider watch cleanup is best-effort, so cleanup may remain pending. This is not the full personal-context erasure control.`}
+          confirmLabel={
+            connectionOverview.disconnectableCount > 1
+              ? "Disconnect all"
+              : "Disconnect"
+          }
           busy={busy}
           restoreFocusRef={receiptRef}
           onCancel={() => setConfirmingDisconnect(false)}

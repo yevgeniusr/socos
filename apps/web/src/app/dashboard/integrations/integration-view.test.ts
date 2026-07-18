@@ -3,12 +3,14 @@ import { describe, expect, it } from "vitest";
 import { ApiError } from "@/lib/api-client";
 import type {
   CalendarConnectionResponse,
+  CalendarConnectionsResponse,
   CalendarSourcesResponse,
   LoadableIntegration,
 } from "@/lib/integration-contracts";
 import {
   CALENDAR_SOURCE_DISCOVERY_SCHEDULE,
   calendarAccessSummary,
+  calendarConnectionOverview,
   hasExactReadOnlyCalendarScopes,
   integrationFailure,
   parseCalendarResult,
@@ -20,7 +22,7 @@ const REQUIRED_SCOPES = [
 ];
 
 type CalendarState = LoadableIntegration<{
-  connection: CalendarConnectionResponse;
+  connections: CalendarConnectionsResponse;
   sources: CalendarSourcesResponse;
 }>;
 
@@ -32,7 +34,17 @@ const activeConnection = {
   errorCode: null,
   createdAt: "2026-07-17T08:00:00.000Z",
   updatedAt: "2026-07-17T08:00:00.000Z",
-};
+} satisfies CalendarConnectionResponse;
+
+const needsReauthConnection = {
+  ...activeConnection,
+  id: "calendar-needs-reauth",
+  status: "needs_reauth",
+  lastSyncedAt: null,
+  errorCode: "google_invalid_grant",
+  createdAt: "2026-07-17T09:00:00.000Z",
+  updatedAt: "2026-07-17T09:00:00.000Z",
+} satisfies CalendarConnectionResponse;
 
 const sources = [
   {
@@ -141,7 +153,7 @@ describe("calendarAccessSummary", () => {
   it("reports discovery while an active connection has no calendar sources", () => {
     const state: CalendarState = {
       status: "ready",
-      data: { connection: activeConnection, sources: [] },
+      data: { connections: [activeConnection], sources: [] },
     };
 
     expect(calendarAccessSummary(state)).toEqual({
@@ -154,7 +166,7 @@ describe("calendarAccessSummary", () => {
   it("reports exact read-only access and selected source counts", () => {
     const state: CalendarState = {
       status: "ready",
-      data: { connection: activeConnection, sources },
+      data: { connections: [activeConnection], sources },
     };
 
     expect(calendarAccessSummary(state)).toEqual({
@@ -168,10 +180,12 @@ describe("calendarAccessSummary", () => {
     const state: CalendarState = {
       status: "ready",
       data: {
-        connection: {
-          ...activeConnection,
-          grantedScopes: [...REQUIRED_SCOPES, REQUIRED_SCOPES[0]],
-        },
+        connections: [
+          {
+            ...activeConnection,
+            grantedScopes: [...REQUIRED_SCOPES, REQUIRED_SCOPES[0]],
+          },
+        ],
         sources,
       },
     };
@@ -180,6 +194,60 @@ describe("calendarAccessSummary", () => {
       state: "review",
       accessLabel: "Scope needs review",
       sourceLabel: "1 of 2 calendars included",
+    });
+  });
+
+  it("summarizes multiple active read-only connections", () => {
+    const state: CalendarState = {
+      status: "ready",
+      data: {
+        connections: [
+          activeConnection,
+          { ...activeConnection, id: "calendar-active-second" },
+        ],
+        sources,
+      },
+    };
+
+    expect(calendarAccessSummary(state)).toEqual({
+      state: "active",
+      accessLabel: "2 accounts read only",
+      sourceLabel: "1 of 2 calendars included",
+    });
+  });
+
+  it("reports mixed active and needs-reauth connections for review", () => {
+    const state: CalendarState = {
+      status: "ready",
+      data: {
+        connections: [activeConnection, needsReauthConnection],
+        sources,
+      },
+    };
+
+    expect(calendarAccessSummary(state)).toEqual({
+      state: "review",
+      accessLabel: "1 read only / 1 reconnect required",
+      sourceLabel: "1 of 2 calendars included",
+    });
+  });
+
+  it("reports connections that all need reauth as reviewable", () => {
+    const state: CalendarState = {
+      status: "ready",
+      data: {
+        connections: [
+          needsReauthConnection,
+          { ...needsReauthConnection, id: "calendar-needs-reauth-second" },
+        ],
+        sources: [],
+      },
+    };
+
+    expect(calendarAccessSummary(state)).toEqual({
+      state: "review",
+      accessLabel: "2 accounts reconnect required",
+      sourceLabel: "No calendars available",
     });
   });
 
@@ -214,7 +282,7 @@ describe("calendarAccessSummary", () => {
     [
       {
         status: "ready",
-        data: { connection: null, sources: [] },
+        data: { connections: [], sources: [] },
       } satisfies CalendarState,
       {
         state: "disconnected",
@@ -227,11 +295,80 @@ describe("calendarAccessSummary", () => {
   });
 });
 
+describe("calendarConnectionOverview", () => {
+  it("describes zero connections", () => {
+    expect(calendarConnectionOverview([])).toEqual({
+      activeCount: 0,
+      needsReauthCount: 0,
+      disconnectableCount: 0,
+      statusLabel: "Not connected",
+      detailLabel: "Not connected",
+      connectLabel: "Connect Google Calendar",
+      lastSyncedAt: null,
+      errorCodes: [],
+    });
+  });
+
+  it("describes one active connection", () => {
+    expect(calendarConnectionOverview([activeConnection])).toEqual({
+      activeCount: 1,
+      needsReauthCount: 0,
+      disconnectableCount: 1,
+      statusLabel: "Connected",
+      detailLabel: "Calendar connection is active.",
+      connectLabel: "Connect another Google Calendar",
+      lastSyncedAt: activeConnection.lastSyncedAt,
+      errorCodes: [],
+    });
+  });
+
+  it("counts multiple active and needs-reauth connections deterministically", () => {
+    expect(
+      calendarConnectionOverview([
+        needsReauthConnection,
+        activeConnection,
+        { ...activeConnection, id: "calendar-active-second" },
+      ])
+    ).toEqual({
+      activeCount: 2,
+      needsReauthCount: 1,
+      disconnectableCount: 3,
+      statusLabel: "2 connected / 1 reconnect required",
+      detailLabel: "2 of 3 Calendar connections are active.",
+      connectLabel: "Reconnect Google Calendar",
+      lastSyncedAt: activeConnection.lastSyncedAt,
+      errorCodes: ["google_invalid_grant"],
+    });
+  });
+
+  it("truthfully describes multiple connections that all need reauth", () => {
+    expect(
+      calendarConnectionOverview([
+        needsReauthConnection,
+        {
+          ...needsReauthConnection,
+          id: "calendar-needs-reauth-second",
+          errorCode: "google_oauth_provider_error",
+        },
+      ])
+    ).toEqual({
+      activeCount: 0,
+      needsReauthCount: 2,
+      disconnectableCount: 2,
+      statusLabel: "2 reconnect required",
+      detailLabel: "2 Calendar connections require reconnection.",
+      connectLabel: "Reconnect Google Calendar",
+      lastSyncedAt: null,
+      errorCodes: ["google_invalid_grant", "google_oauth_provider_error"],
+    });
+  });
+});
+
 describe("Calendar source discovery schedule", () => {
   it("covers backend reconciliation while remaining bounded", () => {
-    expect(CALENDAR_SOURCE_DISCOVERY_SCHEDULE.intervalMs).toBeGreaterThanOrEqual(
-      1_000
-    );
+    expect(
+      CALENDAR_SOURCE_DISCOVERY_SCHEDULE.intervalMs
+    ).toBeGreaterThanOrEqual(1_000);
     expect(CALENDAR_SOURCE_DISCOVERY_SCHEDULE.retryLimit).toBeLessThanOrEqual(
       30
     );

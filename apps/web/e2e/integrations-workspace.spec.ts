@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import type { CalendarConnectionResponse } from "../src/lib/integration-contracts";
 
 const ISO_NOW = "2026-07-17T08:00:00.000Z";
 const FEED_URL = "https://events.example.test/dubai-ai.ics";
@@ -35,7 +36,17 @@ const calendarConnection = {
   errorCode: null,
   createdAt: ISO_NOW,
   updatedAt: ISO_NOW,
-};
+} satisfies CalendarConnectionResponse;
+
+const calendarConnectionNeedsReauth = {
+  ...calendarConnection,
+  id: "calendar-connection-needs-reauth",
+  status: "needs_reauth",
+  lastSyncedAt: null,
+  errorCode: "google_invalid_grant",
+  createdAt: "2026-07-17T09:00:00.000Z",
+  updatedAt: "2026-07-17T09:00:00.000Z",
+} satisfies CalendarConnectionResponse;
 
 const calendarSources = [
   {
@@ -162,13 +173,14 @@ async function installSyntheticApi(page: Page, options: SyntheticOptions = {}) {
     calendarFailuresRemaining: options.calendarFailures ?? 0,
     emptyCalendarSourceResponsesRemaining:
       options.emptyCalendarSourceResponses ?? 0,
-    calendarConnection: {
-      ...calendarConnection,
-      grantedScopes: options.calendarScopes ?? calendarConnection.grantedScopes,
-    } as Omit<typeof calendarConnection, "status" | "errorCode"> & {
-      status: string;
-      errorCode: string | null;
-    },
+    calendarConnections: [
+      {
+        ...calendarConnection,
+        grantedScopes:
+          options.calendarScopes ?? calendarConnection.grantedScopes,
+      },
+    ] as CalendarConnectionResponse[],
+    calendarSources: calendarSources.map((source) => ({ ...source })),
     calendarConnectPayloads: [] as unknown[],
     calendarSelectionPayloads: [] as unknown[],
     calendarPatchAttempts: 0,
@@ -264,7 +276,7 @@ async function installSyntheticApi(page: Page, options: SyntheticOptions = {}) {
         state.calendarFailuresRemaining -= 1;
         return json(route, { message: "Synthetic Calendar failure" }, 500);
       }
-      return json(route, state.calendarConnection);
+      return json(route, state.calendarConnections);
     }
     if (
       url.pathname === "/api/integrations/google-calendar/sources" &&
@@ -280,7 +292,7 @@ async function installSyntheticApi(page: Page, options: SyntheticOptions = {}) {
         state.emptyCalendarSourceResponsesRemaining -= 1;
         return json(route, []);
       }
-      return json(route, calendarSources);
+      return json(route, state.calendarSources);
     }
     if (
       url.pathname === "/api/integrations/google-calendar/connect" &&
@@ -430,6 +442,104 @@ async function installSyntheticApi(page: Page, options: SyntheticOptions = {}) {
 }
 
 test.describe("authenticated Integrations workspace", () => {
+  test("renders the real Calendar connection array without browser errors", async ({
+    page,
+  }) => {
+    await installSyntheticApi(page);
+    await page.goto("/dashboard/integrations");
+
+    const calendar = page.getByRole("region", { name: "Google Calendar" });
+    await expect(
+      calendar.getByText("Connected", { exact: true })
+    ).toBeVisible();
+    await expect(calendar.getByRole("checkbox")).toHaveCount(2);
+  });
+
+  test("renders zero Calendar connections truthfully", async ({ page }) => {
+    const api = await installSyntheticApi(page);
+    api.calendarConnections = [];
+    api.calendarSources = [];
+    await page.goto("/dashboard/integrations");
+
+    const calendar = page.getByRole("region", { name: "Google Calendar" });
+    await expect(
+      calendar.getByText("Not connected", { exact: true }).first()
+    ).toBeVisible();
+    await expect(
+      calendar.getByRole("button", { name: "Connect Google Calendar" })
+    ).toBeVisible();
+    await expect(
+      calendar.getByRole("button", { name: "Disconnect Google Calendar" })
+    ).toHaveCount(0);
+    await expect(calendar.getByRole("checkbox")).toHaveCount(0);
+  });
+
+  test("summarizes multiple active Calendar connections", async ({ page }) => {
+    const api = await installSyntheticApi(page);
+    api.calendarConnections = [
+      calendarConnection,
+      { ...calendarConnection, id: "calendar-connection-active-second" },
+    ];
+    await page.goto("/dashboard/integrations");
+
+    const calendar = page.getByRole("region", { name: "Google Calendar" });
+    await expect(
+      calendar.getByText("2 connected", { exact: true }).first()
+    ).toBeVisible();
+    await expect(
+      calendar.getByText("2 Calendar connections are active.")
+    ).toBeVisible();
+    await expect(
+      page.getByRole("status", { name: "Calendar access" })
+    ).toContainText("2 accounts read only");
+    await expect(
+      calendar.getByRole("button", {
+        name: "Connect another Google Calendar",
+      })
+    ).toBeVisible();
+    await expect(calendar.getByRole("checkbox")).toHaveCount(2);
+  });
+
+  test("summarizes mixed active and needs-reauth Calendar connections", async ({
+    page,
+  }) => {
+    const api = await installSyntheticApi(page);
+    api.calendarConnections = [
+      calendarConnection,
+      calendarConnectionNeedsReauth,
+    ];
+    await page.goto("/dashboard/integrations");
+
+    const calendar = page.getByRole("region", { name: "Google Calendar" });
+    await expect(
+      calendar
+        .getByText("1 connected / 1 reconnect required", { exact: true })
+        .first()
+    ).toBeVisible();
+    await expect(
+      calendar.getByText("1 of 2 Calendar connections is active.")
+    ).toBeVisible();
+    await expect(
+      page.getByRole("status", { name: "Calendar access" })
+    ).toContainText("1 read only / 1 reconnect required");
+    await expect(
+      calendar.getByText("Connection issue: google_invalid_grant")
+    ).toBeVisible();
+    await expect(
+      calendar.getByRole("button", { name: "Reconnect Google Calendar" })
+    ).toBeVisible();
+    await calendar
+      .getByRole("button", { name: "Disconnect Google Calendar" })
+      .click();
+    const dialog = page.getByRole("dialog", {
+      name: "Disconnect Google Calendar",
+    });
+    await expect(dialog).toContainText("all synced Calendar connections");
+    await expect(
+      dialog.getByRole("button", { name: "Disconnect all" })
+    ).toBeVisible();
+  });
+
   test("discovers Calendar sources after an initially empty response", async ({
     page,
   }) => {
@@ -536,7 +646,7 @@ test.describe("authenticated Integrations workspace", () => {
     await expect(calendarAccess).toContainText("0 of 2 calendars included");
 
     await calendar
-      .getByRole("button", { name: "Reconnect Google Calendar" })
+      .getByRole("button", { name: "Connect another Google Calendar" })
       .click();
     await expect.poll(() => api.calendarConnectPayloads).toEqual([{}]);
     await expect(page).toHaveURL(/synthetic-oauth=google/);
@@ -977,7 +1087,7 @@ test.describe("authenticated Integrations workspace", () => {
         .filter({ hasText: "Calendar selection saved" })
     ).toBeVisible();
     await calendar
-      .getByRole("button", { name: "Reconnect Google Calendar" })
+      .getByRole("button", { name: "Connect another Google Calendar" })
       .click();
     await expect(
       calendar
@@ -1010,11 +1120,7 @@ test.describe("authenticated Integrations workspace", () => {
     page,
   }) => {
     const api = await installSyntheticApi(page);
-    api.calendarConnection = {
-      ...calendarConnection,
-      status: "needs_reauth",
-      errorCode: "google_invalid_grant",
-    };
+    api.calendarConnections = [calendarConnectionNeedsReauth];
     await page.goto("/dashboard/integrations?calendar=error");
 
     const calendar = page.getByRole("region", { name: "Google Calendar" });
@@ -1027,27 +1133,27 @@ test.describe("authenticated Integrations workspace", () => {
     await expect(calendar.getByRole("checkbox")).toHaveCount(0);
     await expect(
       calendar.getByRole("button", { name: "Disconnect Google Calendar" })
-    ).toHaveCount(0);
+    ).toBeVisible();
     await expect(
       page.getByRole("status").filter({ hasText: "connection failed" })
     ).toBeVisible();
     await expect(page).toHaveURL(/\/dashboard\/integrations$/);
 
-    api.calendarConnection = {
-      ...calendarConnection,
-      status: "disconnected",
-      errorCode: null,
-    };
+    api.calendarConnections = [
+      { ...calendarConnection, status: "disconnected", errorCode: null },
+    ];
     await page.reload();
     await expect(
       calendar.getByText("Disconnected", { exact: true }).first()
     ).toBeVisible();
 
-    api.calendarConnection = {
-      ...calendarConnection,
-      status: "error",
-      errorCode: "google_rate_limited",
-    };
+    api.calendarConnections = [
+      {
+        ...calendarConnection,
+        status: "error",
+        errorCode: "google_rate_limited",
+      },
+    ];
     await page.reload();
     await expect(
       calendar.getByText("Connection error", { exact: true }).first()

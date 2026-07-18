@@ -8,7 +8,7 @@ export interface CalendarConnectResponse {
   authorizationUrl: string;
 }
 
-export type CalendarConnectionResponse = {
+export interface CalendarConnectionResponse {
   id: string;
   status: string;
   grantedScopes: string[];
@@ -16,7 +16,9 @@ export type CalendarConnectionResponse = {
   errorCode: string | null;
   createdAt: string;
   updatedAt: string;
-} | null;
+}
+
+export type CalendarConnectionsResponse = CalendarConnectionResponse[];
 
 export interface CalendarSourceResponse {
   id: string;
