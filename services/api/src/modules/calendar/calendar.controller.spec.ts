@@ -180,10 +180,9 @@ describe("calendar controller boundaries", () => {
       { state: "state", code: "code", scope: ["one", "two"] },
       "duplicate scope",
     ],
-    [{ state: "state", code: "code", ownerId: "injected" }, "extra owner"],
     [
-      { state: "state", code: "code", redirect_uri: "https://attacker.test" },
-      "redirect injection",
+      { state: "state", code: "code", redirect_uri: ["one", "two"] },
+      "duplicate unknown metadata",
     ],
     [{ state: "state" }, "missing outcome"],
   ])("rejects %s query input before provider work", (query, _label) => {
@@ -192,7 +191,7 @@ describe("calendar controller boundaries", () => {
     );
   });
 
-  it("accepts Google success metadata but returns only state and code", () => {
+  it("ignores scalar OAuth response metadata but returns only state and code", () => {
     expect(
       parseGoogleOAuthCallbackQuery({
         state: "state",
@@ -201,16 +200,24 @@ describe("calendar controller boundaries", () => {
         authuser: "0",
         prompt: "consent",
         hd: "example.test",
+        iss: "https://accounts.google.com",
+        ownerId: "ignored-not-authority",
+        redirect_uri: "https://attacker.test/ignored",
       })
     ).toEqual({ state: "state", code: "code" });
   });
 
-  it("accepts exactly one scalar code or provider error without metadata", () => {
+  it("accepts exactly one scalar code or provider error and ignores scalar metadata", () => {
     expect(
       parseGoogleOAuthCallbackQuery({ state: "state", code: "code" })
     ).toEqual({ state: "state", code: "code" });
     expect(
-      parseGoogleOAuthCallbackQuery({ state: "state", error: "access_denied" })
+      parseGoogleOAuthCallbackQuery({
+        state: "state",
+        error: "access_denied",
+        error_description: "user denied access",
+        iss: "https://accounts.google.com",
+      })
     ).toEqual({ state: "state", error: "access_denied" });
   });
 
@@ -236,7 +243,7 @@ describe("calendar controller boundaries", () => {
   });
 
   it.each([
-    ["parser failure", { state: "state", code: "code", extra: "bad" }],
+    ["parser failure", { state: "state", code: "code", extra: ["bad"] }],
     ["provider failure", { state: "state", code: "code" }],
   ])("converts %s to the same fixed error redirect", async (label, query) => {
     const { callback, connections } = harness();
