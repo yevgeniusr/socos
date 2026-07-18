@@ -52,6 +52,10 @@ const eventCatalogMigrationPath = resolve(
   root,
   "services/api/prisma/migrations/20260718120000_event_catalog/migration.sql",
 );
+const eventCatalogExpansionMigrationPath = resolve(
+  root,
+  "services/api/prisma/migrations/20260718180000_event_catalog_expansion/migration.sql",
+);
 const expectedBriefTables = [
   "BriefBatch",
   "BriefItem",
@@ -1445,20 +1449,31 @@ if (!databaseUrl) {
     assert.equal(sourceColumn.rows[0]?.is_nullable, "YES");
 
     const seed = await client.query(
-      `SELECT "id", "slug", "contentHash" FROM "EventCatalogListing" ORDER BY "slug"`,
+      `SELECT "id", "slug", "sourceRevision", "contentHash"
+         FROM "EventCatalogListing" ORDER BY "slug"`,
     );
-    assert.equal(seed.rowCount, 6);
-    assert.deepEqual(
-      seed.rows.map(({ id, slug }) => ({ id, slug })),
-      [
-        { id: "catalog-ai-everything-global", slug: "ai-everything-global" },
-        { id: "catalog-gitex-global", slug: "gitex-global" },
-        { id: "catalog-jewish-holidays-diaspora", slug: "jewish-holidays-diaspora" },
-        { id: "catalog-jewish-holidays-israel", slug: "jewish-holidays-israel" },
-        { id: "catalog-uae-public-holidays", slug: "uae-public-holidays" },
-        { id: "catalog-un-international-days", slug: "un-international-days" },
-      ],
+    assert.equal(seed.rowCount, 49);
+    assert.equal(
+      seed.rows.filter(({ sourceRevision }) => sourceRevision === "seed-2026-07-18").length,
+      6,
     );
+    assert.equal(
+      seed.rows.filter(({ sourceRevision }) => sourceRevision === "seed-2026-07-18-v2").length,
+      43,
+    );
+    const slugs = new Set(seed.rows.map(({ slug }) => slug));
+    for (const slug of [
+      "uae-public-holidays",
+      "un-international-days",
+      "openholidays",
+      "bahai-calendar",
+      "python-events",
+      "dubai-calendar",
+      "ticketmaster-discovery",
+      "world-athletics-calendar",
+    ]) {
+      assert.equal(slugs.has(slug), true, `missing catalog seed ${slug}`);
+    }
     for (const { contentHash } of seed.rows) {
       assert.match(contentHash, /^[a-f0-9]{64}$/);
     }
@@ -1540,7 +1555,7 @@ if (!databaseUrl) {
     );
     const preservedFollows = await client.query(
       `SELECT "id", "sourceId" FROM "EventCatalogFollow"
-        WHERE "ownerId" = 'catalog-follow-owner' ORDER BY "id"`,
+        WHERE "ownerId" = 'catalog-follow-owner' ORDER BY "id" COLLATE "C"`,
     );
     assert.deepEqual(preservedFollows.rows, [
       { id: "catalog-follow-with-source", sourceId: "catalog-linked-source" },
@@ -2904,6 +2919,7 @@ if (!databaseUrl) {
       await assertHumanIdempotencySchema(client);
       await client.query(readFileSync(interactionReceiptsMigrationPath, "utf8"));
       await client.query(readFileSync(eventCatalogMigrationPath, "utf8"));
+      await client.query(readFileSync(eventCatalogExpansionMigrationPath, "utf8"));
       await assertEventCatalogSchema(client);
 
       const after = await client.query(

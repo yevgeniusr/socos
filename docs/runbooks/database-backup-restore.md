@@ -213,6 +213,9 @@ newly introduced tables to match their registered rollout counts. Those counts
 are zero for the calendar, location, event discovery, human-idempotency,
 interaction-receipt, and `EventCatalogFollow` tables, while migration 13 requires
 six seeded `EventCatalogListing` rows and a zero-row `EventCatalogFollow` table.
+Migration 14 adds exactly 43 global catalogue rows, bringing
+`EventCatalogListing` to 49 while preserving zero owner follows and every
+preexisting owner-data count.
 The `new_empty_tables` receipt field counts only registered zero-row additions.
 Drop the disposable database before declaring the drill successful. If any
 command fails, stop the deployment and retain only redacted schema metadata

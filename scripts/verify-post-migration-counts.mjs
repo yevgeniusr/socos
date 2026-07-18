@@ -77,6 +77,13 @@ const introducedTableRollouts = [
     ],
   },
 ];
+const rowCountRollouts = [
+  {
+    migrationCount: 14,
+    table: 'EventCatalogListing',
+    addedRowCount: 43,
+  },
+];
 const allowedNewTables = new Set([
   ...introducedTableRollouts
     .filter((rollout) => rollout.migrationCount <= expectedMigrationCount)
@@ -188,8 +195,19 @@ try {
 }
 
 let valid = before.size > 0;
+const addedRowsAfter = (table, migrationCount) =>
+  rowCountRollouts
+    .filter(
+      (rollout) =>
+        rollout.table === table
+        && rollout.migrationCount > migrationCount
+        && rollout.migrationCount <= expectedMigrationCount,
+    )
+    .reduce((total, rollout) => total + rollout.addedRowCount, 0);
 for (const [table, count] of before) {
-  if (table !== '_prisma_migrations') valid &&= after.get(table) === count;
+  if (table !== '_prisma_migrations') {
+    valid &&= after.get(table) === count + addedRowsAfter(table, beforeMigrationCount);
+  }
 }
 let introducedEmptyTables = 0;
 const expectedIntroducedTables = introducedTableRollouts
@@ -200,10 +218,13 @@ const expectedIntroducedTables = introducedTableRollouts
   )
   .flatMap((rollout) => rollout.tables);
 for (const table of expectedIntroducedTables) {
-  if (before.has(table.name)) {
-    valid &&= after.get(table.name) === before.get(table.name);
-  } else {
-    valid &&= after.get(table.name) === table.introducedRowCount;
+  if (!before.has(table.name)) {
+    const introducedAt = introducedTableRollouts.find((rollout) =>
+      rollout.tables.some((candidate) => candidate.name === table.name)
+    )?.migrationCount;
+    valid &&=
+      after.get(table.name) ===
+      table.introducedRowCount + addedRowsAfter(table.name, introducedAt ?? beforeMigrationCount);
     if (table.introducedRowCount === 0) introducedEmptyTables++;
   }
 }

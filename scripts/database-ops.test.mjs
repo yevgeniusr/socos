@@ -239,7 +239,7 @@ test('post-migration recovery example uses required and configured optional libp
   );
   assert.match(
     migrationRecovery,
-    /six seeded `EventCatalogListing` rows.*zero-row `EventCatalogFollow`/is,
+    /six seeded `EventCatalogListing` rows.*Migration 14 adds exactly 43 global catalogue rows.*49.*zero owner follows/is,
   );
 });
 
@@ -412,7 +412,7 @@ test('post-migration verifier supports the current rollout from the pre-agent ba
   executable(
     bin,
     'psql',
-    `printf 'table_name\\trow_count\\nActionOutbox\\t0\\nActionProposal\\t0\\nAgentClient\\t0\\nAgentCredential\\t0\\nAgentIdempotencyRecord\\t0\\nApprovalGrant\\t0\\nCalendarEvent\\t0\\nCalendarSource\\t0\\nCalendarWatch\\t0\\nCityStay\\t0\\nContact\\t106\\nDMSceneResponse\\t2\\nDMSession\\t1\\nDerivedVisit\\t0\\nDiscoveredEvent\\t0\\nDungeonMasterScenario\\t3\\nEventCatalogFollow\\t0\\nEventCatalogListing\\t6\\nEventPreference\\t0\\nEventSource\\t0\\nGoogleCalendarConnection\\t0\\nGoogleOAuthAttempt\\t0\\nHumanIdempotencyRecord\\t0\\nInteractionReceipt\\t0\\nLocationAlias\\t0\\nLocationDevice\\t0\\nLocationSample\\t0\\nMutationAuditEvent\\t0\\nPersonalDataDeletionAudit\\t0\\n_prisma_migrations\\t${expectedMigrationCount}\\n'`,
+    `printf 'table_name\\trow_count\\nActionOutbox\\t0\\nActionProposal\\t0\\nAgentClient\\t0\\nAgentCredential\\t0\\nAgentIdempotencyRecord\\t0\\nApprovalGrant\\t0\\nCalendarEvent\\t0\\nCalendarSource\\t0\\nCalendarWatch\\t0\\nCityStay\\t0\\nContact\\t106\\nDMSceneResponse\\t2\\nDMSession\\t1\\nDerivedVisit\\t0\\nDiscoveredEvent\\t0\\nDungeonMasterScenario\\t3\\nEventCatalogFollow\\t0\\nEventCatalogListing\\t49\\nEventPreference\\t0\\nEventSource\\t0\\nGoogleCalendarConnection\\t0\\nGoogleOAuthAttempt\\t0\\nHumanIdempotencyRecord\\t0\\nInteractionReceipt\\t0\\nLocationAlias\\t0\\nLocationDevice\\t0\\nLocationSample\\t0\\nMutationAuditEvent\\t0\\nPersonalDataDeletionAudit\\t0\\n_prisma_migrations\\t${expectedMigrationCount}\\n'`,
   );
 
   const result = run('scripts/verify-post-migration-counts.mjs', {
@@ -444,7 +444,7 @@ test('post-migration verifier supports a seven-migration upgrade and preserves c
   executable(
     bin,
     'psql',
-    `printf 'table_name\\trow_count\\nActionOutbox\\t1\\nActionProposal\\t2\\nAgentClient\\t3\\nAgentCredential\\t3\\nAgentIdempotencyRecord\\t4\\nApprovalGrant\\t1\\nCalendarEvent\\t0\\nCalendarSource\\t0\\nCalendarWatch\\t0\\nCityStay\\t0\\nContact\\t106\\nDMSceneResponse\\t2\\nDMSession\\t1\\nDerivedVisit\\t0\\nDiscoveredEvent\\t0\\nDungeonMasterScenario\\t3\\nEventCatalogFollow\\t0\\nEventCatalogListing\\t6\\nEventPreference\\t0\\nEventSource\\t0\\nGoogleCalendarConnection\\t0\\nGoogleOAuthAttempt\\t0\\nHumanIdempotencyRecord\\t0\\nInteractionReceipt\\t0\\nLocationAlias\\t0\\nLocationDevice\\t0\\nLocationSample\\t0\\nMutationAuditEvent\\t8\\nPersonalDataDeletionAudit\\t0\\n_prisma_migrations\\t${expectedMigrationCount}\\n'`,
+    `printf 'table_name\\trow_count\\nActionOutbox\\t1\\nActionProposal\\t2\\nAgentClient\\t3\\nAgentCredential\\t3\\nAgentIdempotencyRecord\\t4\\nApprovalGrant\\t1\\nCalendarEvent\\t0\\nCalendarSource\\t0\\nCalendarWatch\\t0\\nCityStay\\t0\\nContact\\t106\\nDMSceneResponse\\t2\\nDMSession\\t1\\nDerivedVisit\\t0\\nDiscoveredEvent\\t0\\nDungeonMasterScenario\\t3\\nEventCatalogFollow\\t0\\nEventCatalogListing\\t49\\nEventPreference\\t0\\nEventSource\\t0\\nGoogleCalendarConnection\\t0\\nGoogleOAuthAttempt\\t0\\nHumanIdempotencyRecord\\t0\\nInteractionReceipt\\t0\\nLocationAlias\\t0\\nLocationDevice\\t0\\nLocationSample\\t0\\nMutationAuditEvent\\t8\\nPersonalDataDeletionAudit\\t0\\n_prisma_migrations\\t${expectedMigrationCount}\\n'`,
   );
 
   const result = run('scripts/verify-post-migration-counts.mjs', {
@@ -476,7 +476,7 @@ test('post-migration verifier supports an eight-migration upgrade with event tab
   executable(
     bin,
     'psql',
-    `printf 'table_name\\trow_count\\nActionOutbox\\t1\\nActionProposal\\t2\\nAgentClient\\t3\\nAgentCredential\\t3\\nAgentIdempotencyRecord\\t4\\nApprovalGrant\\t1\\nCalendarEvent\\t0\\nCalendarSource\\t0\\nCalendarWatch\\t0\\nCityStay\\t0\\nContact\\t106\\nDMSceneResponse\\t2\\nDMSession\\t1\\nDerivedVisit\\t0\\nDiscoveredEvent\\t0\\nDungeonMasterScenario\\t3\\nEventCatalogFollow\\t0\\nEventCatalogListing\\t6\\nEventPreference\\t0\\nEventSource\\t0\\nGoogleCalendarConnection\\t0\\nGoogleOAuthAttempt\\t0\\nHumanIdempotencyRecord\\t0\\nInteractionReceipt\\t0\\nLocationAlias\\t0\\nLocationDevice\\t0\\nLocationSample\\t0\\nMutationAuditEvent\\t8\\nPersonalDataDeletionAudit\\t0\\n_prisma_migrations\\t${expectedMigrationCount}\\n'`,
+    `printf 'table_name\\trow_count\\nActionOutbox\\t1\\nActionProposal\\t2\\nAgentClient\\t3\\nAgentCredential\\t3\\nAgentIdempotencyRecord\\t4\\nApprovalGrant\\t1\\nCalendarEvent\\t0\\nCalendarSource\\t0\\nCalendarWatch\\t0\\nCityStay\\t0\\nContact\\t106\\nDMSceneResponse\\t2\\nDMSession\\t1\\nDerivedVisit\\t0\\nDiscoveredEvent\\t0\\nDungeonMasterScenario\\t3\\nEventCatalogFollow\\t0\\nEventCatalogListing\\t49\\nEventPreference\\t0\\nEventSource\\t0\\nGoogleCalendarConnection\\t0\\nGoogleOAuthAttempt\\t0\\nHumanIdempotencyRecord\\t0\\nInteractionReceipt\\t0\\nLocationAlias\\t0\\nLocationDevice\\t0\\nLocationSample\\t0\\nMutationAuditEvent\\t8\\nPersonalDataDeletionAudit\\t0\\n_prisma_migrations\\t${expectedMigrationCount}\\n'`,
   );
 
   const result = run('scripts/verify-post-migration-counts.mjs', {
@@ -505,7 +505,7 @@ test('post-migration verifier supports a nine-migration upgrade before event-bri
   const metadata =
     'table_name\trow_count\nActionOutbox\t1\nActionProposal\t2\nAgentClient\t3\nAgentCredential\t3\nAgentIdempotencyRecord\t4\nApprovalGrant\t1\nCalendarEvent\t0\nCalendarSource\t0\nCalendarWatch\t0\nCityStay\t0\nContact\t106\nDMSceneResponse\t2\nDMSession\t1\nDerivedVisit\t0\nDiscoveredEvent\t0\nDungeonMasterScenario\t3\nEventPreference\t0\nEventSource\t0\nGoogleCalendarConnection\t0\nGoogleOAuthAttempt\t0\nLocationAlias\t0\nLocationDevice\t0\nLocationSample\t0\nMutationAuditEvent\t8\nPersonalDataDeletionAudit\t0\n_prisma_migrations\t9\n';
   const afterMetadata =
-    `table_name\trow_count\nActionOutbox\t1\nActionProposal\t2\nAgentClient\t3\nAgentCredential\t3\nAgentIdempotencyRecord\t4\nApprovalGrant\t1\nCalendarEvent\t0\nCalendarSource\t0\nCalendarWatch\t0\nCityStay\t0\nContact\t106\nDMSceneResponse\t2\nDMSession\t1\nDerivedVisit\t0\nDiscoveredEvent\t0\nDungeonMasterScenario\t3\nEventCatalogFollow\t0\nEventCatalogListing\t6\nEventPreference\t0\nEventSource\t0\nGoogleCalendarConnection\t0\nGoogleOAuthAttempt\t0\nHumanIdempotencyRecord\t0\nInteractionReceipt\t0\nLocationAlias\t0\nLocationDevice\t0\nLocationSample\t0\nMutationAuditEvent\t8\nPersonalDataDeletionAudit\t0\n_prisma_migrations\t${expectedMigrationCount}\n`;
+    `table_name\trow_count\nActionOutbox\t1\nActionProposal\t2\nAgentClient\t3\nAgentCredential\t3\nAgentIdempotencyRecord\t4\nApprovalGrant\t1\nCalendarEvent\t0\nCalendarSource\t0\nCalendarWatch\t0\nCityStay\t0\nContact\t106\nDMSceneResponse\t2\nDMSession\t1\nDerivedVisit\t0\nDiscoveredEvent\t0\nDungeonMasterScenario\t3\nEventCatalogFollow\t0\nEventCatalogListing\t49\nEventPreference\t0\nEventSource\t0\nGoogleCalendarConnection\t0\nGoogleOAuthAttempt\t0\nHumanIdempotencyRecord\t0\nInteractionReceipt\t0\nLocationAlias\t0\nLocationDevice\t0\nLocationSample\t0\nMutationAuditEvent\t8\nPersonalDataDeletionAudit\t0\n_prisma_migrations\t${expectedMigrationCount}\n`;
   writeFileSync(before, metadata);
   executable(
     bin,
@@ -537,7 +537,7 @@ test('post-migration verifier preserves human idempotency rows current-to-curren
     .filter((name) => existsSync(resolve(root, 'services/api/prisma/migrations', name, 'migration.sql')))
     .length;
   const metadata =
-    `table_name\trow_count\nActionOutbox\t1\nActionProposal\t2\nAgentClient\t3\nAgentCredential\t3\nAgentIdempotencyRecord\t4\nApprovalGrant\t1\nCalendarEvent\t0\nCalendarSource\t0\nCalendarWatch\t0\nCityStay\t0\nContact\t106\nDMSceneResponse\t2\nDMSession\t1\nDerivedVisit\t0\nDiscoveredEvent\t0\nDungeonMasterScenario\t3\nEventCatalogFollow\t0\nEventCatalogListing\t6\nEventPreference\t0\nEventSource\t0\nGoogleCalendarConnection\t0\nGoogleOAuthAttempt\t0\nHumanIdempotencyRecord\t3\nInteractionReceipt\t0\nLocationAlias\t0\nLocationDevice\t0\nLocationSample\t0\nMutationAuditEvent\t8\nPersonalDataDeletionAudit\t0\n_prisma_migrations\t${expectedMigrationCount}\n`;
+    `table_name\trow_count\nActionOutbox\t1\nActionProposal\t2\nAgentClient\t3\nAgentCredential\t3\nAgentIdempotencyRecord\t4\nApprovalGrant\t1\nCalendarEvent\t0\nCalendarSource\t0\nCalendarWatch\t0\nCityStay\t0\nContact\t106\nDMSceneResponse\t2\nDMSession\t1\nDerivedVisit\t0\nDiscoveredEvent\t0\nDungeonMasterScenario\t3\nEventCatalogFollow\t0\nEventCatalogListing\t49\nEventPreference\t0\nEventSource\t0\nGoogleCalendarConnection\t0\nGoogleOAuthAttempt\t0\nHumanIdempotencyRecord\t3\nInteractionReceipt\t0\nLocationAlias\t0\nLocationDevice\t0\nLocationSample\t0\nMutationAuditEvent\t8\nPersonalDataDeletionAudit\t0\n_prisma_migrations\t${expectedMigrationCount}\n`;
   writeFileSync(before, metadata);
   executable(bin, 'psql', `printf '${metadata.replaceAll('\n', '\\n')}'`);
 
@@ -571,7 +571,7 @@ test('post-migration verifier supports an eleven-migration upgrade with receipts
   executable(
     bin,
     'psql',
-    `printf '%s\\n' "$*" > '${argsLog}'\nprintf '${metadata.replace('_prisma_migrations\t11', `EventCatalogFollow\t0\nEventCatalogListing\t6\nInteractionReceipt\t0\n_prisma_migrations\t${expectedMigrationCount}`).replaceAll('\n', '\\n')}'`,
+    `printf '%s\\n' "$*" > '${argsLog}'\nprintf '${metadata.replace('_prisma_migrations\t11', `EventCatalogFollow\t0\nEventCatalogListing\t49\nInteractionReceipt\t0\n_prisma_migrations\t${expectedMigrationCount}`).replaceAll('\n', '\\n')}'`,
   );
   const result = run('scripts/verify-post-migration-counts.mjs', {
     args: [before],
@@ -599,7 +599,7 @@ function runEventCatalogCountVerification(afterCatalogRows) {
     bin,
     'psql',
     `printf '${migrationTwelveMetadata
-      .replace('_prisma_migrations\t12\n', `${afterCatalogRows}_prisma_migrations\t13\n`)
+      .replace('_prisma_migrations\t12\n', `${afterCatalogRows}_prisma_migrations\t14\n`)
       .replaceAll('\n', '\\n')}'`,
   );
   return run('scripts/verify-post-migration-counts.mjs', {
@@ -611,21 +611,21 @@ function runEventCatalogCountVerification(afterCatalogRows) {
   });
 }
 
-test('post-migration verifier accepts migration twelve to thirteen with six seeded catalog listings and no follows', () => {
+test('post-migration verifier accepts all 49 seeded catalog listings and no follows', () => {
   const result = runEventCatalogCountVerification(
-    'EventCatalogFollow\t0\nEventCatalogListing\t6\n',
+    'EventCatalogFollow\t0\nEventCatalogListing\t49\n',
   );
 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(
     result.stdout.trim(),
-    'migration_counts_status=preserved existing_tables=24 new_empty_tables=1 migrations=13',
+    'migration_counts_status=preserved existing_tables=24 new_empty_tables=1 migrations=14',
   );
 });
 
 test('post-migration verifier rejects the wrong event catalog seed count', () => {
   const result = runEventCatalogCountVerification(
-    'EventCatalogFollow\t0\nEventCatalogListing\t5\n',
+    'EventCatalogFollow\t0\nEventCatalogListing\t48\n',
   );
 
   assert.equal(result.status, 2);
@@ -634,7 +634,7 @@ test('post-migration verifier rejects the wrong event catalog seed count', () =>
 
 test('post-migration verifier rejects event catalog follows introduced with rows', () => {
   const result = runEventCatalogCountVerification(
-    'EventCatalogFollow\t1\nEventCatalogListing\t6\n',
+    'EventCatalogFollow\t1\nEventCatalogListing\t49\n',
   );
 
   assert.equal(result.status, 2);
@@ -642,7 +642,7 @@ test('post-migration verifier rejects event catalog follows introduced with rows
 });
 
 test('post-migration verifier rejects missing event catalog rollout tables', () => {
-  const result = runEventCatalogCountVerification('EventCatalogListing\t6\n');
+  const result = runEventCatalogCountVerification('EventCatalogListing\t49\n');
 
   assert.equal(result.status, 2);
   assert.match(result.stderr, /Post-migration aggregate verification failed/);
@@ -659,7 +659,10 @@ test('post-migration verifier preserves existing event catalog counts at the cur
       'EventCatalogFollow\t2\nEventCatalogListing\t9\n_prisma_migrations\t13\n',
     );
   writeFileSync(before, metadata);
-  executable(bin, 'psql', `printf '${metadata.replaceAll('\n', '\\n')}'`);
+  const afterMetadata = metadata
+    .replace('EventCatalogListing\t9', 'EventCatalogListing\t52')
+    .replace('_prisma_migrations\t13', '_prisma_migrations\t14');
+  executable(bin, 'psql', `printf '${afterMetadata.replaceAll('\n', '\\n')}'`);
 
   const result = run('scripts/verify-post-migration-counts.mjs', {
     args: [before],
@@ -672,7 +675,7 @@ test('post-migration verifier preserves existing event catalog counts at the cur
   assert.equal(result.status, 0, result.stderr);
   assert.equal(
     result.stdout.trim(),
-    'migration_counts_status=preserved existing_tables=26 new_empty_tables=0 migrations=13',
+    'migration_counts_status=preserved existing_tables=26 new_empty_tables=0 migrations=14',
   );
 });
 
@@ -686,7 +689,7 @@ test('post-migration verifier gives psql only the configured libpq environment',
     .filter((name) => existsSync(resolve(root, 'services/api/prisma/migrations', name, 'migration.sql')))
     .length;
   const metadata =
-    `table_name\trow_count\nActionOutbox\t1\nActionProposal\t2\nAgentClient\t3\nAgentCredential\t3\nAgentIdempotencyRecord\t4\nApprovalGrant\t1\nCalendarEvent\t0\nCalendarSource\t0\nCalendarWatch\t0\nCityStay\t0\nContact\t106\nDerivedVisit\t0\nDiscoveredEvent\t0\nEventCatalogFollow\t0\nEventCatalogListing\t6\nEventPreference\t0\nEventSource\t0\nGoogleCalendarConnection\t0\nGoogleOAuthAttempt\t0\nHumanIdempotencyRecord\t3\nInteractionReceipt\t0\nLocationAlias\t0\nLocationDevice\t0\nLocationSample\t0\nMutationAuditEvent\t8\nPersonalDataDeletionAudit\t0\n_prisma_migrations\t${expectedMigrationCount}\n`;
+    `table_name\trow_count\nActionOutbox\t1\nActionProposal\t2\nAgentClient\t3\nAgentCredential\t3\nAgentIdempotencyRecord\t4\nApprovalGrant\t1\nCalendarEvent\t0\nCalendarSource\t0\nCalendarWatch\t0\nCityStay\t0\nContact\t106\nDerivedVisit\t0\nDiscoveredEvent\t0\nEventCatalogFollow\t0\nEventCatalogListing\t49\nEventPreference\t0\nEventSource\t0\nGoogleCalendarConnection\t0\nGoogleOAuthAttempt\t0\nHumanIdempotencyRecord\t3\nInteractionReceipt\t0\nLocationAlias\t0\nLocationDevice\t0\nLocationSample\t0\nMutationAuditEvent\t8\nPersonalDataDeletionAudit\t0\n_prisma_migrations\t${expectedMigrationCount}\n`;
   writeFileSync(before, metadata);
   const psql = join(bin, 'psql');
   writeFileSync(
@@ -808,7 +811,7 @@ test('post-migration verifier derives migration count and allows calendar locati
   executable(
     bin,
     'psql',
-    `printf 'table_name\\trow_count\\nActionOutbox\\t1\\nActionProposal\\t2\\nAgentClient\\t3\\nAgentCredential\\t3\\nAgentIdempotencyRecord\\t4\\nApprovalGrant\\t1\\nCalendarEvent\\t0\\nCalendarSource\\t0\\nCalendarWatch\\t0\\nCityStay\\t0\\nContact\\t106\\nDMSceneResponse\\t2\\nDMSession\\t1\\nDerivedVisit\\t0\\nDiscoveredEvent\\t0\\nDungeonMasterScenario\\t3\\nEventCatalogFollow\\t0\\nEventCatalogListing\\t6\\nEventPreference\\t0\\nEventSource\\t0\\nGoogleCalendarConnection\\t0\\nGoogleOAuthAttempt\\t0\\nHumanIdempotencyRecord\\t0\\nInteractionReceipt\\t0\\nLocationAlias\\t0\\nLocationDevice\\t0\\nLocationSample\\t0\\nMutationAuditEvent\\t8\\nPersonalDataDeletionAudit\\t0\\n_prisma_migrations\\t${expectedMigrationCount}\\n'`,
+    `printf 'table_name\\trow_count\\nActionOutbox\\t1\\nActionProposal\\t2\\nAgentClient\\t3\\nAgentCredential\\t3\\nAgentIdempotencyRecord\\t4\\nApprovalGrant\\t1\\nCalendarEvent\\t0\\nCalendarSource\\t0\\nCalendarWatch\\t0\\nCityStay\\t0\\nContact\\t106\\nDMSceneResponse\\t2\\nDMSession\\t1\\nDerivedVisit\\t0\\nDiscoveredEvent\\t0\\nDungeonMasterScenario\\t3\\nEventCatalogFollow\\t0\\nEventCatalogListing\\t49\\nEventPreference\\t0\\nEventSource\\t0\\nGoogleCalendarConnection\\t0\\nGoogleOAuthAttempt\\t0\\nHumanIdempotencyRecord\\t0\\nInteractionReceipt\\t0\\nLocationAlias\\t0\\nLocationDevice\\t0\\nLocationSample\\t0\\nMutationAuditEvent\\t8\\nPersonalDataDeletionAudit\\t0\\n_prisma_migrations\\t${expectedMigrationCount}\\n'`,
   );
 
   const result = run('scripts/verify-post-migration-counts.mjs', {
