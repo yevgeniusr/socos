@@ -1255,4 +1255,16 @@ INSERT INTO "EventCatalogListing" (
     '2026-07-18T06:30:00.000Z'
   );
 
+UPDATE "EventCatalogListing"
+SET "dateCertainty" = 'tentative',
+    "contentHash" = '1eb73ecf0f1b1e4946c223bc8d9158f0a0764c7e6b91a29bc2e42e601db09c5e',
+    "updatedAt" = '2026-07-18T06:30:00.000Z'
+WHERE "id" = 'catalog-gitex-global';
+
+UPDATE "EventCatalogListing"
+SET "dateCertainty" = 'tentative',
+    "contentHash" = '3e7678b15a112c0150929414d09910c63dfae03457d6e4b90af52bb02a66f7cb',
+    "updatedAt" = '2026-07-18T06:30:00.000Z'
+WHERE "id" = 'catalog-ai-everything-global';
+
 COMMIT;

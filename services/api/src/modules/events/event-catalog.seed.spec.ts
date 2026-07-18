@@ -109,19 +109,19 @@ describe("event catalog seed manifest", () => {
   });
 
   it("does not present mutable source feeds as confirmed occurrences", () => {
-    for (const slug of [
-      "python-events",
-      "dubai-calendar",
-      "world-athletics-calendar",
-      "ticketmaster-discovery",
-      "predicthq",
-      "eventbrite-organizer-events",
-      "meetup-groups",
-    ]) {
-      expect(
-        EVENT_CATALOG_SEED_MANIFEST.find((item) => item.slug === slug)
-          ?.dateCertainty
-      ).toBe("tentative");
+    const mutableKinds = new Set([
+      "account_events",
+      "city_events",
+      "commercial_discovery",
+      "conference_series",
+      "festival_series",
+      "sports_calendar",
+      "venue_calendar",
+    ]);
+    for (const item of EVENT_CATALOG_SEED_MANIFEST) {
+      if (mutableKinds.has(item.kind)) {
+        expect(item.dateCertainty).toBe("tentative");
+      }
     }
     expect(
       EVENT_CATALOG_SEED_MANIFEST.find(
@@ -146,6 +146,16 @@ describe("event catalog seed manifest", () => {
     expect(migration.match(/'seed-2026-07-18-v2'/g)).toHaveLength(43);
     for (const item of expansion) {
       expect(migration).toContain(`  (\n    ${migrationRow(item)}\n  )`);
+    }
+    for (const slug of ["gitex-global", "ai-everything-global"]) {
+      const item = EVENT_CATALOG_SEED_MANIFEST.find(
+        (candidate) => candidate.slug === slug
+      );
+      expect(item).toBeDefined();
+      expect(migration).toContain(
+        `"contentHash" = '${eventCatalogSeedContentHash(item!)}'`
+      );
+      expect(migration).toContain(`WHERE "id" = '${item!.id}'`);
     }
   });
 });
