@@ -64,15 +64,15 @@ Commit the tested UI behavior without schema or OAuth changes.
 
 Run the activation wrapper tests, confirm a clean pushed commit, and use that exact 40-character SHA.
 
-- [ ] **Step 2: Activate location**
+- [x] **Step 2: Activate location**
 
 Run the checked-in location activation operation. Require a fresh positive-size backup, exact deployment commit, health `200`, Calendar guard `401`, OwnTracks `401`, and Calendar webhook `404`.
 
-- [ ] **Step 3: Verify authenticated aggregate state**
+- [x] **Step 3: Verify authenticated aggregate state**
 
 Confirm the owner can list location devices and current coarse context without printing device identity or location values. Do not create a device outside the visible one-time credential flow.
 
-- [ ] **Step 4: Record the receipt**
+- [x] **Step 4: Record the receipt**
 
 Update the handoff with only fixed deployment/backup identifiers, flags, and aggregate status.
 
@@ -85,23 +85,23 @@ Update the handoff with only fixed deployment/backup identifiers, flags, and agg
 - Consumes: `scripts/run-coolify-activation.mjs event-discovery-enable <exact-sha> calendar.google.com`, the Python Software Foundation public calendar subscription, and owner-scoped event preferences.
 - Produces: `EVENT_DISCOVERY_ENABLED=true`, a certified Python Events ICS source, and balanced social preferences.
 
-- [ ] **Step 1: Certify the feed without storing contents**
+- [x] **Step 1: Certify the feed without storing contents**
 
 Require direct HTTPS `200` from `calendar.google.com`, `text/calendar`, no redirect, public DNS, and a decoded size under the five-megabyte fetch limit.
 
-- [ ] **Step 2: Activate discovery**
+- [x] **Step 2: Activate discovery**
 
 Run the checked-in discovery activation operation for `calendar.google.com`. Require a fresh backup, exact deployment, and fixed smokes.
 
-- [ ] **Step 3: Create useful owner-scoped configuration**
+- [x] **Step 3: Create useful owner-scoped configuration**
 
 Through the authenticated API, add the Python Events public ICS source with global/online context and a conservative poll interval. Save balanced interests covering professional networking, hobbies, learning, and social adventures. Never print the private stored feed URL or event data.
 
-- [ ] **Step 4: Verify aggregate polling state**
+- [x] **Step 4: Verify aggregate polling state**
 
 Verify only source count, status, safe error code, timestamps, and discovered-event count after a bounded scheduler window. Do not print event titles or locations.
 
-- [ ] **Step 5: Record and commit operational state**
+- [x] **Step 5: Record and commit operational state**
 
 Update the handoff, run `git diff --check`, commit the documentation-only receipt, and push it without redeploying the documentation commit.
 
@@ -110,7 +110,7 @@ Update the handoff, run `git diff --check`, commit the documentation-only receip
 **Files:**
 - Review all changed files and production receipts.
 
-- [ ] **Step 1: Run focused regression checks**
+- [x] **Step 1: Run focused regression checks**
 
 Run Calendar integration UI tests, activation tests, API type checking, security regression, and repository diff checks.
 
@@ -118,6 +118,6 @@ Run Calendar integration UI tests, activation tests, API type checking, security
 
 Review OAuth ownership, timer cleanup, feature dependency order, feed allowlisting, cloud-only persistence, and production/application SHA separation.
 
-- [ ] **Step 3: Final live verification**
+- [x] **Step 3: Final live verification**
 
 Verify production health, Calendar aggregate connection/source state, location endpoint auth state, event source aggregate state, and the 49-item catalogue count.

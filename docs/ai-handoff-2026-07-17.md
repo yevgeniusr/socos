@@ -13,13 +13,19 @@ Daily Cockpit, approvals, quests, XP, and authenticated REST/MCP access.
 
 The new Integrations workspace is deployed at
 `https://socos.rachkovan.com/dashboard/integrations`. Google Calendar code and
-production configuration are enabled and healthy, but the real Google account
-is not connected. Yev supplied the OAuth client ID and downloaded client JSON;
+production configuration are enabled and healthy. Yev supplied the OAuth client
+ID and downloaded client JSON;
 the ID and secret were verified in memory, stored in macOS Keychain, and the
 plaintext download was deleted. No agent accepted Google's User Data Policy.
-The final Google account permission grant remains a separate unavoidable
-user-confirmed action. Pixel location, event discovery, and event briefs remain
-disabled so activation still follows dependency order.
+The Google grant is complete: production reports one active read-only
+connection, 16 discovered calendars, 13 selected/synced calendars, and zero
+calendar errors. The UI now polls through the asynchronous calendar-list window
+so all calendars become selectable without a manual reload.
+
+Pixel location, certified ICS discovery, and event briefs are enabled in both
+Coolify profiles. No Pixel device is enrolled yet. One certified Python Events
+source is active and has polled successfully; balanced preferences are stored.
+Today's existing brief remains immutable V1.0, while new batches may use V1.1.
 
 P1 source changes, the agent-safety hardening slice, and the searchable Event
 Catalog marketplace are implemented, independently reviewed, restore-gated,
@@ -30,10 +36,13 @@ hard-delete routes, scope-aware MCP discovery/metadata, and first-class
 read-only Codex and Claude plugin packages. The receipt adds migration 12, so
 the dedicated forced-command runner was provisioned with isolated rotating
 read/admin/restore roles and audited before deployment. The latest exact
-wrapper-level restore gate passed for
+schema restore gate passed for
 `8dc742e5e729a2a6137ccaa30af634c38f84e1c0`, and Coolify deployment
 `fobw461x9kmwqrsdc0sd7avj` finished at that same SHA.
-Production is healthy with 14 applied migrations, 50 public tables, 106
+The reviewed Calendar UX and integration activation are now deployed at
+`37e021384d9b376c01c2f728d902cc8794ea72ce` through deployment
+`bqk6nrfiox6dbk6v502fnoxv`. Production is healthy with 14 applied migrations,
+50 public tables, 106
 non-demo contacts, 7 isolated demos, and the migration-12 receipt table.
 
 The tracked Hermes `socos-social-loop` skill is installed and attached to the
@@ -47,23 +56,23 @@ Snapshot taken in `/Users/mac/Desktop/projects/personal/socos`.
 
 | Area | State |
 | --- | --- |
-| Reviewed application SHA | `8dc742e5e729a2a6137ccaa30af634c38f84e1c0` |
-| Latest reviewed source commit before this handoff | `8dc742e5e729a2a6137ccaa30af634c38f84e1c0` |
+| Reviewed application SHA | `37e021384d9b376c01c2f728d902cc8794ea72ce` |
+| Latest reviewed source commit before this handoff | `6e09b46` |
 | Reviewed application-code ancestor | `084b7addb0ccc765aa343c5412ed8f5fe5f6da0b` |
 | Pre-activation-tooling baseline SHA | `69e6ac0444a50ae92d811155493fcff559774a86` |
-| Production application SHA | `8dc742e5e729a2a6137ccaa30af634c38f84e1c0` |
+| Production application SHA | `37e021384d9b376c01c2f728d902cc8794ea72ce` |
 | Current source branch | `main`; this handoff may be a later documentation-only commit; resolve any future candidate action-time |
 | Production status | `running:healthy` |
 | Production URL | `https://socos.rachkovan.com` |
 | Real contacts | 106 non-demo, cloud-only |
 | Demo contacts | 7, isolated where required |
-| Calendar code/config | enabled and independently verified; real OAuth connection pending |
+| Calendar code/config | active; 16 calendars discovered, 13 selected/synced, 0 errors |
 | Google OAuth material | verified in Keychain; plaintext client JSON deleted |
 | Owner access | recovered; HTTPS login and guarded route verified |
-| Pixel location | disabled |
+| Pixel location | enabled; no device enrolled; fallback context only |
 | Event catalog | deployed with 49 global listings, search/tags, and source-free owner follows |
-| Event ingestion | disabled |
-| Event briefs | disabled |
+| Event ingestion | enabled; one certified Python Events source active and polled |
+| Event briefs | enabled for new V1.1 batches; today's stored V1.0 is unchanged |
 | Hermes | installed, gateway supervised, cron active |
 | Live Discord reply proof | pending |
 | P1 source hardening | implemented, independently reviewed, restore-gated, deployed |
@@ -444,8 +453,8 @@ release gate: PASS
 Application UUID: swwcg80gkw4k0k4oco8w8wgw
 Database UUID: zwkk0scogckskkwss8oo48k4
 Backup configuration UUID: b85nxfljaz0xpo9xqa57lfr4
-Reviewed/deployed SHA: 8dc742e5e729a2a6137ccaa30af634c38f84e1c0
-Current deployment: fobw461x9kmwqrsdc0sd7avj
+Reviewed/deployed SHA: 37e021384d9b376c01c2f728d902cc8794ea72ce
+Current deployment: bqk6nrfiox6dbk6v502fnoxv
 Live restore-gate backup: ahjdk7p3t7uimkcm7wnay4ur
 Live restore-gate backup size: 191164 bytes
 Live restore-gate dump SHA-256: 4983d9aeffa4fec3560f720b9afc2a98a77fa03ae7b4eb78401c37843af46cf3
@@ -458,6 +467,12 @@ Disabled-first deployment: jstocddvahtq2ptk159krd6e
 Calendar activation deployment: fobw461x9kmwqrsdc0sd7avj
 Calendar activation backup: b335qyv4o9zdlse4kocx7hf2
 Calendar activation backup status: success
+Location activation deployment: dle0hihd9o355d9ky9an1553
+Location activation backup: d13pt290ylahgm3ax3wxbtt2
+Event discovery deployment: irl7ab7qeaatrkcutskqehcg
+Event discovery backup: rzxriqogihkop64fthajm9tx
+Event brief deployment: bqk6nrfiox6dbk6v502fnoxv
+Event brief backup: hnwq3hova1qecxnjp4d3a630
 Owner-recovery backup: z7fzdte9nlv0b5v06bepzon8
 Owner-recovery backup status: success
 Rollback SHA: b0e88ccc535ba79d71a5586f341e0d3ac6be8ac1
@@ -467,9 +482,10 @@ Current feature flags in both production and preview profiles:
 
 ```text
 CALENDAR_SYNC_ENABLED=true
-LOCATION_INGEST_ENABLED=false
-EVENT_DISCOVERY_ENABLED=false
-EVENT_BRIEF_ENABLED=false
+LOCATION_INGEST_ENABLED=true
+EVENT_DISCOVERY_ENABLED=true
+EVENT_BRIEF_ENABLED=true
+EVENT_SOURCE_ALLOWED_HOSTS=calendar.google.com
 ```
 
 Current production smoke passed:
@@ -480,7 +496,7 @@ GET  /dashboard/integrations                200
 GET  /api/health-check                      200
 GET  authenticated CRM/integration routes  401
 POST /api/mcp                               401
-POST /api/location/owntracks                503
+POST /api/location/owntracks                401
 POST destructive admin routes              404
 Contact aggregates                         106 non-demo / 7 demo
 Application containers                     2 running / 2 healthy
@@ -512,9 +528,11 @@ for the exact SHA above; later schema candidates require a new receipt.
   state plus code/error, ignores other scalar metadata, and still rejects
   duplicate arrays, nested values, missing outcomes, and code+error. The fix is
   deployed and independently reviewed.
-- A fresh retry window was opened after deployment `fobw461x9kmwqrsdc0sd7avj`,
-  but no callback arrived during the monitoring window. The real Google account
-  is not yet connected; no partial connection row or consumed attempt is claimed.
+- The final permission grant completed. Production now reports the exact two
+  read-only scopes, an active and synced connection, 16 discovered calendars,
+  13 selected/synced calendars, and zero source errors. The reviewed web client
+  polls the asynchronous discovery window for 75 seconds and recovers after a
+  failed disconnect attempt.
 
 ### Documentation
 
@@ -565,38 +583,26 @@ already delivered.
 
 ### P0: Finish Personal Activation
 
-For every remaining flag stage: take fresh backup evidence, update both
-production and preview copies, deploy the exact reviewed SHA, require health and
-stage-local smoke, and restore the prior flag plus redeploy on failure.
+Calendar, location, discovery, and event-brief flags are enabled. Remaining
+activation work requires user/device action or a future scheduler boundary:
 
-1. Sign in to `/dashboard/integrations`, click Google Calendar Connect, stop
-   immediately before the Google account permission grant, obtain separate
-   action-time confirmation, then grant read-only access and select calendars.
-2. Verify only aggregate Calendar connection/source/watch/sync state and the
-   user-visible connected status. On integrity failure, disable Calendar in
-   both profiles, deploy the same SHA, stop active Google channels, and verify
-   scheduler quietness.
-3. Take a fresh backup, enable `LOCATION_INGEST_ENABLED` in both profiles,
-   deploy the same exact SHA, and require health. Create the Pixel device only
-   while Yev can consume the one-time credentials.
-4. On the Pixel, install/configure OwnTracks HTTP mode, enter the one-time
+1. Create the Pixel device only while Yev can consume the one-time credentials.
+2. On the Pixel, install/configure OwnTracks HTTP mode, enter the one-time
    credentials, grant precise and background location, remove battery
    restrictions, and verify aggregate device/sample/last-seen state.
-5. Re-certify one current public Dubai ICS source. Candidate feeds:
-   - `https://www.meetup.com/dubai-ai/events/ical/`
-   - `https://www.meetup.com/dubai-ai-meetup/events/ical/`
-   - `https://www.meetup.com/startups-and-tech-events-in-dubai/events/ical/`
-6. Set both profiles of `EVENT_SOURCE_ALLOWED_HOSTS=www.meetup.com`, enable both
-   profiles of `EVENT_DISCOVERY_ENABLED`, deploy and smoke the same exact SHA,
-   add one source through the UI, and verify aggregate source/poll/event state
-   plus visible ranking/conflict behavior.
-7. After a fresh stage backup, enable both profiles of `EVENT_BRIEF_ENABLED`
-   last, deploy and smoke the same exact SHA, and verify the next new brief is
+3. Verify the next newly generated brief is
    V1.1 with no more than three event items. Never rewrite existing V1 batches.
-8. Trigger or wait for a skill-generated Hermes brief, then have Yev send one
+4. Trigger or wait for a skill-generated Hermes brief, then have Yev send one
    controlled unedited `socos ...` Discord reply. Verify one feedback or exact
    evidence CRM mutation occurred exactly once. Replay the exact immutable plan
    or tool input and verify no second mutation. Do not test outbound execution.
+
+The currently listed public Dubai Meetup ICS feeds return data but exceed the
+adapter's strict description bound and fail closed as `event_feed_failed`.
+Do not allowlist them until the adapter has a reviewed truncation policy. The
+49-item catalogue is still metadata-only and needs connector-specific import,
+deduplication, source attachment, and local-location fallback before it powers
+comprehensive event recommendations.
 
 ### P1: Relationship Memory And Social Planning
 
@@ -674,16 +680,17 @@ Trust current evidence over any stale snapshot. Do not reset, clean, stash,
 rewrite history, switch branches, or discard existing/user changes.
 
 Production is deployed and healthy at exact reviewed SHA
-8dc742e5e729a2a6137ccaa30af634c38f84e1c0 through Coolify deployment
-fobw461x9kmwqrsdc0sd7avj. The dedicated forced-command runner returned an exit-0
-live restore receipt for that exact SHA: fresh backup
+37e021384d9b376c01c2f728d902cc8794ea72ce through Coolify deployment
+bqk6nrfiox6dbk6v502fnoxv. The most recent schema-changing ancestor remains
+restore-gated at `8dc742e5e729a2a6137ccaa30af634c38f84e1c0`; the dedicated
+forced-command runner returned an exit-0 live restore receipt with fresh backup
 ahjdk7p3t7uimkcm7wnay4ur, 50 pre-migration aggregate tables, zero schema drift,
-preserved migration counts, and verified cleanup. The activation then created
-backup b335qyv4o9zdlse4kocx7hf2. Independent read-only verification confirmed the
-healthy exact deployment, equal environment pairs, Calendar credentials matching
-Keychain, Calendar enabled, and location/discovery/brief disabled. Public smokes
-are health 200, Calendar guard 401, disabled OwnTracks 503, and enabled Calendar
-webhook 404 with its exact fixed code.
+preserved migration counts, and verified cleanup. Staged activation then created
+fresh backups d13pt290ylahgm3ax3wxbtt2, rzxriqogihkop64fthajm9tx, and
+hnwq3hova1qecxnjp4d3a630 for location, discovery, and briefs. Independent
+read-only verification confirmed equal environment pairs and all four flags
+enabled. Public smokes are health 200, Calendar guard 401, authenticated
+OwnTracks boundary 401, and Calendar webhook 404 with its exact fixed code.
 
 Do not redeploy merely because this handoff adds a documentation-only commit.
 For the next schema change, resolve the new action-time trusted origin/main,
@@ -700,23 +707,24 @@ context, not the current release. Trust the exact current gate/deployment facts
 above and re-read Coolify before any later mutation.
 
 All 106 real Monica contacts plus 7 isolated demos are cloud-only. The global
-Event Catalog has 49 listings and 0 owner follows. Calendar code is currently
-enabled; location, event ingestion, and event briefs are false in both profiles.
+Event Catalog has 49 listings and 0 owner follows. Calendar, location ingest,
+event discovery, and event briefs are enabled in both profiles. Production has
+one active, successfully polled certified event source and nine balanced
+interest tags. No Pixel device is enrolled yet.
 Owner access was recovered through an independently reviewed,
 guarded cloud-only rotation after successful backup
 z7fzdte9nlv0b5v06bepzon8. HTTPS login and a guarded route were verified from the
 primary socos-production-login Keychain item. Never print it. Password rotation
 did not revoke existing stateless JWTs.
 
-Calendar is the current activation checkpoint. Yev supplied the OAuth client;
+Calendar activation is complete. Yev supplied the OAuth client;
 its ID and secret were verified in memory, stored in Keychain, activated in both
 Coolify profiles, and independently matched without printing values. The
 plaintext downloaded client JSON was deleted. No agent accepted Google's User
-Data Policy. Calendar production configuration is enabled, but the real Google
-account is not connected. An agent may create a fresh single-use attempt and
-open the validated Google authorization page, but Yev must complete the account
-permission grant. After that grant, select calendars and verify only aggregate
-connection/source/watch/sync state plus the visible UI.
+Data Policy. The real Google account is connected with the exact two read-only
+scopes. Production reports 16 calendars, 13 selected/synced, and zero errors.
+Multiple calendars inside this account are independently selectable. Multiple
+Google accounts still require a separate schema/API/UI migration.
 
 Use the checked-in staged activation wrapper for every feature transition. The
 Coolify token is in macOS Keychain account `socos`, service
@@ -733,14 +741,10 @@ shape conservatively, and its focused tests pass 42/42 with independent review
 approval. The Calendar activation and independent
 read-only verification succeeded at the exact production SHA above.
 
-For every stage below, take fresh backup evidence, update both environment
-profiles, deploy the exact reviewed SHA, require health/stage smoke, and restore
-the prior flag plus redeploy on failure. Activate one dependency at a time:
-1. Pixel OwnTracks location. Yev must enter the one-time credentials on his
-   Pixel and grant precise/background/battery permissions.
-2. One re-certified public Dubai Meetup ICS source with www.meetup.com
-   allowlisted.
-3. Event briefs last, verified only on a newly created V1.1 batch.
+All four integration flags are active. The remaining Pixel step is user action:
+Yev must create the device while viewing its one-time credentials, enter them in
+OwnTracks, and grant precise/background/battery permissions. Verify event briefs
+only on a newly created V1.1 batch; never rewrite today's stored V1.0 batch.
 
 The tracked Hermes socos-social-loop skill is installed and attached to active
 cron 59db0ea1d9d8 at 09:00 Asia/Dubai. The launchd gateway is supervised and the
