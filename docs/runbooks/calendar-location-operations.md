@@ -189,6 +189,17 @@ precise/background location, two-minute interval, 100 m displacement,
 15-minute ping, and no OwnTracks payload encryption. Verify only success,
 aggregate counts, and `lastSeenAt`.
 
+For a first-sample diagnosis, the combination of exactly one active device,
+zero devices with `lastSeenAt`, fallback location context, and zero Traefik
+requests to `/api/location/owntracks` since enrollment means the phone client
+is not reaching the endpoint. It is not evidence of an ingest-processing
+failure because no request has crossed the proxy boundary. If the guarded route
+returns 401 without Basic auth, treat the route as live and direct the user to
+finish OwnTracks HTTP configuration: use the exact HTTPS endpoint and saved
+Basic credentials, grant always/background location, disable battery
+optimization, save, and send one manual location report. Inspect downstream
+authentication or ingest processing only after Traefik has observed a request.
+
 ### ICS
 
 Certifying an ICS host as public is an operator decision. Add one lowercase

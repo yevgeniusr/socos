@@ -19,6 +19,7 @@ import { integrationFailure } from "../integration-view";
 import ConfirmationDialog from "./confirmation-dialog";
 import IntegrationSection from "./integration-section";
 import OneTimeCredentialsDialog from "./one-time-credentials-dialog";
+import OwnTracksSetupChecklist from "./owntracks-setup-checklist";
 
 type PixelPanelData = {
   devices: LocationDevicesResponse;
@@ -28,6 +29,10 @@ type PixelPanelData = {
 type PixelCredentials = {
   username: string;
   password: string;
+};
+
+type PixelCredentialDisclosure = PixelCredentials & {
+  externalDeviceId: string;
 };
 
 type CreatePixelResponse = {
@@ -55,7 +60,8 @@ export default function PixelLocationPanel() {
   const [externalDeviceId, setExternalDeviceId] = useState("");
   const [rawRetentionDays, setRawRetentionDays] = useState(30);
   const [derivedRetentionDays, setDerivedRetentionDays] = useState(365);
-  const [credentials, setCredentials] = useState<PixelCredentials | null>(null);
+  const [credentials, setCredentials] =
+    useState<PixelCredentialDisclosure | null>(null);
   const [credentialReturnKind, setCredentialReturnKind] = useState<
     "receipt" | "rotate"
   >("receipt");
@@ -113,7 +119,10 @@ export default function PixelLocationPanel() {
           }),
         }
       );
-      setCredentials(response.credentials);
+      setCredentials({
+        ...response.credentials,
+        externalDeviceId: response.device.externalDeviceId,
+      });
       setName("");
       setExternalDeviceId("");
       setReceipt(
@@ -139,7 +148,10 @@ export default function PixelLocationPanel() {
         { method: "POST" }
       );
       setCredentialReturnKind("rotate");
-      setCredentials(response.credentials);
+      setCredentials({
+        ...response.credentials,
+        externalDeviceId: device.externalDeviceId,
+      });
       setReceipt("Pixel credentials rotated. Configure the replacement now.");
     } catch (error) {
       setActionError(
@@ -308,8 +320,9 @@ export default function PixelLocationPanel() {
                         {device.name}
                       </p>
                       <p className="mt-1 break-all text-xs text-on-surface-variant">
-                        {device.externalDeviceId} / {device.rawRetentionDays}d
-                        raw / {device.derivedRetentionDays}d derived
+                        External ID: {device.externalDeviceId} /{" "}
+                        {device.rawRetentionDays}d raw /{" "}
+                        {device.derivedRetentionDays}d derived
                       </p>
                       <p className="mt-1 text-xs font-bold uppercase text-secondary">
                         {device.status === "revoked"
@@ -364,6 +377,31 @@ export default function PixelLocationPanel() {
                       </div>
                     ) : null}
                   </div>
+                  {device.status === "active" && !device.lastSeenAt ? (
+                    <section
+                      aria-label="OwnTracks setup needed"
+                      className="mt-4 border-l-4 border-secondary bg-surface-container-lowest px-4 py-4"
+                    >
+                      <h4 className="text-sm font-extrabold text-on-surface">
+                        Socos has received no sample from this device yet
+                      </h4>
+                      <p className="mt-2 text-sm leading-6 text-on-surface-variant">
+                        Finish the Android OwnTracks setup, then send one manual
+                        location report.
+                      </p>
+                      <div className="mt-4">
+                        <OwnTracksSetupChecklist
+                          endpoint={`${window.location.origin}/api/location/owntracks`}
+                          externalDeviceId={device.externalDeviceId}
+                        />
+                      </div>
+                      <p className="mt-4 border-t border-outline-variant/30 pt-4 text-sm leading-6 text-on-surface-variant">
+                        Socos cannot recover the one-time password. Rotate
+                        credentials only if the original password was lost.
+                        Old credentials stop working immediately.
+                      </p>
+                    </section>
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -478,6 +516,7 @@ export default function PixelLocationPanel() {
       {credentials ? (
         <OneTimeCredentialsDialog
           endpoint={`${window.location.origin}/api/location/owntracks`}
+          externalDeviceId={credentials.externalDeviceId}
           username={credentials.username}
           password={credentials.password}
           initialFocusRef={credentialDialogFocusRef}

@@ -625,9 +625,28 @@ test.describe("authenticated Integrations workspace", () => {
     const credentials = page.getByRole("dialog", {
       name: "One-time Pixel credentials",
     });
-    await expect(credentials).toContainText("/api/location/owntracks");
+    const ownTracksEndpoint = `${new URL(page.url()).origin}/api/location/owntracks`;
+    await expect(credentials).toContainText(ownTracksEndpoint);
+    await expect(credentials).toContainText("External device ID");
+    await expect(credentials).toContainText("synthetic-pixel-9");
     await expect(credentials).toContainText("synthetic-pixel-user");
     await expect(credentials).toContainText(FIRST_PASSWORD);
+    await expect(credentials).toContainText("password cannot be shown again");
+    await expect(credentials).toContainText("Socos cannot recover it");
+    await expect(credentials).toContainText("Connection mode to HTTP");
+    await expect(credentials).toContainText(
+      "Basic username and password under Identification or connection settings"
+    );
+    await expect(credentials).toContainText("Allow all the time");
+    await expect(credentials).toContainText(
+      "Disable battery optimization for OwnTracks"
+    );
+    await expect(credentials).toContainText(
+      "manual publish or Report location"
+    );
+    await expect(credentials).toContainText(
+      "Return to Socos and refresh this page"
+    );
     await expect
       .poll(() =>
         page.evaluate(
@@ -666,6 +685,7 @@ test.describe("authenticated Integrations workspace", () => {
     await expect.poll(() => api.locationRotations).toBe(1);
     await expect(credentials).toContainText("synthetic-pixel-user-rotated");
     await expect(credentials).toContainText(ROTATED_PASSWORD);
+    await expect(credentials).toContainText("synthetic-pixel-9");
     await expect(credentials).not.toContainText(FIRST_PASSWORD);
     await credentials
       .getByRole("button", { name: "Close credentials" })
@@ -885,6 +905,40 @@ test.describe("authenticated Integrations workspace", () => {
       pixel.getByText("Enrolled / awaiting first sample")
     ).toBeVisible();
     await expect(pixel.getByText("No device samples received")).toBeVisible();
+    const troubleshooting = pixel.getByRole("region", {
+      name: "OwnTracks setup needed",
+    });
+    await expect(troubleshooting).toContainText(
+      "Socos has received no sample from this device yet"
+    );
+    await expect(troubleshooting).toContainText(
+      `${new URL(page.url()).origin}/api/location/owntracks`
+    );
+    await expect(troubleshooting).toContainText("Connection mode to HTTP");
+    await expect(troubleshooting).toContainText(
+      "Basic username and password under Identification or connection settings"
+    );
+    await expect(troubleshooting).toContainText("Allow all the time");
+    await expect(troubleshooting).toContainText(
+      "Disable battery optimization for OwnTracks"
+    );
+    await expect(troubleshooting).toContainText(
+      "manual publish or Report location"
+    );
+    await expect(troubleshooting).toContainText(
+      "Return to Socos and refresh this page"
+    );
+    await expect(troubleshooting).toContainText(
+      "Socos cannot recover the one-time password"
+    );
+    await expect(troubleshooting).toContainText(
+      "Rotate credentials only if the original password was lost"
+    );
+    await expect(troubleshooting).toContainText(
+      "Old credentials stop working immediately"
+    );
+    await expect(troubleshooting).not.toContainText(FIRST_PASSWORD);
+    await expect(troubleshooting).not.toContainText("synthetic-pixel-user");
     await expect(
       pixel.getByText("Visit-derived", { exact: true })
     ).toBeVisible();

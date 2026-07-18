@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useRef, type RefObject } from "react";
+import OwnTracksSetupChecklist from "./owntracks-setup-checklist";
 
 type OneTimeCredentialsDialogProps = {
   endpoint: string;
+  externalDeviceId: string;
   username: string;
   password: string;
   initialFocusRef?: RefObject<HTMLButtonElement | null>;
@@ -20,6 +22,7 @@ function focusTarget(
 
 export default function OneTimeCredentialsDialog({
   endpoint,
+  externalDeviceId,
   username,
   password,
   initialFocusRef,
@@ -59,7 +62,7 @@ export default function OneTimeCredentialsDialog({
         aria-modal="true"
         aria-label="One-time Pixel credentials"
         onKeyDown={handleKeyDown}
-        className="flex h-full w-full flex-col justify-between overflow-y-auto bg-surface-container p-5 sm:h-auto sm:max-w-lg sm:border sm:border-secondary/50"
+        className="flex h-full w-full flex-col justify-between overflow-y-auto bg-surface-container p-5 sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:max-w-lg sm:border sm:border-secondary/50"
       >
         <div className="min-w-0">
           <div className="mb-5 flex size-11 items-center justify-center bg-secondary text-on-secondary">
@@ -75,11 +78,11 @@ export default function OneTimeCredentialsDialog({
           </h2>
           <p className="mt-3 text-sm leading-6 text-on-surface-variant">
             Configure OwnTracks before closing. The password cannot be shown
-            again.
+            again, and Socos cannot recover it.
           </p>
           <dl className="mt-6 min-w-0 space-y-4">
             {[
-              ["Endpoint", endpoint],
+              ["External device ID", externalDeviceId],
               ["Username", username],
               ["Password", password],
             ].map(([label, value]) => (
@@ -93,6 +96,17 @@ export default function OneTimeCredentialsDialog({
               </div>
             ))}
           </dl>
+          <div className="mt-6 border-t border-outline-variant/30 pt-5">
+            <h3 className="text-sm font-extrabold text-on-surface">
+              Android OwnTracks HTTP setup
+            </h3>
+            <div className="mt-3">
+              <OwnTracksSetupChecklist
+                endpoint={endpoint}
+                credentialsShown
+              />
+            </div>
+          </div>
         </div>
         <button
           ref={closeRef}
