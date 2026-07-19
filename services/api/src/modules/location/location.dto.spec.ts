@@ -28,6 +28,90 @@ describe("OwnTracksLocationDto", () => {
     expect(errors).toHaveLength(0);
   });
 
+  it("accepts documented OwnTracks HTTP and Android metadata", async () => {
+    const input = {
+      _type: "location",
+      tst: nowSeconds,
+      lat: 1,
+      lon: 2,
+      tid: "P1",
+      topic: "owntracks/synthetic/pixel",
+      conn: "w",
+      bs: 2,
+      vac: 4,
+      rad: 25,
+      p: 101.3,
+      inregions: ["Synthetic region"],
+      inrids: ["synthetic-region-id"],
+      SSID: "Synthetic WiFi",
+      BSSID: "00:00:00:00:00:00",
+      created_at: nowSeconds,
+      m: 2,
+      _id: "synthetic-message-id",
+      motionactivities: ["walking"],
+    };
+
+    await expect(
+      createApplicationValidationPipe().transform(input, {
+        type: "body",
+        metatype: OwnTracksLocationDto,
+        data: "",
+      })
+    ).resolves.toEqual({
+      _type: "location",
+      tst: nowSeconds,
+      lat: 1,
+      lon: 2,
+      tid: "P1",
+    });
+  });
+
+  it("drops unknown future OwnTracks extension metadata", async () => {
+    await expect(
+      createApplicationValidationPipe().transform(
+        {
+          _type: "location",
+          tst: nowSeconds,
+          lat: 1,
+          lon: 2,
+          future_extension: { nested: ["ignored"] },
+        },
+        {
+          type: "body",
+          metatype: OwnTracksLocationDto,
+          data: "",
+        }
+      )
+    ).resolves.toEqual({
+      _type: "location",
+      tst: nowSeconds,
+      lat: 1,
+      lon: 2,
+    });
+  });
+
+  it.each(["u", "r", "c", "p", "t", "b", "v", "C", "m", "e"])(
+    "accepts the current OwnTracks location trigger %s",
+    async (trigger) => {
+      await expect(
+        createApplicationValidationPipe().transform(
+          {
+            _type: "location",
+            tst: nowSeconds,
+            lat: 1,
+            lon: 2,
+            t: trigger,
+          },
+          {
+            type: "body",
+            metatype: OwnTracksLocationDto,
+            data: "",
+          }
+        )
+      ).resolves.toMatchObject({ t: trigger });
+    }
+  );
+
   it.each([
     ["wrong type", { _type: "transition", tst: nowSeconds, lat: 1, lon: 2 }],
     ["fractional timestamp", { _type: "location", tst: 1.5, lat: 1, lon: 2 }],

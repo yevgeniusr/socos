@@ -14,9 +14,20 @@ import {
   ValidatorConstraint,
   type ValidatorConstraintInterface,
 } from "class-validator";
-import { Transform } from "class-transformer";
+import { Exclude, Expose, Transform } from "class-transformer";
 
-const OWNTRACKS_TRIGGERS = ["p", "c", "b", "r", "u", "t", "v"] as const;
+const OWNTRACKS_TRIGGERS = [
+  "p",
+  "c",
+  "b",
+  "r",
+  "u",
+  "t",
+  "v",
+  "C",
+  "m",
+  "e",
+] as const;
 
 @ValidatorConstraint({ name: "notTooFarInFuture", async: false })
 class NotTooFarInFuture implements ValidatorConstraintInterface {
@@ -65,6 +76,7 @@ class IanaTimeZone implements ValidatorConstraintInterface {
   }
 }
 
+@Exclude({ toClassOnly: true })
 export class OwnTracksLocationDto {
   @PreserveJsonType()
   @IsIn(["location"])
@@ -222,7 +234,10 @@ export type AuthenticatedLocationDevice = {
 };
 
 function PreserveJsonType(): PropertyDecorator {
-  return Transform(({ obj, key }) => (obj as Record<string, unknown>)[key], {
-    toClassOnly: true,
-  });
+  return (target, propertyKey) => {
+    Expose({ toClassOnly: true })(target, propertyKey);
+    Transform(({ obj, key }) => (obj as Record<string, unknown>)[key], {
+      toClassOnly: true,
+    })(target, propertyKey);
+  };
 }
