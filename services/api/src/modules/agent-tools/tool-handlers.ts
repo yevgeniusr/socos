@@ -37,6 +37,7 @@ import type {
 import { ReminderType, RepeatInterval } from "../reminders/reminders.dto.js";
 import { AgentReadService } from "./agent-read.service.js";
 import { ContactEnrichmentService } from "../contact-enrichment/contact-enrichment.service.js";
+import type { AgentContactCreateInput } from "../contacts/contacts.service.js";
 import {
   ENRICHMENT_FIELDS,
   ENRICHMENT_SOURCE_KINDS,
@@ -51,6 +52,17 @@ const emptyInputSchema = z.strictObject({});
 const contactsSearchInputSchema = z.strictObject({
   query: z.string().trim().min(1).max(100),
   limit: z.number().int().min(1).max(20).default(10),
+});
+const contactText = z.string().trim().min(1).max(200);
+const contactStringList = z.array(z.string().trim().min(1).max(100)).max(20);
+const createContactInputSchema = z.strictObject({
+  idempotencyKey,
+  firstName: contactText,
+  lastName: contactText.optional(),
+  nickname: contactText.optional(),
+  labels: contactStringList.optional(),
+  tags: contactStringList.optional(),
+  groups: contactStringList.optional(),
 });
 const relationshipHealthInputSchema = z.strictObject({ contactId: entityId });
 const importantDatesInputSchema = z.strictObject({
@@ -133,8 +145,17 @@ const createReminderInputSchema = z
   });
 
 export const AGENT_INTERACTION_COMMANDS = Symbol("AGENT_INTERACTION_COMMANDS");
+export const AGENT_CONTACT_COMMANDS = Symbol("AGENT_CONTACT_COMMANDS");
 export const AGENT_REMINDER_COMMANDS = Symbol("AGENT_REMINDER_COMMANDS");
 export const AGENT_FEEDBACK_COMMANDS = Symbol("AGENT_FEEDBACK_COMMANDS");
+
+export interface AgentContactCommands {
+  createForAgent(
+    ownerId: string,
+    input: AgentContactCreateInput,
+    transaction: Prisma.TransactionClient
+  ): Promise<unknown>;
+}
 
 export interface AgentInteractionCommands {
   createForAgent(
@@ -182,6 +203,7 @@ export interface ExplicitAgentTool {
 }
 
 type ContactsSearchInput = z.infer<typeof contactsSearchInputSchema>;
+type CreateContactInput = z.infer<typeof createContactInputSchema>;
 type RelationshipHealthInput = z.infer<typeof relationshipHealthInputSchema>;
 type ImportantDatesInput = z.infer<typeof importantDatesInputSchema>;
 type RemindersListInput = z.infer<typeof remindersListInputSchema>;
@@ -202,6 +224,8 @@ type AcceptCandidateToolInput = z.infer<
 export class AgentToolHandlers {
   constructor(
     private readonly reads: AgentReadService,
+    @Inject(AGENT_CONTACT_COMMANDS)
+    private readonly contacts: AgentContactCommands,
     @Inject(AGENT_INTERACTION_COMMANDS)
     private readonly interactions: AgentInteractionCommands,
     @Inject(AGENT_REMINDER_COMMANDS)
@@ -223,6 +247,16 @@ export class AgentToolHandlers {
       input.query,
       input.limit
     );
+  }
+
+  createContact(
+    principal: AgentPrincipal,
+    input: CreateContactInput,
+    transaction?: Prisma.TransactionClient
+  ) {
+    if (!transaction) throw new Error("Contact creation requires a transaction");
+    const { idempotencyKey: _idempotencyKey, ...contact } = input;
+    return this.contacts.createForAgent(principal.ownerId, contact, transaction);
   }
 
   relationshipHealth(
@@ -498,6 +532,15 @@ export function createExplicitAgentTools(
       false,
       contactsSearchInputSchema,
       handlers.contactsSearch.bind(handlers)
+    ),
+    tool(
+      "socos_create_contact",
+      "Create one owner contact without outbound communication.",
+      "contacts:write",
+      "automatic",
+      true,
+      createContactInputSchema,
+      handlers.createContact.bind(handlers)
     ),
     tool(
       "socos_relationship_health",

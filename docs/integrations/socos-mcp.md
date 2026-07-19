@@ -21,7 +21,7 @@ Use these initial profiles:
 
 | Client | Scopes |
 | --- | --- |
-| Hermes | `contacts:read`, `relationships:read`, `dates:read`, `reminders:read`, `briefs:read`, `enrichment:read`, `interactions:write`, `reminders:write`, `feedback:write`, `quests:complete`, `proposals:write`, `enrichment:candidates:write`, `enrichment:accept` |
+| Hermes | `contacts:read`, `contacts:write`, `relationships:read`, `dates:read`, `reminders:read`, `briefs:read`, `enrichment:read`, `interactions:write`, `reminders:write`, `feedback:write`, `quests:complete`, `proposals:write`, `enrichment:candidates:write`, `enrichment:accept` |
 | Codex | `contacts:read`, `relationships:read`, `dates:read`, `reminders:read`, `briefs:read`, `enrichment:read` |
 | Claude | `contacts:read`, `relationships:read`, `dates:read`, `reminders:read`, `briefs:read`, `enrichment:read` |
 
@@ -30,6 +30,11 @@ automatic but require a stable per-intent `idempotencyKey`. Message, introductio
 invitation, merge, and delete tools only create proposals. A human must approve the
 exact payload before an execution attempt, and every grant is short-lived and
 single-use. Unsupported executors fail without consuming the approval.
+
+`socos_create_contact` requires `contacts:write`, creates one owner-scoped contact,
+rejects exact case-insensitive name duplicates, and performs no outbound action. Its
+strict input accepts names plus bounded labels, tags, and groups; retries must reuse
+the same idempotency key.
 
 Tool discovery is scope-aware: `tools/list` returns only tools whose required scope
 is present on the authenticated client. The default Hermes profile intentionally

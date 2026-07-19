@@ -10,6 +10,7 @@ const principal: AgentPrincipal = {
   credentialId: "credential-synthetic",
   clientName: "Hermes Synthetic",
   scopes: [
+    "contacts:write",
     "interactions:write",
     "reminders:write",
     "feedback:write",
@@ -28,6 +29,7 @@ function harness() {
     contactsMissingEnrichment: jest.fn(),
     enrichmentCandidatesList: jest.fn(),
   };
+  const contacts = { createForAgent: jest.fn() };
   const interactions = { createForAgent: jest.fn() };
   const reminders = { createForAgent: jest.fn(), create: jest.fn() };
   const feedback = {
@@ -43,6 +45,7 @@ function harness() {
   return {
     handlers: new AgentToolHandlers(
       reads as never,
+      contacts,
       interactions,
       reminders,
       feedback,
@@ -51,6 +54,7 @@ function harness() {
       enrichment as never
     ),
     reads,
+    contacts,
     interactions,
     reminders,
     feedback,
@@ -61,6 +65,43 @@ function harness() {
 }
 
 describe("AgentToolHandlers", () => {
+  it("creates contacts through the transaction-aware owner-scoped seam", async () => {
+    const { handlers, contacts } = harness();
+    const transaction = { id: "tx" } as never;
+    contacts.createForAgent.mockResolvedValue({
+      id: "contact-aushman",
+      firstName: "Aushman",
+      lastName: null,
+      nickname: null,
+      labels: ["second-brain"],
+      tags: ["historical-game-event-participant"],
+      groups: [],
+      createdAt: "2026-07-19T00:00:00.000Z",
+    });
+
+    await expect(
+      handlers.createContact(
+        principal,
+        {
+          idempotencyKey: "contact:create-aushman",
+          firstName: "Aushman",
+          labels: ["second-brain"],
+          tags: ["historical-game-event-participant"],
+        },
+        transaction
+      )
+    ).resolves.toMatchObject({ id: "contact-aushman", firstName: "Aushman" });
+    expect(contacts.createForAgent).toHaveBeenCalledWith(
+      principal.ownerId,
+      {
+        firstName: "Aushman",
+        labels: ["second-brain"],
+        tags: ["historical-game-event-participant"],
+      },
+      transaction
+    );
+  });
+
   it("submits and accepts candidates through the idempotency transaction", async () => {
     const { handlers, enrichment } = harness();
     const transaction = { id: "tx" } as never;

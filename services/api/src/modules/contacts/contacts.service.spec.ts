@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import { ContactsService } from './contacts.service.js';
 
@@ -77,6 +77,88 @@ function expectSafeDetailRelations(select: Record<string, any>, ownerId: string)
 }
 
 describe('ContactsService personal profiles', () => {
+  describe('agent contact creation', () => {
+    it('creates an owner-scoped non-demo contact in the supplied transaction', async () => {
+      const createdAt = new Date('2026-07-19T00:00:00.000Z');
+      const transaction = {
+        vault: { findFirst: jest.fn().mockResolvedValue({ id: 'vault-owner' }) },
+        contact: {
+          findFirst: jest.fn().mockResolvedValue(null),
+          create: jest.fn().mockResolvedValue({
+            id: 'contact-created',
+            firstName: 'Synthetic',
+            lastName: 'Person',
+            nickname: null,
+            labels: ['second-brain'],
+            tags: ['historical-event-participant'],
+            groups: [],
+            createdAt,
+          }),
+        },
+      };
+
+      await expect(
+        makeService({}).createForAgent(
+          'owner-one',
+          {
+            firstName: 'Synthetic',
+            lastName: 'Person',
+            labels: ['second-brain'],
+            tags: ['historical-event-participant'],
+          },
+          transaction as any,
+        ),
+      ).resolves.toEqual(expect.objectContaining({
+        id: 'contact-created',
+        createdAt: '2026-07-19T00:00:00.000Z',
+      }));
+
+      expect(transaction.vault.findFirst).toHaveBeenCalledWith({
+        where: { ownerId: 'owner-one' },
+        select: { id: true },
+      });
+      expect(transaction.contact.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          vaultId: 'vault-owner',
+          ownerId: 'owner-one',
+          firstName: 'Synthetic',
+          lastName: 'Person',
+          labels: ['second-brain'],
+          tags: ['historical-event-participant'],
+          groups: [],
+        }),
+      }));
+    });
+
+    it('rejects an exact case-insensitive owner-scoped non-demo duplicate', async () => {
+      const transaction = {
+        vault: { findFirst: jest.fn().mockResolvedValue({ id: 'vault-owner' }) },
+        contact: {
+          findFirst: jest.fn().mockResolvedValue({ id: 'existing-contact' }),
+          create: jest.fn(),
+        },
+      };
+
+      await expect(
+        makeService({}).createForAgent(
+          'owner-one',
+          { firstName: 'Synthetic' },
+          transaction as any,
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(transaction.contact.create).not.toHaveBeenCalled();
+      expect(transaction.contact.findFirst).toHaveBeenCalledWith({
+        where: {
+          ownerId: 'owner-one',
+          isDemo: false,
+          firstName: { equals: 'Synthetic', mode: 'insensitive' },
+          OR: [{ lastName: null }, { lastName: '' }],
+        },
+        select: { id: true },
+      });
+    });
+  });
+
   describe('list and facets', () => {
     it('uses bounded pagination, non-demo isolation, group filtering, and stable allowlisted sorting', async () => {
       const prisma = {

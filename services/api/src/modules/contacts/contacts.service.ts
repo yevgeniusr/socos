@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import {
@@ -13,6 +13,15 @@ import {
 
 const DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 100;
+
+export interface AgentContactCreateInput {
+  firstName: string;
+  lastName?: string;
+  nickname?: string;
+  labels?: string[];
+  tags?: string[];
+  groups?: string[];
+}
 
 const CONTACT_LIST_SELECT = {
   id: true,
@@ -221,6 +230,56 @@ export class ContactsService {
       ...contact,
       socialLinks: parseSocialLinks(contact.socialLinks),
     };
+  }
+
+  async createForAgent(
+    userId: string,
+    input: AgentContactCreateInput,
+    transaction: Prisma.TransactionClient,
+  ) {
+    const vault = await transaction.vault.findFirst({
+      where: { ownerId: userId },
+      select: { id: true },
+    });
+    if (!vault) throw new NotFoundException('No vault found');
+
+    const existing = await transaction.contact.findFirst({
+      where: {
+        ownerId: userId,
+        isDemo: false,
+        firstName: { equals: input.firstName, mode: 'insensitive' },
+        ...(input.lastName
+          ? { lastName: { equals: input.lastName, mode: 'insensitive' } }
+          : { OR: [{ lastName: null }, { lastName: '' }] }),
+      },
+      select: { id: true },
+    });
+    if (existing) throw new ConflictException('Contact already exists');
+
+    const created = await transaction.contact.create({
+      data: {
+        vaultId: vault.id,
+        ownerId: userId,
+        firstName: input.firstName,
+        lastName: input.lastName,
+        nickname: input.nickname,
+        labels: input.labels ?? [],
+        tags: input.tags ?? [],
+        groups: input.groups ?? [],
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        nickname: true,
+        labels: true,
+        tags: true,
+        groups: true,
+        createdAt: true,
+      },
+    });
+
+    return { ...created, createdAt: created.createdAt.toISOString() };
   }
 
   async findAll(userId: string, query: ContactQueryDto) {

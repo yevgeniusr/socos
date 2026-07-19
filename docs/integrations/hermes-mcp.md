@@ -19,6 +19,11 @@ interaction or creating a reminder is allowed automatically. Outbound messages,
 introductions, invitations, merges, and deletions must stop after
 `socos_propose_action` until a human approves the proposal in Socos.
 
+When the owner explicitly asks Hermes to save a person, `socos_create_contact` may
+create the owner-scoped CRM record with a stable idempotency key. Hermes must search
+first, avoid exact duplicates, and preserve source classification through bounded
+labels or tags without inventing names, roles, dates, or relationship facts.
+
 For explicitly requested enrichment work, Hermes may page through
 `socos_contacts_missing_enrichment`, inspect candidates with
 `socos_enrichment_candidates_list`, and submit provenance-backed rows with

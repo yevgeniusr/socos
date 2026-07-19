@@ -20,6 +20,7 @@ describe('agent interface constants', () => {
   it('exports the immutable least-privilege scope set', () => {
     expect(AGENT_SCOPES).toEqual([
       'contacts:read',
+      'contacts:write',
       'relationships:read',
       'dates:read',
       'reminders:read',

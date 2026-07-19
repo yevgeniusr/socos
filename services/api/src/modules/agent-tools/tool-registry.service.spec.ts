@@ -17,6 +17,7 @@ const principal: AgentPrincipal = {
     "briefs:read",
     "enrichment:read",
     "contacts:read",
+    "contacts:write",
     "relationships:read",
     "dates:read",
     "reminders:read",
@@ -36,6 +37,11 @@ function harness() {
   const handlers = {
     briefToday: jest.fn().mockResolvedValue({ status: "BRIEF_NOT_READY" }),
     contactsSearch: jest.fn().mockResolvedValue({ contacts: [] }),
+    createContact: jest.fn().mockResolvedValue({
+      id: "contact-created",
+      firstName: "Synthetic",
+      lastName: "Person",
+    }),
     relationshipHealth: jest.fn(),
     importantDates: jest.fn(),
     remindersList: jest.fn(),
@@ -70,12 +76,13 @@ function harness() {
 }
 
 describe("AgentToolRegistryService", () => {
-  it("lists exactly the fifteen tools in stable explicit order", () => {
+  it("lists exactly the sixteen tools in stable explicit order", () => {
     const { registry } = harness();
 
     expect(registry.list()).toEqual([
       metadata("socos_brief_today", "briefs:read", "read", false),
       metadata("socos_contacts_search", "contacts:read", "read", false),
+      metadata("socos_create_contact", "contacts:write", "automatic", true),
       metadata(
         "socos_relationship_health",
         "relationships:read",
@@ -141,7 +148,7 @@ describe("AgentToolRegistryService", () => {
     const definitions = registry.definitions();
     const search = registry.getDefinition("socos_contacts_search");
 
-    expect(definitions).toHaveLength(15);
+    expect(definitions).toHaveLength(16);
     expect(Object.isFrozen(definitions)).toBe(true);
     expect(search?.metadata.name).toBe("socos_contacts_search");
     expect(search?.inputSchema.safeParse({ query: "Synthetic" }).success).toBe(
@@ -166,7 +173,30 @@ describe("AgentToolRegistryService", () => {
     expect(definitions.map(({ metadata }) => metadata.name)).toEqual([
       "socos_brief_today",
     ]);
-    expect(registry.definitions()).toHaveLength(15);
+    expect(registry.definitions()).toHaveLength(16);
+  });
+
+  it("publishes a strict idempotent contact-creation schema", () => {
+    const { registry } = harness();
+    const create = registry.getDefinition("socos_create_contact")!;
+
+    expect(create.metadata.requiredScope).toBe("contacts:write");
+    expect(create.metadata.requiresIdempotencyKey).toBe(true);
+    expect(
+      create.inputSchema.safeParse({
+        idempotencyKey: "contact:create-aushman",
+        firstName: "Aushman",
+        labels: ["second-brain"],
+        tags: ["historical-game-event-participant"],
+      }).success
+    ).toBe(true);
+    expect(
+      create.inputSchema.safeParse({
+        idempotencyKey: "contact:create-invalid",
+        firstName: "Aushman",
+        ownerId: "caller-controlled",
+      }).success
+    ).toBe(false);
   });
 
   it("publishes strict bounded enrichment schemas with idempotent writes", () => {

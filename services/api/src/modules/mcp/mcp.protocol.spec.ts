@@ -33,6 +33,7 @@ const principals: Record<string, AgentPrincipal> = {
     clientName: "Scoped metadata client",
     scopes: [
       "contacts:read",
+      "contacts:write",
       "relationships:read",
       "dates:read",
       "reminders:read",
@@ -53,6 +54,7 @@ const principals: Record<string, AgentPrincipal> = {
 const definitions = [
   definition("socos_brief_today", "briefs:read", "read", false),
   definition("socos_contacts_search", "contacts:read", "read", false),
+  definition("socos_create_contact", "contacts:write", "automatic", true),
   definition("socos_relationship_health", "relationships:read", "read", false),
   definition("socos_important_dates", "dates:read", "read", false),
   definition("socos_reminders_list", "reminders:read", "read", false),
@@ -254,7 +256,7 @@ describe("MCP Streamable HTTP protocol", () => {
     const allList = await step("all list", all.protocol.listTools());
     await all.protocol.close();
 
-    expect(allList.tools).toHaveLength(15);
+    expect(allList.tools).toHaveLength(16);
     expect(
       allList.tools
         .filter(({ annotations }) => annotations?.destructiveHint === true)

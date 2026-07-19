@@ -10,9 +10,11 @@ import { PrismaService } from "../prisma/prisma.service.js";
 import { RemindersModule } from "../reminders/reminders.module.js";
 import { RemindersService } from "../reminders/reminders.service.js";
 import { ContactEnrichmentService } from "../contact-enrichment/contact-enrichment.service.js";
+import { ContactsService } from "../contacts/contacts.service.js";
 import { AgentReadService } from "./agent-read.service.js";
 import {
   AGENT_FEEDBACK_COMMANDS,
+  AGENT_CONTACT_COMMANDS,
   AGENT_INTERACTION_COMMANDS,
   AGENT_REMINDER_COMMANDS,
   AgentToolHandlers,
@@ -33,9 +35,11 @@ import { AgentToolRegistryService } from "./tool-registry.service.js";
     GamificationService,
     InteractionsService,
     ContactEnrichmentService,
+    ContactsService,
     AgentReadService,
     AgentToolHandlers,
     AgentToolRegistryService,
+    { provide: AGENT_CONTACT_COMMANDS, useExisting: ContactsService },
     { provide: AGENT_INTERACTION_COMMANDS, useExisting: InteractionsService },
     { provide: AGENT_REMINDER_COMMANDS, useExisting: RemindersService },
     { provide: AGENT_FEEDBACK_COMMANDS, useExisting: BriefFeedbackService },
