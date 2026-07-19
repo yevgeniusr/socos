@@ -45,6 +45,19 @@ export interface SubmitEnrichmentCandidateInput {
   matchRationale: string;
 }
 
+export interface CorrectSocialLinkInput {
+  contactId: string;
+  socialKey: string;
+  expectedCurrentValue: string;
+  correctedValue: string;
+  sourceKind: EnrichmentSourceKind;
+  sourceLocator: string;
+  sourceReference: string;
+  sourceRetrievedAt: string;
+  confidence: number;
+  matchRationale: string;
+}
+
 export interface EnrichmentPageInput {
   offset?: number;
   limit?: number;

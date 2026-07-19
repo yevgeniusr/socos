@@ -24,6 +24,14 @@ confirms the field was missing. Treat every conflict as a stop condition. Public
 web candidates remain pending for human review. Enrichment does not use
 `socos_propose_action` and never requires `approvals:execute`.
 
+For an explicit owner correction of an existing LinkedIn or social URL, call
+`socos_correct_contact_social_link` only with the full contact ID, one social key,
+the corrected URL, source kind/locator/reference/retrieved timestamp, confidence,
+rationale, and `expectedCurrentValue`. The source kind must be owner-controlled or
+private evidence: `second_brain`, `arc_history`, `arc_sidebar`, or `vcard`. Treat
+stale-value conflicts as a stop condition. Do not use this from daily-brief replies
+or public-web evidence.
+
 This workflow is separate from the exact Discord reply grammar below. Never infer
 an enrichment mutation from a daily-brief reply.
 

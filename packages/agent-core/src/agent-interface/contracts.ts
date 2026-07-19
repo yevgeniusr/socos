@@ -1,6 +1,7 @@
 export const AGENT_SCOPES = Object.freeze([
   'contacts:read',
   'contacts:write',
+  'contacts:social-links:correct',
   'relationships:read',
   'dates:read',
   'reminders:read',

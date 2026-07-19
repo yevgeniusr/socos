@@ -622,6 +622,8 @@ model ContactEnrichmentCandidate {
   sourceRetrievedAt DateTime
   confidence        Float
   matchRationale    String
+  correctionKind    String?
+  previousValue     Json?
   status            String    @default("pending")
   contentHash       String
   decidedAt         DateTime?

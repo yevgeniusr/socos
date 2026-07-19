@@ -21,7 +21,7 @@ Use these initial profiles:
 
 | Client | Scopes |
 | --- | --- |
-| Hermes | `contacts:read`, `contacts:write`, `relationships:read`, `dates:read`, `reminders:read`, `briefs:read`, `enrichment:read`, `interactions:write`, `reminders:write`, `feedback:write`, `quests:complete`, `proposals:write`, `enrichment:candidates:write`, `enrichment:accept` |
+| Hermes | `contacts:read`, `contacts:write`, `contacts:social-links:correct`, `relationships:read`, `dates:read`, `reminders:read`, `briefs:read`, `enrichment:read`, `interactions:write`, `reminders:write`, `feedback:write`, `quests:complete`, `proposals:write`, `enrichment:candidates:write`, `enrichment:accept` |
 | Codex | `contacts:read`, `relationships:read`, `dates:read`, `reminders:read`, `briefs:read`, `enrichment:read` |
 | Claude | `contacts:read`, `relationships:read`, `dates:read`, `reminders:read`, `briefs:read`, `enrichment:read` |
 
@@ -36,12 +36,26 @@ rejects exact case-insensitive name duplicates, and performs no outbound action.
 strict input accepts names plus bounded labels, tags, and groups; retries must reuse
 the same idempotency key.
 
+`socos_correct_contact_social_link` requires
+`contacts:social-links:correct`. It replaces one existing `socialLinks` value on
+one owner contact when the caller supplies the contact ID, social key,
+`expectedCurrentValue`, corrected URL, owner-controlled/private source
+kind/locator/reference/retrieval time, confidence, and rationale. Allowed automatic
+correction sources are `second_brain`, `arc_history`, `arc_sidebar`, and `vcard`;
+public-web evidence must go through candidate submission and human review. The tool
+refuses missing links, stale expected values, malformed or host-mismatched URLs,
+unknown fields, and cross-owner contacts. It returns a bounded receipt for the one
+changed key and stores an accepted `ContactEnrichmentCandidate` provenance row with
+`correctionKind: "social_link_replace"` and the previous value; unrelated contact
+fields and other social links are left unchanged.
+
 Tool discovery is scope-aware: `tools/list` returns only tools whose required scope
 is present on the authenticated client. The default Hermes profile intentionally
 omits `approvals:execute`; use a separate, narrowly operated client if approved
 execution is enabled in a future deployment. Direct calls remain scope-checked even
-when a caller already knows a hidden tool name. Approved execution is advertised as
-destructive to MCP clients; all other current tools are non-destructive.
+when a caller already knows a hidden tool name. Approved execution and social-link
+correction are advertised as destructive to MCP clients; all other current tools are
+non-destructive.
 
 Enrichment uses four dedicated tools and never overloads an outbound-action
 approval type. `socos_contacts_missing_enrichment` and

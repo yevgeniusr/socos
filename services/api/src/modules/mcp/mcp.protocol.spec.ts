@@ -34,6 +34,7 @@ const principals: Record<string, AgentPrincipal> = {
     scopes: [
       "contacts:read",
       "contacts:write",
+      "contacts:social-links:correct",
       "relationships:read",
       "dates:read",
       "reminders:read",
@@ -48,6 +49,20 @@ const principals: Record<string, AgentPrincipal> = {
       "enrichment:accept",
       "approvals:execute",
     ],
+  },
+  "credential-contact-write": {
+    ownerId: "owner-contact-write",
+    clientId: "client-contact-write",
+    credentialId: "credential-contact-write",
+    clientName: "Contact writer",
+    scopes: ["contacts:write"],
+  },
+  "credential-social-correct": {
+    ownerId: "owner-social-correct",
+    clientId: "client-social-correct",
+    credentialId: "credential-social-correct",
+    clientName: "Social corrector",
+    scopes: ["contacts:social-links:correct"],
   },
 };
 
@@ -83,6 +98,12 @@ const definitions = [
   definition(
     "socos_enrichment_candidate_accept",
     "enrichment:accept",
+    "automatic",
+    true
+  ),
+  definition(
+    "socos_correct_contact_social_link",
+    "contacts:social-links:correct",
     "automatic",
     true
   ),
@@ -218,7 +239,7 @@ describe("MCP Streamable HTTP protocol", () => {
     );
   });
 
-  it("advertises only scoped tools and marks only approved execution destructive", async () => {
+  it("advertises only scoped tools and marks destructive mutation tools", async () => {
     const limited = client("credential-a");
     await step("limited connect", limited.protocol.connect(limited.transport));
     const limitedList = await step(
@@ -256,17 +277,54 @@ describe("MCP Streamable HTTP protocol", () => {
     const allList = await step("all list", all.protocol.listTools());
     await all.protocol.close();
 
-    expect(allList.tools).toHaveLength(16);
+    expect(allList.tools).toHaveLength(17);
     expect(
       allList.tools
         .filter(({ annotations }) => annotations?.destructiveHint === true)
         .map(({ name }) => name)
-    ).toEqual(["socos_execute_approved_action"]);
+    ).toEqual([
+      "socos_correct_contact_social_link",
+      "socos_execute_approved_action",
+    ]);
     expect(
       allList.tools
-        .filter(({ name }) => name !== "socos_execute_approved_action")
+        .filter(
+          ({ name }) =>
+            name !== "socos_execute_approved_action" &&
+            name !== "socos_correct_contact_social_link"
+        )
         .every(({ annotations }) => annotations?.destructiveHint === false)
     ).toBe(true);
+
+    const contactWrite = client("credential-contact-write");
+    await step(
+      "contact write connect",
+      contactWrite.protocol.connect(contactWrite.transport)
+    );
+    const contactWriteList = await step(
+      "contact write list",
+      contactWrite.protocol.listTools()
+    );
+    await contactWrite.protocol.close();
+
+    expect(contactWriteList.tools.map(({ name }) => name)).toEqual([
+      "socos_create_contact",
+    ]);
+
+    const socialCorrect = client("credential-social-correct");
+    await step(
+      "social correction connect",
+      socialCorrect.protocol.connect(socialCorrect.transport)
+    );
+    const socialCorrectList = await step(
+      "social correction list",
+      socialCorrect.protocol.listTools()
+    );
+    await socialCorrect.protocol.close();
+
+    expect(socialCorrectList.tools.map(({ name }) => name)).toEqual([
+      "socos_correct_contact_social_link",
+    ]);
   });
 
   it("rejects missing and invalid bearer credentials generically", async () => {

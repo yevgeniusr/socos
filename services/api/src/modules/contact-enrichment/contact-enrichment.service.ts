@@ -8,6 +8,7 @@ import { Prisma } from "@prisma/client";
 import { hashCanonicalJson } from "../agent-security/canonical-json.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import type {
+  CorrectSocialLinkInput,
   EnrichmentField,
   EnrichmentPageInput,
   SubmitEnrichmentCandidateInput,
@@ -17,8 +18,28 @@ import { normalizeCandidateValue } from "./contact-enrichment.validation.js";
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
 const AUTO_ACCEPT_CONFIDENCE = 0.9;
+const AUTOMATIC_CORRECTION_SOURCE_KINDS = new Set([
+  "second_brain",
+  "arc_history",
+  "arc_sidebar",
+  "vcard",
+]);
+const SOCIAL_KEY_PROBE_URLS: Readonly<Record<string, string>> = {
+  linkedin: "https://www.linkedin.com/in/example/",
+  twitter: "https://twitter.com/example",
+  x: "https://x.com/example",
+  instagram: "https://www.instagram.com/example/",
+  github: "https://github.com/example",
+  facebook: "https://www.facebook.com/example",
+  website: "https://example.org/",
+};
 
 type EnrichmentClient = Pick<
+  Prisma.TransactionClient,
+  "contact" | "contactEnrichmentCandidate"
+>;
+
+type SocialCorrectionClient = Pick<
   Prisma.TransactionClient,
   "contact" | "contactEnrichmentCandidate"
 >;
@@ -174,6 +195,113 @@ export class ContactEnrichmentService {
     }
   }
 
+  async correctSocialLink(
+    ownerId: string,
+    input: CorrectSocialLinkInput,
+    client?: SocialCorrectionClient
+  ) {
+    if (!client) {
+      return this.prisma.$transaction((transaction) =>
+        this.correctSocialLink(ownerId, input, transaction)
+      );
+    }
+
+    const normalized = normalizeSocialCorrection(input);
+    const contact = await client.contact.findFirst({
+      where: { id: input.contactId, ownerId, isDemo: false },
+      select: { id: true, socialLinks: true },
+    });
+    if (!contact) throw new NotFoundException("Contact not found");
+
+    const currentLinks = normalizeExistingSocialLinks(contact.socialLinks);
+    const previousValue = currentLinks.normalized[normalized.socialKey];
+    const rawPreviousValue = currentLinks.raw[normalized.socialKey];
+    if (typeof previousValue !== "string") {
+      throw new ConflictException("Contact social link is not populated");
+    }
+    if (typeof rawPreviousValue !== "string") {
+      throw new ConflictException("Contact social link is not populated");
+    }
+    if (
+      normalized.expectedCurrentValue !== undefined &&
+      normalized.expectedCurrentValue !== previousValue
+    ) {
+      throw new ConflictException("Contact social link has changed");
+    }
+    if (normalized.correctedValue === previousValue) {
+      throw new ConflictException("Corrected social link matches current value");
+    }
+
+    const proposedValue = sortJsonObject({
+      ...currentLinks.raw,
+      [normalized.socialKey]: normalized.correctedValue,
+    });
+    const now = new Date();
+    const previousValuePayload = { [normalized.socialKey]: rawPreviousValue };
+    const contentHash = hashCanonicalJson({
+      correctionKind: "social_link_replace",
+      contactId: input.contactId,
+      socialKey: normalized.socialKey,
+      previousValue: previousValuePayload,
+      proposedValue,
+      sourceKind: input.sourceKind,
+      sourceLocator: normalized.sourceLocator,
+      sourceReference: normalized.sourceReference ?? null,
+      sourceRetrievedAt: normalized.sourceRetrievedAt.toISOString(),
+    });
+
+    const candidate = await client.contactEnrichmentCandidate.create({
+      data: {
+        ownerId,
+        contactId: input.contactId,
+        fieldName: "socialLinks",
+        previousValue: previousValuePayload,
+        proposedValue: proposedValue as Prisma.InputJsonValue,
+        correctionKind: "social_link_replace",
+        sourceKind: input.sourceKind,
+        sourceLocator: normalized.sourceLocator,
+        sourceReference: normalized.sourceReference,
+        sourceRetrievedAt: normalized.sourceRetrievedAt,
+        confidence: input.confidence,
+        matchRationale: normalized.matchRationale,
+        contentHash,
+        status: "accepted",
+        decidedAt: now,
+        appliedAt: now,
+      },
+    });
+
+    const updated = await client.contact.updateMany({
+      where: {
+        id: input.contactId,
+        ownerId,
+        isDemo: false,
+        socialLinks: { equals: currentLinks.raw as Prisma.InputJsonValue },
+      },
+      data: { socialLinks: proposedValue as Prisma.InputJsonValue },
+    });
+    if (updated.count !== 1) {
+      throw new ConflictException("Contact social link has changed");
+    }
+
+    return {
+      contactId: input.contactId,
+      socialKey: normalized.socialKey,
+      status: "accepted" as const,
+      applied: true,
+      correctedValue: normalized.correctedValue,
+      appliedAt: now.toISOString(),
+      provenance: {
+        candidateId: candidate.id,
+        sourceKind: candidate.sourceKind,
+        sourceLocator: candidate.sourceLocator,
+        sourceReference: null,
+        sourceRetrievedAt: candidate.sourceRetrievedAt.toISOString(),
+        confidence: candidate.confidence,
+      },
+    };
+  }
+
   async acceptCandidate(
     ownerId: string,
     candidateId: string,
@@ -263,6 +391,107 @@ function normalizeSubmission(input: SubmitEnrichmentCandidateInput) {
     matchRationale,
     sourceRetrievedAt,
   };
+}
+
+function normalizeSocialCorrection(input: CorrectSocialLinkInput) {
+  if (!input.expectedCurrentValue) {
+    throw new BadRequestException("Invalid social link correction intent");
+  }
+  if (!AUTOMATIC_CORRECTION_SOURCE_KINDS.has(input.sourceKind)) {
+    throw new BadRequestException("Invalid enrichment candidate metadata");
+  }
+  const socialKey = normalizeSocialKey(input.socialKey);
+  const expectedCurrentValue = normalizeSocialUrl(
+    socialKey,
+    input.expectedCurrentValue
+  );
+  const correctedValue = normalizeSocialUrl(socialKey, input.correctedValue);
+  const sourceLocator = normalizeSourceLocator(
+    input.sourceKind,
+    input.sourceLocator
+  );
+  const sourceReference = input.sourceReference.trim();
+  const matchRationale = input.matchRationale.trim();
+  const sourceRetrievedAt = new Date(input.sourceRetrievedAt);
+  if (
+    !sourceReference ||
+    sourceReference.length > 500 ||
+    hasControlCharacters(sourceReference) ||
+    !matchRationale ||
+    matchRationale.length > 1_000 ||
+    !Number.isFinite(input.confidence) ||
+    input.confidence < 0 ||
+    input.confidence > 1 ||
+    Number.isNaN(sourceRetrievedAt.getTime())
+  ) {
+    throw new BadRequestException("Invalid enrichment candidate metadata");
+  }
+  return {
+    socialKey,
+    expectedCurrentValue,
+    correctedValue,
+    sourceLocator,
+    sourceReference,
+    matchRationale,
+    sourceRetrievedAt,
+  };
+}
+
+function normalizeSocialUrl(socialKey: string, value: string): string {
+  const normalized = normalizeCandidateValue("socialLinks", {
+    [socialKey]: value,
+  }) as Prisma.JsonObject;
+  return normalized[socialKey] as string;
+}
+
+function normalizeExistingSocialLinks(value: Prisma.JsonValue): {
+  raw: Prisma.JsonObject;
+  normalized: Prisma.JsonObject;
+} {
+  if (!value || Array.isArray(value) || typeof value !== "object") {
+    throw new ConflictException("Contact social links are malformed");
+  }
+  const entries = Object.entries(value);
+  if (entries.length === 0 || entries.length > 10) {
+    throw new ConflictException("Contact social links are malformed");
+  }
+  for (const key of Object.keys(value)) {
+    if (isUnsafeObjectKey(key)) {
+      throw new BadRequestException("Invalid social link key");
+    }
+  }
+  const normalized = normalizeCandidateValue(
+    "socialLinks",
+    value as Prisma.JsonObject
+  ) as Prisma.JsonObject;
+  return {
+    raw: sortJsonObject(value as Prisma.JsonObject),
+    normalized: sortJsonObject(normalized),
+  };
+}
+
+function normalizeSocialKey(rawKey: string): string {
+  if (isUnsafeObjectKey(rawKey)) {
+    throw new BadRequestException("Invalid social link key");
+  }
+  const normalized = rawKey.trim().toLowerCase();
+  const probeUrl = SOCIAL_KEY_PROBE_URLS[normalized];
+  if (!probeUrl) throw new BadRequestException("Invalid social link key");
+  const probe = normalizeCandidateValue("socialLinks", {
+    [normalized]: probeUrl,
+  });
+  if (!probe) throw new BadRequestException("Invalid social link key");
+  return normalized;
+}
+
+function sortJsonObject(value: Prisma.JsonObject): Prisma.JsonObject {
+  return Object.fromEntries(
+    Object.entries(value).sort(([left], [right]) => left.localeCompare(right))
+  ) as Prisma.JsonObject;
+}
+
+function isUnsafeObjectKey(key: string): boolean {
+  return key === "__proto__" || key === "prototype" || key === "constructor";
 }
 
 function normalizeSourceLocator(

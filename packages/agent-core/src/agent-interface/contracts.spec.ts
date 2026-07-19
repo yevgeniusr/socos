@@ -21,6 +21,7 @@ describe('agent interface constants', () => {
     expect(AGENT_SCOPES).toEqual([
       'contacts:read',
       'contacts:write',
+      'contacts:social-links:correct',
       'relationships:read',
       'dates:read',
       'reminders:read',

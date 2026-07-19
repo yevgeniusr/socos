@@ -42,8 +42,10 @@ import {
   ENRICHMENT_FIELDS,
   ENRICHMENT_SOURCE_KINDS,
   ENRICHMENT_STATUSES,
+  type CorrectSocialLinkInput,
   type SubmitEnrichmentCandidateInput,
 } from "../contact-enrichment/contact-enrichment.types.js";
+import { normalizeCandidateValue } from "../contact-enrichment/contact-enrichment.validation.js";
 
 const entityId = z.string().min(1).max(128);
 const idempotencyKey = z.string().regex(/^[A-Za-z0-9._:-]{8,128}$/);
@@ -105,6 +107,43 @@ const acceptEnrichmentCandidateInputSchema = z.strictObject({
   idempotencyKey,
   candidateId: entityId,
 });
+const socialLinkKeys = [
+  "linkedin",
+  "twitter",
+  "x",
+  "instagram",
+  "github",
+  "facebook",
+  "website",
+] as const;
+const correctContactSocialLinkInputSchema = z
+  .strictObject({
+    idempotencyKey,
+    contactId: entityId,
+    socialKey: z.enum(socialLinkKeys),
+    expectedCurrentValue: z.string().trim().min(1).max(2_048),
+    correctedValue: z.string().trim().min(1).max(2_048),
+    sourceKind: z.enum(["second_brain", "arc_history", "arc_sidebar", "vcard"]),
+    sourceLocator: z.string().trim().min(1).max(2_048),
+    sourceReference: z.string().trim().min(1).max(500),
+    sourceRetrievedAt: isoTimestamp,
+    confidence: z.number().min(0).max(1),
+    matchRationale: z.string().trim().min(1).max(1_000),
+  })
+  .superRefine((input, context) => {
+    validateSocialLinkUrl(
+      input.socialKey,
+      input.correctedValue,
+      ["correctedValue"],
+      context
+    );
+    validateSocialLinkUrl(
+      input.socialKey,
+      input.expectedCurrentValue,
+      ["expectedCurrentValue"],
+      context
+    );
+  });
 const logInteractionInputSchema = z.strictObject({
   idempotencyKey,
   contactId: entityId,
@@ -218,6 +257,9 @@ type SubmitCandidateToolInput = z.infer<
 >;
 type AcceptCandidateToolInput = z.infer<
   typeof acceptEnrichmentCandidateInputSchema
+>;
+type CorrectContactSocialLinkToolInput = z.infer<
+  typeof correctContactSocialLinkInputSchema
 >;
 
 @Injectable()
@@ -421,6 +463,19 @@ export class AgentToolHandlers {
     );
   }
 
+  correctContactSocialLink(
+    principal: AgentPrincipal,
+    input: CorrectContactSocialLinkToolInput,
+    transaction: Prisma.TransactionClient
+  ) {
+    const { idempotencyKey: _key, ...correction } = input;
+    return this.enrichment.correctSocialLink(
+      principal.ownerId,
+      correction as CorrectSocialLinkInput,
+      transaction
+    );
+  }
+
   async proposeAction(
     principal: AgentPrincipal,
     input: AgentActionProposalInput,
@@ -478,6 +533,8 @@ function presentCandidate(candidate: {
   contactId: string;
   fieldName: string;
   proposedValue: Prisma.JsonValue;
+  correctionKind: string | null;
+  previousValue: Prisma.JsonValue | null;
   sourceKind: string;
   sourceLocator: string;
   sourceReference: string | null;
@@ -495,13 +552,20 @@ function presentCandidate(candidate: {
     id: candidate.id,
     contactId: candidate.contactId,
     fieldName: candidate.fieldName,
-    proposedValue: candidate.proposedValue,
+    proposedValue: presentCandidateProposedValue(candidate),
+    correctionKind: candidate.correctionKind ?? null,
     sourceKind: candidate.sourceKind,
     sourceLocator: candidate.sourceLocator,
-    sourceReference: candidate.sourceReference ?? null,
+    sourceReference:
+      candidate.correctionKind === "social_link_replace"
+        ? null
+        : (candidate.sourceReference ?? null),
     sourceRetrievedAt: candidate.sourceRetrievedAt.toISOString(),
     confidence: candidate.confidence,
-    matchRationale: candidate.matchRationale,
+    matchRationale:
+      candidate.correctionKind === "social_link_replace"
+        ? "Source-backed social link correction."
+        : candidate.matchRationale,
     status: candidate.status,
     contentHash: candidate.contentHash,
     decidedAt: candidate.decidedAt?.toISOString() ?? null,
@@ -509,6 +573,33 @@ function presentCandidate(candidate: {
     createdAt: candidate.createdAt.toISOString(),
     updatedAt: candidate.updatedAt.toISOString(),
   };
+}
+
+function presentCandidateProposedValue(candidate: {
+  correctionKind: string | null;
+  previousValue: Prisma.JsonValue | null;
+  proposedValue: Prisma.JsonValue;
+}): Prisma.JsonValue {
+  if (candidate.correctionKind !== "social_link_replace") {
+    return candidate.proposedValue;
+  }
+  if (
+    !candidate.previousValue ||
+    Array.isArray(candidate.previousValue) ||
+    typeof candidate.previousValue !== "object" ||
+    !candidate.proposedValue ||
+    Array.isArray(candidate.proposedValue) ||
+    typeof candidate.proposedValue !== "object"
+  ) {
+    return null;
+  }
+  const [socialKey] = Object.keys(candidate.previousValue);
+  if (!socialKey) return null;
+  const correctedValue = (candidate.proposedValue as Prisma.JsonObject)[
+    socialKey
+  ];
+  if (typeof correctedValue !== "string") return null;
+  return { [socialKey]: correctedValue };
 }
 
 export function createExplicitAgentTools(
@@ -642,6 +733,15 @@ export function createExplicitAgentTools(
       handlers.acceptEnrichmentCandidate.bind(handlers)
     ),
     tool(
+      "socos_correct_contact_social_link",
+      "Replace one existing owner contact social link with explicit source-backed correction evidence.",
+      "contacts:social-links:correct",
+      "automatic",
+      true,
+      correctContactSocialLinkInputSchema,
+      handlers.correctContactSocialLink.bind(handlers)
+    ),
+    tool(
       "socos_propose_action",
       "Create a preview for a human-approved action.",
       "proposals:write",
@@ -682,4 +782,21 @@ function tool(
     inputSchema,
     handler,
   });
+}
+
+function validateSocialLinkUrl(
+  socialKey: (typeof socialLinkKeys)[number],
+  value: string,
+  path: string[],
+  context: z.RefinementCtx
+): void {
+  try {
+    normalizeCandidateValue("socialLinks", { [socialKey]: value });
+  } catch {
+    context.addIssue({
+      code: "custom",
+      message: "Invalid social link URL.",
+      path,
+    });
+  }
 }

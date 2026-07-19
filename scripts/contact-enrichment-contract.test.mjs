@@ -105,6 +105,44 @@ test("MCP exposes narrow enrichment scopes and four explicit tools", async () =>
   );
 });
 
+test("contact social-link corrections use a dedicated scope and caller-known stale guard", async () => {
+  const contracts = await text(
+    "packages/agent-core/src/agent-interface/contracts.ts",
+  );
+  const tools = await text(
+    "services/api/src/modules/agent-tools/tool-handlers.ts",
+  );
+  const migration = await text(
+    "services/api/prisma/migrations/20260719120000_contact_social_link_correction/migration.sql",
+  );
+  const schema = await text("services/api/prisma/schema.prisma");
+  const docs = await text("docs/integrations/socos-mcp.md");
+
+  assert.match(tools, /"socos_correct_contact_social_link"/);
+  assert.match(
+    tools,
+    /"socos_correct_contact_social_link"[\s\S]{0,300}"contacts:social-links:correct"/,
+  );
+  assert.match(contracts, /contacts:social-links:correct/);
+  assert.match(schema, /correctionKind\s+String\?/);
+  assert.match(schema, /previousValue\s+Json\?/);
+  assert.match(migration, /ADD COLUMN "correctionKind" TEXT/);
+  assert.match(migration, /ADD COLUMN "previousValue" JSONB/);
+  assert.match(migration, /social_link_replace/);
+  assert.match(docs, /socos_correct_contact_social_link/);
+  assert.match(docs, /expectedCurrentValue/);
+  assert.doesNotMatch(docs, /replacementIntent|replace_existing/);
+  assert.match(tools, /sourceKind:\s*z\.enum\(\[/);
+  assert.match(tools, /"second_brain"/);
+  assert.match(tools, /"arc_history"/);
+  assert.match(tools, /"arc_sidebar"/);
+  assert.match(tools, /"vcard"/);
+  assert.doesNotMatch(
+    tools,
+    /socos_correct_contact_social_link[\s\S]{0,1600}replacementIntent/,
+  );
+});
+
 test("collector is dry-run local-only and Arc reads a copied URL/title projection", async () => {
   const collector = await text(
     "services/api/src/cli/contact-enrichment-collector.ts",

@@ -127,6 +127,20 @@ Public-result JSONL uses one object per line:
 All submit and accept calls use the existing durable agent idempotency and append-only
 mutation audit. A retry must reuse the exact input and idempotency key.
 
+For an explicit owner instruction that an existing LinkedIn or other social link is
+wrong, use `socos_correct_contact_social_link` instead of the missing-only accept
+tool. The correction tool requires `contacts:social-links:correct`, the exact
+contact ID, one social key, the expected current HTTPS URL, a corrected HTTPS URL,
+owner-controlled/private source kind/locator/reference/retrieval time, confidence,
+and rationale. It only accepts `second_brain`, `arc_history`, `arc_sidebar`, or
+`vcard` evidence for automatic correction; public-web evidence remains in candidate
+submission and human review. It only replaces an already-populated social link on
+the authenticated owner's non-demo contact. Stale expected values, missing links,
+unsafe maps, prototype keys, unknown fields, and host-mismatched URLs are conflicts
+or invalid input. The durable record remains in `ContactEnrichmentCandidate` with
+`correctionKind: "social_link_replace"`, stored previous-value provenance, the final
+proposed `socialLinks` map, accepted status, and applied timestamps.
+
 ## Limitations and deployment steps
 
 - This slice does not include an authenticated human candidate-review UI or bulk
@@ -134,8 +148,9 @@ mutation audit. A retry must reuse the exact input and idempotency key.
   agent tool.
 - It does not fetch pages, resolve DNS, merge social-link objects into populated
   contacts, or infer identity from bios/free text.
-- Before importing real data, take the normal database backup, apply migration
-  `20260718200000_contact_enrichment`, regenerate Prisma Client, deploy the API,
-  and rotate/reissue agent clients with only the documented new scopes.
+- Before importing real data, take the normal database backup, apply migrations
+  `20260718200000_contact_enrichment` and
+  `20260719120000_contact_social_link_correction`, regenerate Prisma Client,
+  deploy the API, and rotate/reissue agent clients with only the documented scopes.
 - Run a dry collection, review aggregate counts and samples locally, submit a small
   batch, verify audit rows and missing-only behavior, then continue in bounded pages.

@@ -11,6 +11,7 @@ const principal: AgentPrincipal = {
   clientName: "Hermes Synthetic",
   scopes: [
     "contacts:write",
+    "contacts:social-links:correct",
     "interactions:write",
     "reminders:write",
     "feedback:write",
@@ -39,8 +40,10 @@ function harness() {
   const proposals = { createProposal: jest.fn() };
   const executions = { execute: jest.fn() };
   const enrichment = {
+    listCandidates: jest.fn(),
     submitCandidate: jest.fn(),
     acceptCandidate: jest.fn(),
+    correctSocialLink: jest.fn(),
   };
   return {
     handlers: new AgentToolHandlers(
@@ -110,6 +113,8 @@ describe("AgentToolHandlers", () => {
       contactId: "contact-synthetic",
       fieldName: "company",
       proposedValue: "Synthetic Labs",
+      correctionKind: null,
+      previousValue: null,
       sourceKind: "second_brain",
       sourceLocator: "people/synthetic-person.md",
       sourceReference: null,
@@ -156,6 +161,7 @@ describe("AgentToolHandlers", () => {
       deduplicated: false,
       candidate: {
         id: row.id,
+        correctionKind: null,
         sourceRetrievedAt: "2026-07-18T10:00:00.000Z",
       },
     });
@@ -176,6 +182,107 @@ describe("AgentToolHandlers", () => {
     expect(enrichment.acceptCandidate).toHaveBeenCalledWith(
       principal.ownerId,
       row.id,
+      transaction
+    );
+  });
+
+  it("redacts stored previous values from public candidate-list presentation", async () => {
+    const { handlers, enrichment } = harness();
+    enrichment.listCandidates.mockResolvedValue({
+      candidates: [
+        {
+          id: "candidate-correction",
+          contactId: "contact-synthetic",
+          fieldName: "socialLinks",
+          proposedValue: {
+            linkedin: "https://www.linkedin.com/in/correct-person/",
+            github: "https://github.com/synthetic-person",
+          },
+          correctionKind: "social_link_replace",
+          previousValue: {
+            linkedin: "https://www.linkedin.com/in/old-person/",
+          },
+          sourceKind: "second_brain",
+          sourceLocator: "people/synthetic-person.md",
+          sourceReference: "old URL https://www.linkedin.com/in/old-person/",
+          sourceRetrievedAt: new Date("2026-07-19T11:45:00.000Z"),
+          confidence: 0.99,
+          matchRationale:
+            "Owner said https://www.linkedin.com/in/old-person/ was stale.",
+          status: "accepted",
+          contentHash: "b".repeat(64),
+          decidedAt: new Date("2026-07-19T12:00:00.000Z"),
+          appliedAt: new Date("2026-07-19T12:00:00.000Z"),
+          createdAt: new Date("2026-07-19T11:50:00.000Z"),
+          updatedAt: new Date("2026-07-19T12:00:00.000Z"),
+        },
+      ],
+      total: 1,
+      offset: 0,
+      limit: 20,
+    });
+
+    const result = await handlers.enrichmentCandidatesList(principal, {
+      contactId: "contact-synthetic",
+      offset: 0,
+      limit: 20,
+    });
+    const serialized = JSON.stringify(result);
+
+    expect(serialized).not.toContain("previousValue");
+    expect(serialized).not.toContain("old-person");
+    expect(serialized).toContain("correct-person");
+  });
+
+  it("corrects an existing social link through the transaction-aware owner-scoped seam", async () => {
+    const { handlers, enrichment } = harness();
+    const transaction = { id: "tx" } as never;
+    enrichment.correctSocialLink.mockResolvedValue({
+      contactId: "contact-synthetic",
+      socialKey: "linkedin",
+      status: "accepted",
+      applied: true,
+      correctedValue: "https://www.linkedin.com/in/correct-person/",
+      appliedAt: "2026-07-19T12:00:00.000Z",
+      provenance: {
+        candidateId: "candidate-correction",
+        sourceKind: "second_brain",
+        sourceLocator: "people/synthetic-person.md",
+        sourceReference: "frontmatter: linkedin",
+        sourceRetrievedAt: "2026-07-19T11:45:00.000Z",
+        confidence: 0.99,
+      },
+    });
+
+    await expect(
+      handlers.correctContactSocialLink(
+        principal,
+        {
+          idempotencyKey: "contact-social-link:correct-001",
+          contactId: "contact-synthetic",
+          socialKey: "linkedin",
+          expectedCurrentValue: "https://www.linkedin.com/in/old-person/",
+          correctedValue: "https://www.linkedin.com/in/correct-person/",
+          sourceKind: "second_brain",
+          sourceLocator: "people/synthetic-person.md",
+          sourceReference: "frontmatter: linkedin",
+          sourceRetrievedAt: "2026-07-19T11:45:00.000Z",
+          confidence: 0.99,
+          matchRationale:
+            "Owner explicitly identified the existing LinkedIn URL as incorrect.",
+        },
+        transaction
+      )
+    ).resolves.toMatchObject({
+      contactId: "contact-synthetic",
+      socialKey: "linkedin",
+      applied: true,
+      provenance: { candidateId: "candidate-correction" },
+    });
+
+    expect(enrichment.correctSocialLink).toHaveBeenCalledWith(
+      principal.ownerId,
+      expect.not.objectContaining({ idempotencyKey: expect.anything() }),
       transaction
     );
   });

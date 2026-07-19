@@ -623,10 +623,12 @@ function runEventCatalogCountVerification(
   });
 }
 
-test('post-migration verifier accepts the combined 16-migration baseline', () => {
-  assert.equal(currentMigrationCount, 16);
+test('post-migration verifier accepts the current migration baseline', () => {
+  assert.equal(currentMigrationCount, 20);
   assert.equal(currentMigrationNames[14], '20260718200000_contact_enrichment');
   assert.equal(currentMigrationNames[15], '20260718210000_google_calendar_multi_account');
+  assert.equal(currentMigrationNames[18], '20260719120000_contact_social_link_correction');
+  assert.equal(currentMigrationNames[19], '20260719123000_contact_social_link_correct_scope');
 
   const result = runEventCatalogCountVerification(
     'EventCatalogFollow\t0\nEventCatalogListing\t49\n',
@@ -635,7 +637,7 @@ test('post-migration verifier accepts the combined 16-migration baseline', () =>
   assert.equal(result.status, 0, result.stderr);
   assert.equal(
     result.stdout.trim(),
-    'migration_counts_status=preserved existing_tables=24 new_empty_tables=2 migrations=16',
+    'migration_counts_status=preserved existing_tables=24 new_empty_tables=2 migrations=20',
   );
 });
 
@@ -715,7 +717,7 @@ test('post-migration verifier preserves existing event catalog counts at the cur
   assert.equal(result.status, 0, result.stderr);
   assert.equal(
     result.stdout.trim(),
-    'migration_counts_status=preserved existing_tables=26 new_empty_tables=1 migrations=16',
+    'migration_counts_status=preserved existing_tables=26 new_empty_tables=1 migrations=20',
   );
 });
 

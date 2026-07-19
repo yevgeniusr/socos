@@ -46,7 +46,9 @@ export class McpServerFactory {
           inputSchema,
           annotations: {
             readOnlyHint: metadata.risk === "read",
-            destructiveHint: metadata.name === "socos_execute_approved_action",
+            destructiveHint:
+              metadata.name === "socos_execute_approved_action" ||
+              metadata.name === "socos_correct_contact_social_link",
             idempotentHint: metadata.requiresIdempotencyKey,
             openWorldHint: false,
           },

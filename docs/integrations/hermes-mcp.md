@@ -24,6 +24,14 @@ create the owner-scoped CRM record with a stable idempotency key. Hermes must se
 first, avoid exact duplicates, and preserve source classification through bounded
 labels or tags without inventing names, roles, dates, or relationship facts.
 
+When the owner explicitly says an existing contact's LinkedIn or other social link
+is wrong, Hermes may call `socos_correct_contact_social_link` with
+`contacts:social-links:correct`. It must include the full contact ID, the expected
+current URL, the corrected URL, owner-controlled/private source metadata
+(`second_brain`, `arc_history`, `arc_sidebar`, or `vcard`), confidence, and
+rationale. Treat stale-value conflicts as a stop condition. Public-web evidence
+must stay in candidate submission and human review.
+
 For explicitly requested enrichment work, Hermes may page through
 `socos_contacts_missing_enrichment`, inspect candidates with
 `socos_enrichment_candidates_list`, and submit provenance-backed rows with

@@ -18,6 +18,7 @@ const principal: AgentPrincipal = {
     "enrichment:read",
     "contacts:read",
     "contacts:write",
+    "contacts:social-links:correct",
     "relationships:read",
     "dates:read",
     "reminders:read",
@@ -49,6 +50,7 @@ function harness() {
     enrichmentCandidatesList: jest.fn(),
     submitEnrichmentCandidate: jest.fn(),
     acceptEnrichmentCandidate: jest.fn(),
+    correctContactSocialLink: jest.fn().mockResolvedValue(correctionReceipt()),
     logInteraction: jest
       .fn()
       .mockResolvedValue({ interactionId: "interaction-synthetic" }),
@@ -76,7 +78,7 @@ function harness() {
 }
 
 describe("AgentToolRegistryService", () => {
-  it("lists exactly the sixteen tools in stable explicit order", () => {
+  it("lists exactly the seventeen tools in stable explicit order", () => {
     const { registry } = harness();
 
     expect(registry.list()).toEqual([
@@ -125,6 +127,12 @@ describe("AgentToolRegistryService", () => {
         true
       ),
       metadata(
+        "socos_correct_contact_social_link",
+        "contacts:social-links:correct",
+        "automatic",
+        true
+      ),
+      metadata(
         "socos_propose_action",
         "proposals:write",
         "approval_required",
@@ -148,7 +156,7 @@ describe("AgentToolRegistryService", () => {
     const definitions = registry.definitions();
     const search = registry.getDefinition("socos_contacts_search");
 
-    expect(definitions).toHaveLength(16);
+    expect(definitions).toHaveLength(17);
     expect(Object.isFrozen(definitions)).toBe(true);
     expect(search?.metadata.name).toBe("socos_contacts_search");
     expect(search?.inputSchema.safeParse({ query: "Synthetic" }).success).toBe(
@@ -173,7 +181,7 @@ describe("AgentToolRegistryService", () => {
     expect(definitions.map(({ metadata }) => metadata.name)).toEqual([
       "socos_brief_today",
     ]);
-    expect(registry.definitions()).toHaveLength(16);
+    expect(registry.definitions()).toHaveLength(17);
   });
 
   it("publishes a strict idempotent contact-creation schema", () => {
@@ -233,6 +241,84 @@ describe("AgentToolRegistryService", () => {
     ).toBe(false);
   });
 
+  it("publishes a strict idempotent social-link correction schema without weakening contacts write", () => {
+    const { registry } = harness();
+    const correction = registry.getDefinition(
+      "socos_correct_contact_social_link"
+    )!;
+    const valid = {
+      idempotencyKey: "contact-social-link:correct-001",
+      contactId: "contact-synthetic",
+      socialKey: "linkedin",
+      expectedCurrentValue: "https://www.linkedin.com/in/old-person/",
+      correctedValue: "https://www.linkedin.com/in/correct-person/",
+      sourceKind: "second_brain",
+      sourceLocator: "people/synthetic-person.md",
+      sourceReference: "frontmatter: linkedin",
+      sourceRetrievedAt: "2026-07-19T11:45:00.000Z",
+      confidence: 0.99,
+      matchRationale:
+        "Owner explicitly identified the existing LinkedIn URL as incorrect.",
+    };
+
+    expect(correction.metadata.requiredScope).toBe(
+      "contacts:social-links:correct"
+    );
+    expect(correction.metadata.requiresIdempotencyKey).toBe(true);
+    expect(correction.inputSchema.safeParse(valid).success).toBe(true);
+    expect(
+      correction.inputSchema.safeParse({
+        ...valid,
+        expectedCurrentValue: undefined,
+        replacementIntent: "replace_existing",
+      }).success
+    ).toBe(false);
+    expect(
+      correction.inputSchema.safeParse({
+        ...valid,
+        expectedCurrentValue: undefined,
+      }).success
+    ).toBe(false);
+    expect(
+      correction.inputSchema.safeParse({
+        ...valid,
+        sourceKind: "public_web",
+        sourceLocator: "https://www.linkedin.com/in/correct-person/",
+        sourceReference: "public result",
+      }).success
+    ).toBe(false);
+    expect(
+      correction.inputSchema.safeParse({
+        ...valid,
+        sourceReference: undefined,
+      }).success
+    ).toBe(false);
+    expect(
+      correction.inputSchema.safeParse({
+        ...valid,
+        ownerId: "caller-controlled",
+      }).success
+    ).toBe(false);
+    expect(
+      correction.inputSchema.safeParse({
+        ...valid,
+        socialLinks: { linkedin: valid.correctedValue },
+      }).success
+    ).toBe(false);
+    expect(
+      correction.inputSchema.safeParse({
+        ...valid,
+        socialKey: "__proto__",
+      }).success
+    ).toBe(false);
+    expect(
+      correction.inputSchema.safeParse({
+        ...valid,
+        correctedValue: "https://example.com/not-linkedin",
+      }).success
+    ).toBe(false);
+  });
+
   it("filters enrichment discovery by each narrow server-owned scope", () => {
     const { registry } = harness();
 
@@ -257,6 +343,19 @@ describe("AgentToolRegistryService", () => {
         .definitions({ ...principal, scopes: ["enrichment:accept"] })
         .map(({ metadata }) => metadata.name)
     ).toEqual(["socos_enrichment_candidate_accept"]);
+    expect(
+      registry
+        .definitions({ ...principal, scopes: ["contacts:write"] })
+        .map(({ metadata }) => metadata.name)
+    ).toEqual(["socos_create_contact"]);
+    expect(
+      registry
+        .definitions({
+          ...principal,
+          scopes: ["contacts:social-links:correct"],
+        })
+        .map(({ metadata }) => metadata.name)
+    ).toEqual(["socos_correct_contact_social_link"]);
   });
 
   it("requires a repeat interval exactly for recurring reminders", () => {
@@ -330,6 +429,30 @@ describe("AgentToolRegistryService", () => {
       readOnly,
       expect.objectContaining({
         operation: "socos_log_interaction",
+        outcome: "rejected",
+        metadata: {
+          errorCode: "INSUFFICIENT_SCOPE",
+          riskLevel: "automatic",
+        },
+      })
+    );
+  });
+
+  it("rejects social-link correction without the dedicated correction scope", async () => {
+    const { registry, handlers, audit } = harness();
+    const readOnly = { ...principal, scopes: ["contacts:write"] as const };
+    const input = correctionInput("contact-social-link:scope-001");
+
+    await expect(
+      registry.call("socos_correct_contact_social_link", readOnly, input)
+    ).resolves.toEqual(
+      failure("INSUFFICIENT_SCOPE", "Agent scope is insufficient.", false)
+    );
+    expect(handlers.correctContactSocialLink).not.toHaveBeenCalled();
+    expect(audit.record).toHaveBeenCalledWith(
+      readOnly,
+      expect.objectContaining({
+        operation: "socos_correct_contact_social_link",
         outcome: "rejected",
         metadata: {
           errorCode: "INSUFFICIENT_SCOPE",
@@ -417,6 +540,39 @@ describe("AgentToolRegistryService", () => {
     );
   });
 
+  it("passes social-link correction through idempotency and audits in the same transaction", async () => {
+    const { registry, handlers, idempotency, audit, transaction } = harness();
+    const input = correctionInput("contact-social-link:correct-002");
+
+    await expect(
+      registry.call("socos_correct_contact_social_link", principal, input)
+    ).resolves.toEqual({ ok: true, data: correctionReceipt() });
+
+    expect(idempotency.execute).toHaveBeenCalledWith(
+      principal,
+      "socos_correct_contact_social_link",
+      input.idempotencyKey,
+      input,
+      expect.any(Function)
+    );
+    expect(handlers.correctContactSocialLink).toHaveBeenCalledWith(
+      principal,
+      input,
+      transaction
+    );
+    expect(audit.record).toHaveBeenCalledWith(
+      principal,
+      expect.objectContaining({
+        operation: "socos_correct_contact_social_link",
+        outcome: "succeeded",
+        idempotencyKey: input.idempotencyKey,
+        requestHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+        metadata: { riskLevel: "automatic", replayed: false },
+      }),
+      transaction
+    );
+  });
+
   it("audits a cached idempotent replay without invoking the handler", async () => {
     const { registry, handlers, idempotency, audit } = harness();
     idempotency.execute.mockResolvedValue({
@@ -436,6 +592,33 @@ describe("AgentToolRegistryService", () => {
       principal,
       expect.objectContaining({
         operation: "socos_log_interaction",
+        outcome: "succeeded",
+        idempotencyKey: input.idempotencyKey,
+        metadata: { riskLevel: "automatic", replayed: true },
+      })
+    );
+  });
+
+  it("replays a cached social-link correction receipt without invoking the handler", async () => {
+    const { registry, handlers, idempotency, audit } = harness();
+    const input = correctionInput("contact-social-link:replay-001");
+    idempotency.execute.mockResolvedValue({
+      ok: true,
+      data: correctionReceipt({ appliedAt: "2026-07-19T12:00:00.000Z" }),
+    });
+
+    await expect(
+      registry.call("socos_correct_contact_social_link", principal, input)
+    ).resolves.toEqual({
+      ok: true,
+      data: correctionReceipt({ appliedAt: "2026-07-19T12:00:00.000Z" }),
+    });
+
+    expect(handlers.correctContactSocialLink).not.toHaveBeenCalled();
+    expect(audit.record).toHaveBeenCalledWith(
+      principal,
+      expect.objectContaining({
+        operation: "socos_correct_contact_social_link",
         outcome: "succeeded",
         idempotencyKey: input.idempotencyKey,
         metadata: { riskLevel: "automatic", replayed: true },
@@ -464,6 +647,45 @@ describe("AgentToolRegistryService", () => {
       principal,
       expect.objectContaining({
         outcome: "failed",
+        metadata: {
+          errorCode: "IDEMPOTENCY_CONFLICT",
+          riskLevel: "automatic",
+        },
+      })
+    );
+  });
+
+  it("returns changed-payload conflict for social-link correction idempotency key reuse", async () => {
+    const { registry, handlers, idempotency, audit } = harness();
+    const input = correctionInput("contact-social-link:conflict-001");
+    idempotency.execute.mockResolvedValue(
+      failure(
+        "IDEMPOTENCY_CONFLICT",
+        "Idempotency key conflicts with an existing request.",
+        false
+      )
+    );
+
+    await expect(
+      registry.call("socos_correct_contact_social_link", principal, {
+        ...input,
+        correctedValue: "https://www.linkedin.com/in/different-person/",
+      })
+    ).resolves.toEqual(
+      failure(
+        "IDEMPOTENCY_CONFLICT",
+        "Idempotency key conflicts with an existing request.",
+        false
+      )
+    );
+
+    expect(handlers.correctContactSocialLink).not.toHaveBeenCalled();
+    expect(audit.record).toHaveBeenCalledWith(
+      principal,
+      expect.objectContaining({
+        operation: "socos_correct_contact_social_link",
+        outcome: "failed",
+        idempotencyKey: input.idempotencyKey,
         metadata: {
           errorCode: "IDEMPOTENCY_CONFLICT",
           riskLevel: "automatic",
@@ -571,4 +793,41 @@ function metadata(
 
 function failure(code: string, message: string, retryable: boolean) {
   return { ok: false, error: { code, message, retryable } };
+}
+
+function correctionInput(idempotencyKey: string) {
+  return {
+    idempotencyKey,
+    contactId: "contact-synthetic",
+    socialKey: "linkedin",
+    expectedCurrentValue: "https://www.linkedin.com/in/old-person/",
+    correctedValue: "https://www.linkedin.com/in/correct-person/",
+    sourceKind: "second_brain",
+    sourceLocator: "people/synthetic-person.md",
+    sourceReference: "frontmatter: linkedin",
+    sourceRetrievedAt: "2026-07-19T11:45:00.000Z",
+    confidence: 0.99,
+    matchRationale:
+      "Owner explicitly identified the existing LinkedIn URL as incorrect.",
+  };
+}
+
+function correctionReceipt(overrides: Record<string, unknown> = {}) {
+  return {
+    contactId: "contact-synthetic",
+    socialKey: "linkedin",
+    status: "accepted",
+    applied: true,
+    correctedValue: "https://www.linkedin.com/in/correct-person/",
+    appliedAt: "2026-07-19T12:00:00.000Z",
+    provenance: {
+      candidateId: "candidate-correction",
+      sourceKind: "second_brain",
+      sourceLocator: "people/synthetic-person.md",
+      sourceReference: "frontmatter: linkedin",
+      sourceRetrievedAt: "2026-07-19T11:45:00.000Z",
+      confidence: 0.99,
+    },
+    ...overrides,
+  };
 }

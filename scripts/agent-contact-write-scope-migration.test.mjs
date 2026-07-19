@@ -7,7 +7,7 @@ import test from "node:test";
 const root = resolve(import.meta.dirname, "..");
 const migrationPath = resolve(
   root,
-  "services/api/prisma/migrations/20260719093000_hermes_enrichment_contact_write_scope/migration.sql",
+  "services/api/prisma/migrations/20260719123000_contact_social_link_correct_scope/migration.sql",
 );
 const previousMigrationPath = resolve(
   root,
@@ -23,19 +23,24 @@ test("documents why a forward Hermes Enrichment scope migration exists", () => {
   assert.doesNotMatch(previousMigrationSql, /Hermes Enrichment/);
   assert.match(migrationSql, /20260719084500_agent_contact_write_scope/);
   assert.match(migrationSql, /Hermes Enrichment/);
+  assert.match(migrationSql, /contacts:social-links:correct/);
   assert.match(migrationSql, /forward-only/i);
 });
 
 test("targets only active non-revoked exact Hermes Enrichment clients idempotently", () => {
   assert.equal(migrationSql.match(/UPDATE\s+"AgentClient"/gi)?.length, 1);
-  assert.match(migrationSql, /SET[\s\S]*array_append\("scopes", 'contacts:write'\)/);
+  assert.match(
+    migrationSql,
+    /SET[\s\S]*array_append\("scopes", 'contacts:social-links:correct'\)/,
+  );
   assert.match(migrationSql, /WHERE[\s\S]*"name"\s*=\s*'Hermes Enrichment'/);
   assert.match(migrationSql, /WHERE[\s\S]*"status"\s*=\s*'active'/);
   assert.match(migrationSql, /WHERE[\s\S]*"revokedAt"\s+IS\s+NULL/);
   assert.match(
     migrationSql,
-    /WHERE[\s\S]*NOT\s+\('contacts:write'\s*=\s*ANY\("scopes"\)\)/,
+    /WHERE[\s\S]*NOT\s+\('contacts:social-links:correct'\s*=\s*ANY\("scopes"\)\)/,
   );
+  assert.doesNotMatch(migrationSql, /array_append\("scopes", 'contacts:write'\)/);
   assert.doesNotMatch(migrationSql, /\bILIKE\b|\bLIKE\b/);
   assert.doesNotMatch(migrationSql, /"name"\s+IN\s*\(/);
   assert.doesNotMatch(migrationSql, /"status"\s*<>\s*'revoked'/);
@@ -77,7 +82,7 @@ test("PostgreSQL contract grants only the exact active non-revoked client", asyn
       INSERT INTO "AgentClient" ("id", "name", "scopes", "status", "revokedAt", "updatedAt")
       VALUES
         ('target', 'Hermes Enrichment', ARRAY['contacts:read'], 'active', NULL, TIMESTAMP '2026-07-19 08:45:00'),
-        ('already-granted', 'Hermes Enrichment', ARRAY['contacts:read', 'contacts:write'], 'active', NULL, TIMESTAMP '2026-07-19 08:45:00'),
+        ('already-granted', 'Hermes Enrichment', ARRAY['contacts:read', 'contacts:social-links:correct'], 'active', NULL, TIMESTAMP '2026-07-19 08:45:00'),
         ('revoked-status', 'Hermes Enrichment', ARRAY['contacts:read'], 'revoked', TIMESTAMP '2026-07-19 08:50:00', TIMESTAMP '2026-07-19 08:45:00'),
         ('revoked-at', 'Hermes Enrichment', ARRAY['contacts:read'], 'active', TIMESTAMP '2026-07-19 08:50:00', TIMESTAMP '2026-07-19 08:45:00'),
         ('old-hermes', 'Hermes', ARRAY['contacts:read'], 'active', NULL, TIMESTAMP '2026-07-19 08:45:00'),
@@ -96,10 +101,13 @@ test("PostgreSQL contract grants only the exact active non-revoked client", asyn
     const rows = Object.fromEntries(
       afterSecond.rows.map((row) => [row.id, row]),
     );
-    assert.deepEqual(rows.target.scopes, ["contacts:read", "contacts:write"]);
+    assert.deepEqual(rows.target.scopes, [
+      "contacts:read",
+      "contacts:social-links:correct",
+    ]);
     assert.deepEqual(rows["already-granted"].scopes, [
       "contacts:read",
-      "contacts:write",
+      "contacts:social-links:correct",
     ]);
     assert.deepEqual(rows["revoked-status"].scopes, ["contacts:read"]);
     assert.deepEqual(rows["revoked-at"].scopes, ["contacts:read"]);
@@ -107,6 +115,12 @@ test("PostgreSQL contract grants only the exact active non-revoked client", asyn
     assert.deepEqual(rows["case-mismatch"].scopes, ["contacts:read"]);
     assert.equal(
       rows.target.scopes.filter((scope) => scope === "contacts:write").length,
+      0,
+    );
+    assert.equal(
+      rows.target.scopes.filter(
+        (scope) => scope === "contacts:social-links:correct",
+      ).length,
       1,
     );
     assert.equal(
